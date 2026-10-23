@@ -86,6 +86,7 @@ target_sources(frankenstein-desktop PRIVATE src/desktop/host_pointer.cpp src/des
                src/desktop/client_cursors.cpp src/desktop/client_cursors.hpp
                src/desktop/session_control.cpp src/desktop/session_control.hpp
                src/desktop/power_control.cpp src/desktop/power_control.hpp
+               src/desktop/removable_media.cpp src/desktop/removable_media.hpp
                src/desktop/icon_store.cpp src/desktop/icon_store.hpp
                src/desktop/notifications.cpp src/desktop/notifications.hpp
                src/desktop/bluetooth.cpp src/desktop/bluetooth.hpp
@@ -366,6 +367,9 @@ if(BUILD_TESTING)
     target_link_libraries(bluetooth-tests PRIVATE frankenstein-desktop Qt6::Test)
     add_test(NAME bluetooth COMMAND bluetooth-tests)
     set_tests_properties(bluetooth PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
+    add_executable(removable-media-tests tests/removable_media_tests.cpp)
+    target_link_libraries(removable-media-tests PRIVATE frankenstein-desktop Qt6::Test)
+    add_test(NAME removable-media COMMAND removable-media-tests)
     add_executable(power-tests tests/power_tests.cpp)
     target_link_libraries(power-tests PRIVATE frankenstein-desktop Qt6::Test)
     add_test(NAME power COMMAND power-tests)

@@ -205,6 +205,13 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
                 if (!ok)
                     emit errorOccurred("The main display could not be changed.");
             });
+    // Flash drives: mounted as they are plugged in only in the whole session (a desktop in a window
+    // leaves that to the desktop around it), and, like Bluetooth, never from a test's host bus.
+    m_removableMedia = new RemovableMedia(hostBluetooth ? QDBusConnection::systemBus() : QDBusConnection(QString()),
+                                          m_sessionControl->available(), this);
+    connect(m_removableMedia, &RemovableMedia::mounted, m_desktopItems, &DesktopItems::refresh);
+    connect(m_removableMedia, &RemovableMedia::ejected, m_desktopItems, &DesktopItems::refresh);
+    connect(m_removableMedia, &RemovableMedia::failed, this, &NativeManager::errorOccurred);
     const auto refitFullScreen = [this] { refitFullScreens(); emit displayLayoutChanged(); };
     connect(m_view, &QWindow::widthChanged, this, refitFullScreen);
     connect(m_view, &QWindow::heightChanged, this, refitFullScreen);
@@ -1429,6 +1436,12 @@ void NativeManager::setShadeInMotion(qulonglong id, bool running)
         return;
     window->shadeInMotion = running;
     synchronize();
+    // A triple-click undid the double-click's WindowShade; fill the screen once it has rolled down.
+    if (!running && window->fillPending)
+    {
+        window->fillPending = false;
+        fillScreen(id);
+    }
 }
 QVariantList NativeManager::displayOutputs() const
 {
@@ -1680,6 +1693,37 @@ void NativeManager::zoom(qulonglong id)
         w->zoomed = true;
         m_interfaceSounds->play("wzmo");
     }
+}
+void NativeManager::fillScreen(qulonglong id)
+{
+    auto *w = find(id);
+    if (!w || !w->top || !w->canResize() || w->fullScreen || shellModal())
+        return;
+    if (w->collapsed() && !w->shadeInMotion)
+        dispatch(SetCollapsed{{id}, false});
+    if (w->shadeInMotion)
+    {
+        w->fillPending = true;
+        return;
+    }
+    if (w->filled)
+    {
+        w->filled = false;
+        resizeWindow(id, w->filledRestore.width(), w->filledRestore.height());
+        moveWindow(id, w->filledRestore.x(), w->filledRestore.y());
+        m_interfaceSounds->play("wzmi");
+        return;
+    }
+    // The window's screen, below the menu bar on the main one; the frame's chrome fits inside too.
+    const auto screen = windowScreen(w);
+    const int top = screen.y() + (screen.contains(effectiveDisplayLayout().primaryRect().topLeft()) ? 26 : 0);
+    const int frameWidth = w->serverDecorated() ? 6 : 0, frameHeight = w->serverDecorated() ? 27 : 0;
+    w->filledRestore = QRect(w->x(), w->y(), w->width(), w->height());
+    w->filled = true;
+    w->zoomed = false;
+    moveWindow(id, screen.x(), top);
+    resizeWindow(id, screen.width() - frameWidth, screen.y() + screen.height() - top - frameHeight);
+    m_interfaceSounds->play("wzmo");
 }
 void NativeManager::closeWindow(qulonglong id)
 {
@@ -2210,15 +2254,16 @@ QString NativeManager::aboutThisComputer() const
 {
     QString memory = "Unknown";
     QFile meminfo("/proc/meminfo");
+    // /proc files report a size of 0, so QFile::atEnd() is true before anything is read: read it whole.
     if (meminfo.open(QIODevice::ReadOnly))
-        while (!meminfo.atEnd())
+        for (const auto &raw : meminfo.read(64 * 1024).split('\n'))
         {
-            const auto line = meminfo.readLine(256).simplified();
+            const auto line = raw.simplified();
             if (line.startsWith("MemTotal:"))
             {
-                const auto kilobytes = line.split(' ').value(1).toLongLong();
-                memory = QLocale::system().formattedDataSize(kilobytes * 1024, 1,
-                                                             QLocale::DataSizeTraditionalFormat);
+                if (const auto kilobytes = line.split(' ').value(1).toLongLong(); kilobytes > 0)
+                    memory = QLocale::system().formattedDataSize(kilobytes * 1024, 1,
+                                                                 QLocale::DataSizeTraditionalFormat);
                 break;
             }
         }

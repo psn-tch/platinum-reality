@@ -23,6 +23,8 @@ class DesktopItems final : public QAbstractListModel
     Q_PROPERTY(bool canModifySelection READ canModifySelection NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap renameTarget READ renameTarget NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedDocument READ selectedDocument NOTIFY selectionChanged)
+    // The one selected icon's folder when it is a mounted drive (Special ▸ Eject), else empty.
+    Q_PROPERTY(QString selectedDrive READ selectedDrive NOTIFY selectionChanged)
     Q_PROPERTY(bool dragging READ dragging NOTIFY dragChanged)
     Q_PROPERTY(QString dropTarget READ dropTarget NOTIFY dragChanged)
     Q_PROPERTY(bool selecting READ selecting NOTIFY selectionAreaChanged)
@@ -64,6 +66,7 @@ class DesktopItems final : public QAbstractListModel
     bool canModifySelection() const;
     QVariantMap renameTarget() const;
     QString selectedDocument() const;
+    QString selectedDrive() const;
     bool dragging() const
     {
         return !m_dragPositions.isEmpty();

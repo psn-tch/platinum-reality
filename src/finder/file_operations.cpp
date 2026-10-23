@@ -184,9 +184,16 @@ FileOperations::FileOperations(QString root, QString trashBase, QStringList extr
       m_trash(QDir::cleanPath(QFileInfo(trashBase).absoluteFilePath()))
 {
     m_roots << m_root;
+    // The mounted-drives folder (/run/media/<user>) only exists once the first drive is mounted,
+    // usually after the desktop started: until then, its plain absolute path stands for it.
     for (const auto &extra : extraRoots)
-        if (const auto canonical = QFileInfo(extra).canonicalFilePath(); !canonical.isEmpty() && !m_roots.contains(canonical))
+    {
+        auto canonical = QFileInfo(extra).canonicalFilePath();
+        if (canonical.isEmpty() && QFileInfo(extra).isAbsolute() && !QFileInfo(extra).exists())
+            canonical = QDir::cleanPath(extra);
+        if (!canonical.isEmpty() && !m_roots.contains(canonical))
             m_roots << canonical;
+    }
 }
 bool FileOperations::inside(const QString &canonicalPath) const
 {

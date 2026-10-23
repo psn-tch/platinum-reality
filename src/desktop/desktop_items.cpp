@@ -755,6 +755,15 @@ QString DesktopItems::selectedDocument() const
     return paths.size() == 1 && m_operations.readableFile(paths.first()) ? paths.first()
                                                                          : QString();
 }
+QString DesktopItems::selectedDrive() const
+{
+    if (m_selected.size() != 1)
+        return {};
+    for (const auto &entry : m_entries)
+        if (m_selected.contains(entry.key) && entry.key.startsWith("drive:"))
+            return entry.path;
+    return {};
+}
 QVariantMap DesktopItems::renameTarget() const
 {
     if (m_selected.size() != 1)

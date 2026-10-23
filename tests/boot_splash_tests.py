@@ -79,7 +79,7 @@ class BootSplashTests(unittest.TestCase):
             self.assertIn('+ plymouth-set-default-theme platinum-reality', result.stdout)
             self.assertIn('+ mkinitcpio -P', result.stdout)
             self.assertEqual((root / 'etc/kernel/cmdline').read_text(),
-                             'root=PARTUUID=x rw fbcon=rotate:1 quiet splash loglevel=3 rd.udev.log_level=3 '
+                             'root=PARTUUID=x rw fbcon=rotate:1 quiet splash loglevel=0 rd.udev.log_level=3 '
                              'vt.global_cursor_default=0 plymouth.force-scale=1\n')
             self.assertIn('--splash /usr/share/plymouth/themes/platinum-reality/splash.bmp',
                           (root / 'etc/mkinitcpio.d/linux.preset').read_text())

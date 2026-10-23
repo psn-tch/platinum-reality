@@ -2696,6 +2696,15 @@ class DesktopTests : public QObject
         QDir().mkpath(QCoreApplication::applicationDirPath() + "/artifacts");
         view.setSource({});
     }
+    void aboutThisComputerShowsTheBuiltInMemory()
+    {
+        // /proc/meminfo reports a size of 0; it must still be read (it said "Unknown", 2026-10-23).
+        QTemporaryDir fixture;
+        QQuickView view;
+        NativeManager manager(nullptr, &view, fixture.path(), fixture.path() + "/profile", {});
+        const auto about = manager.aboutThisComputer();
+        QVERIFY2(QRegularExpression("Built-in Memory: [0-9]").match(about).hasMatch(), qPrintable(about));
+    }
     void previewDoesNotLaunchHostPrograms()
     {
         QTemporaryDir fixture;

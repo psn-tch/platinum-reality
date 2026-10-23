@@ -5,6 +5,7 @@
 #include "window_presentation.hpp"
 #include "display_layout.hpp"
 #include "power_control.hpp"
+#include "removable_media.hpp"
 #include <QAbstractListModel>
 #include <QPointer>
 #include <QProcess>
@@ -144,6 +145,9 @@ class ManagedWindow final : public QObject
     int z = 0;
     QSize userSize;
     bool zoomed = false;
+    // Triple-click on the title bar: the whole screen (below the menu bar), and back to filledRestore.
+    bool filled = false, fillPending = false;
+    QRect filledRestore;
     // A client-requested full screen: it covers the desktop without chrome and
     // returns to restoreSize when the client leaves full screen.
     bool fullScreen = false;
@@ -186,6 +190,7 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(QObject *bluetooth READ bluetooth CONSTANT)
     // Wi-Fi networks through iwd on the host's system bus (docs/wifi.md); as Bluetooth.
     Q_PROPERTY(QObject *wifi READ wifi CONSTANT)
+    Q_PROPERTY(QObject *removableMedia READ removableMedia CONSTANT)
     // Special ▸ Sleep, Restart and Shut Down: only in the whole session (power_control.hpp).
     Q_PROPERTY(bool powerAvailable READ powerAvailable CONSTANT)
     // Alert sounds (docs/alert-sounds.md); silent outside a real session.
@@ -261,6 +266,7 @@ class NativeManager final : public QAbstractListModel
     QObject *audio() const { return m_audio; }
     QObject *bluetooth() const { return m_bluetooth; }
     QObject *wifi() const { return m_wifi; }
+    QObject *removableMedia() const { return m_removableMedia; }
     QObject *alertSounds() const { return m_alertSounds; }
     QObject *interfaceSounds() const { return m_interfaceSounds; }
     QObject *battery() const { return m_battery; }
@@ -293,6 +299,7 @@ class NativeManager final : public QAbstractListModel
     Q_INVOKABLE void moveWindow(qulonglong id, int x, int y);
     Q_INVOKABLE void resizeWindow(qulonglong id, int width, int height);
     Q_INVOKABLE void zoom(qulonglong id);
+    Q_INVOKABLE void fillScreen(qulonglong id);
     Q_INVOKABLE void closeWindow(qulonglong id);
     Q_INVOKABLE void hideApplication();
     Q_INVOKABLE void hideOtherApplications();
@@ -402,6 +409,7 @@ class NativeManager final : public QAbstractListModel
     std::optional<DisplayLayout> m_displayLayout;
     SessionControl *m_sessionControl = nullptr;
     PowerControl *m_power = nullptr;
+    RemovableMedia *m_removableMedia = nullptr;
     std::optional<PowerControl::Action> m_pendingPower;
     void endSession();
     bool m_normalApplicationSettings = false;

@@ -80,7 +80,8 @@ Rectangle {
             {label:"Rename…",action:"rename",enabled:ready && Boolean(desktopFiles.renameTarget.key)},
             {label:"Duplicate",action:"duplicate",enabled:ready && desktopFiles.canModifySelection},
             {separator:true},
-            {label:"Move to Trash",action:"trash",enabled:ready && desktopFiles.canModifySelection}
+            desktopFiles.selectedDrive!=="" ? {label:"Eject",action:"eject",enabled:manager.removableMedia.canEject(desktopFiles.selectedDrive)}
+                                            : {label:"Move to Trash",action:"trash",enabled:ready && desktopFiles.canModifySelection}
         ] : [
             {label:"New Folder…",action:"new-folder",enabled:ready},
             {separator:true},
@@ -162,6 +163,7 @@ Rectangle {
         else if(action==="show-clipboard")showClipboard()
         else if(action==="copy-names")copySelectedNames()
         else if(action==="quit")manager.quitSession()
+        else if(action==="eject")manager.removableMedia.eject(desktopFiles.selectedDrive)
         else if(action==="sleep")manager.sleepComputer()
         else if(action==="restart")manager.restartComputer()
         else if(action==="shut-down")manager.shutDownComputer()
@@ -324,6 +326,7 @@ Rectangle {
         // As in 9.2.2 (Eject and Erase Disk aside): Sleep, Restart and Shut Down only in a whole session.
         if(kind==="special")return [
             {text:"Empty Trash…",action:"empty-trash",enabled:ready},
+            {text:"Eject",key:"⌘E",action:"eject",enabled:desktopFiles.selectedDrive!=="" && manager.removableMedia.canEject(desktopFiles.selectedDrive)},
             {separator:true,action:"separator"}].concat(manager.powerAvailable ? [
             {text:"Sleep",action:"sleep"},
             {text:"Restart",action:"restart"},
@@ -622,6 +625,7 @@ Rectangle {
     Shortcut {sequences:["Meta+A","Ctrl+A"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal;onActivated:desktopFiles.selectAll()}
     Shortcut {sequences:["Meta+Shift+N","Ctrl+Shift+N"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && !desktopFiles.busy;onActivated:desktop.promptName("create")}
     Shortcut {sequence:"F2";enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && !desktopFiles.busy;onActivated:desktop.promptName("rename")}
+    Shortcut {sequences:["Meta+E","Ctrl+E"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && desktopFiles.selectedDrive!=="";onActivated:manager.removableMedia.eject(desktopFiles.selectedDrive)}
     Shortcut {sequences:["Meta+D","Ctrl+D"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && !desktopFiles.busy && desktopFiles.canModifySelection;onActivated:desktopFiles.duplicateSelected()}
     Shortcut {sequences:["Meta+Backspace","Ctrl+Backspace"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && !desktopFiles.busy && desktopFiles.canModifySelection;onActivated:desktopFiles.trashSelected()}
     Connections {
@@ -631,6 +635,13 @@ Rectangle {
         function onControlPanelRequested(action) {desktop.dispatchShellCommand(action,0)}
         function onFocusDesktop() { desktop.forceActiveFocus() }
         function onContextChanged() { if(!manager.menuOpen && (desktop.openMenu>=0 || desktop.exportPopup || desktop.stripModule!==""))desktop.closeMenu(false) }
+    }
+    // While a menu bar or Control Strip menu is open, a click anywhere else (a window included)
+    // only closes it, as in Mac OS 9. Above windows; below the strip, the menu bar and menus.
+    MouseArea {
+        objectName:"menu-dismiss";anchors.fill:parent;z:7999;acceptedButtons:Qt.AllButtons
+        visible:(desktop.openMenu>=0 && desktop.exportedRoot<0) || desktop.stripModule!==""
+        onPressed:desktop.closeMenu()
     }
     MouseArea { objectName:"desktopBackground";anchors.fill: parent; enabled:!manager.shellModal;acceptedButtons:Qt.LeftButton|Qt.RightButton
         onPressed:function(mouse){
@@ -749,10 +760,25 @@ Rectangle {
                     Rectangle { required property int index; x: 4; y: 3+index*3; width: titlebar.width-8; height: 1; color: record.active ? "#777" : "#c5c5c5" }
                 }
                 MouseArea {
+                    objectName:"title-bar-"+record.id
                     anchors.fill: parent;property point origin;property point pointerOrigin
-                    onPressed: function(mouse) {manager.activate(record.id);origin=Qt.point(record.x,record.y);pointerOrigin=mapToItem(desktop,mouse.x,mouse.y)}
+                    // Two clicks: WindowShade, at once. A third: the shade rolls back and the window
+                    // fills the screen (or returns to where it was).
+                    property double doubleClickAt:0;property bool shadedByDoubleClick:false
+                    onPressed: function(mouse) {
+                        manager.activate(record.id);origin=Qt.point(record.x,record.y);pointerOrigin=mapToItem(desktop,mouse.x,mouse.y)
+                        if(doubleClickAt && Date.now()-doubleClickAt<=Qt.styleHints.mouseDoubleClickInterval){
+                            doubleClickAt=0
+                            if(shadedByDoubleClick)manager.shade(record.id)
+                            manager.fillScreen(record.id)
+                        }
+                    }
                     onPositionChanged: function(mouse) {if(pressed){let p=mapToItem(desktop,mouse.x,mouse.y);manager.moveWindow(record.id,origin.x+p.x-pointerOrigin.x,origin.y+p.y-pointerOrigin.y)}}
-                    onDoubleClicked: if(record.canShade && desktop.appearance.doubleClickCollapse)manager.shade(record.id)
+                    onDoubleClicked: {
+                        doubleClickAt=Date.now()
+                        shadedByDoubleClick=record.canShade && desktop.appearance.doubleClickCollapse
+                        if(shadedByDoubleClick)manager.shade(record.id)
+                    }
                 }
                 Rectangle {
                     anchors.centerIn: parent; width: Math.min(caption.implicitWidth+18,parent.width-(record.modal?12:120)); height: 18; color: titlebar.color

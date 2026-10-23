@@ -349,7 +349,7 @@ class PersonalCursorTests(unittest.TestCase):
             boot.write_text('first-boot\n')
             played = home / 'played'
             player = home / 'player'
-            player.write_text(f'#!/bin/sh\necho "$1" >> {played}\n')
+            player.write_text(f'#!/bin/sh\necho "$1 $2" >> {played}\n')
             player.chmod(0o755)
             environment = {'HOME': str(home), 'PATH': '/usr/bin:/bin'}
             chime = lambda: session.startup_chime(environment, boot_id=boot, players=(str(home / 'absent'), str(player)),
@@ -363,7 +363,9 @@ class PersonalCursorTests(unittest.TestCase):
             process = chime()
             self.assertIsNotNone(process)
             process.wait(5)
-            self.assertEqual(played.read_text().strip(), str(assets / 'startup-chime.aiff'))
+            # At half volume (pw-play's factor; paplay would get 32768 of 65536).
+            self.assertEqual(played.read_text().strip(), '--volume=0.5 ' + str(assets / 'startup-chime.aiff'))
+            self.assertEqual(session.chime_volume_option('/usr/bin/paplay'), '--volume=32768')
             # Once per boot: logging in again (after Log Out) is silent; the next boot chimes.
             self.assertIsNone(chime())
             boot.write_text('second-boot\n')
@@ -373,7 +375,7 @@ class PersonalCursorTests(unittest.TestCase):
             (assets / 'startup-chime.wav').symlink_to(assets / 'startup-chime.aiff')
             boot.write_text('third-boot\n')
             chime().wait(5)
-            self.assertEqual(played.read_text().splitlines()[-1], str(assets / 'startup-chime.aiff'))
+            self.assertEqual(played.read_text().splitlines()[-1], '--volume=0.5 ' + str(assets / 'startup-chime.aiff'))
 
     def test_startup_chime_waits_for_an_audio_output(self):
         import tempfile, time
@@ -387,7 +389,7 @@ class PersonalCursorTests(unittest.TestCase):
             wpctl.write_text(f'#!/bin/sh\necho look >> {log}\n[ "$(grep -c look {log})" -ge 3 ]\n')
             wpctl.chmod(0o755)
             player = home / 'player'
-            player.write_text(f'#!/bin/sh\necho "play $1" >> {log}\n')
+            player.write_text(f'#!/bin/sh\necho "play $2" >> {log}\n')
             player.chmod(0o755)
             assets = home / '.local/share/platinum-reality/assets'
             assets.mkdir(parents=True)

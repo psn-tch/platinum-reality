@@ -5327,6 +5327,84 @@ class NativeTests : public QObject
         QTRY_VERIFY(first(*scene.manager, "Native Probe Boxes").value("collapsed").toBool());
         QDBusInterface("org.frankenstein.NativeProbeBoxes", "/Probe", "org.frankenstein.NativeProbe").call("Finish");
     }
+    void tripleClickingTheTitleBarFillsTheScreenAndBack()
+    {
+        // psn_tch, 2026-10-23: two clicks on the title bar are WindowShade (at once, as before); a
+        // third fills the screen below the menu bar; three again put the window back.
+        NativeScene scene;
+        QVERIFY(scene.show());
+        QProcess probe;
+        probe.setProcessEnvironment(scene.childEnvironment());
+        const auto cleanup = qScopeGuard([&] { if (probe.state() != QProcess::NotRunning) { probe.kill(); probe.waitForFinished(3000); } });
+        probe.start(QCoreApplication::applicationDirPath() + "/native-probe", {"Triple"});
+        QVERIFY(probe.waitForStarted());
+        const auto window = [&] { return first(*scene.manager, "Native Probe Triple"); };
+        QTRY_VERIFY(!window().isEmpty());
+        const auto id = window().value("id").toULongLong();
+        QTRY_VERIFY(window().value("active").toBool());
+        QQuickItem *bar = nullptr;
+        QTRY_VERIFY((bar = visualItem(scene.view.contentItem(), "title-bar-" + QString::number(id))));
+        // Settled where it was placed, so each click lands on the same title bar.
+        QVariantMap before;
+        QTRY_VERIFY([&] { const auto now = window(); const bool same = now == before; before = now; return same; }());
+        QTest::qWait(200);
+        before = window();
+        const auto click = [&] { return bar->mapToScene(QPointF(60, bar->height() / 2)).toPoint(); };
+        QTest::mouseDClick(&scene.view, Qt::LeftButton, {}, click());
+        QTRY_VERIFY(window().value("collapsed").toBool());
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, click());
+        const auto screen = scene.manager->primaryDisplayRect();
+        QTRY_VERIFY_WITH_TIMEOUT(!window().value("collapsed").toBool() &&
+                                 window().value("width").toInt() == screen.width() - 6, 5000);
+        QTRY_COMPARE(window().value("x").toInt(), screen.x());
+        QTRY_COMPARE(window().value("y").toInt(), screen.y() + 26);
+        QTRY_COMPARE(window().value("height").toInt(), screen.height() - 26 - 27);
+        QVERIFY(capture(scene.view, "title-bar-triple-click-filled.png"));
+        // Three again: back where and how big it was.
+        QTRY_VERIFY(!window().value("shadeAnimating").toBool());
+        QTest::mouseDClick(&scene.view, Qt::LeftButton, {}, click());
+        QTRY_VERIFY(window().value("collapsed").toBool());
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, click());
+        QTRY_VERIFY_WITH_TIMEOUT(!window().value("collapsed").toBool() &&
+                                 window().value("width").toInt() == before.value("width").toInt(), 5000);
+        QTRY_COMPARE(window().value("height").toInt(), before.value("height").toInt());
+        QTRY_COMPARE(window().value("x").toInt(), before.value("x").toInt());
+        QTRY_COMPARE(window().value("y").toInt(), before.value("y").toInt());
+        QDBusInterface("org.frankenstein.NativeProbeTriple", "/Probe", "org.frankenstein.NativeProbe").call("Finish");
+    }
+    void aClickOnAWindowClosesAnOpenMenuAndGoesNoFurther()
+    {
+        // psn_tch, 2026-10-23: a Control Strip menu stayed open until something was chosen when the
+        // click outside it landed on a window. As in Mac OS 9, the click only closes the menu.
+        NativeScene scene;
+        QVERIFY(scene.show());
+        QProcess probe;
+        probe.setProcessEnvironment(scene.childEnvironment());
+        const auto cleanup = qScopeGuard([&] { if (probe.state() != QProcess::NotRunning) { probe.kill(); probe.waitForFinished(3000); } });
+        probe.start(QCoreApplication::applicationDirPath() + "/native-probe", {"Dismiss"});
+        QVERIFY(probe.waitForStarted());
+        const auto window = [&] { return first(*scene.manager, "Native Probe Dismiss"); };
+        QTRY_VERIFY(!window().isEmpty() && window().value("active").toBool());
+        QVariantMap before;
+        QTRY_VERIFY([&] { const auto now = window(); const bool same = now == before; before = now; return same; }());
+        const QPoint inside(window().value("x").toInt() + 120, window().value("y").toInt() + 120);
+        auto *module = visualItem(scene.view.contentItem(), "control-strip-bluetooth");
+        QVERIFY(module);
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, module->mapToScene(QPointF(8, 8)).toPoint());
+        auto *menu = visualItem(scene.view.contentItem(), "control-strip-menu");
+        QTRY_VERIFY(menu->isVisible());
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, inside);
+        QTRY_VERIFY(!menu->isVisible());
+        QVERIFY(!scene.manager->menuOpen());
+        // The Apple menu too.
+        auto *apple = visualItem(scene.view.contentItem(), "bar-entry-0");
+        QVERIFY(apple);
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, apple->mapToScene(QPointF(10, 10)).toPoint());
+        QTRY_VERIFY(scene.manager->menuOpen());
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, inside);
+        QTRY_VERIFY(!scene.manager->menuOpen());
+        QDBusInterface("org.frankenstein.NativeProbeDismiss", "/Probe", "org.frankenstein.NativeProbe").call("Finish");
+    }
     void fixedSizeWindowsTooBigForTheScreenAreShownFullScreen()
     {
         // psn_tch, 2026-10-22 (Daggerfall Unity's launcher): a window whose client fixed its size too

@@ -64,7 +64,10 @@ LEGACY = "platinum-dreams"   # the name before Platinum Reality; its install is 
 # Quiet boot, and Plymouth at one device pixel per pixel: on a high-density panel it otherwise
 # doubles everything, reports half the panel's size, and the theme no longer recognises the panel
 # (its picture then came out unturned: sideways on a panel mounted sideways, 2026-10-23).
-QUIET = ["quiet", "splash", "loglevel=3", "rd.udev.log_level=3", "vt.global_cursor_default=0",
+# loglevel=0: not even emergency-level notices on the screen (an AMD Zen 5 laptop prints
+# "RDSEED32 is broken" at that level on every boot, 2026-10-23). A panic still shows: the kernel
+# raises the console level itself before printing one. Everything stays in the journal.
+QUIET = ["quiet", "splash", "loglevel=0", "rd.udev.log_level=3", "vt.global_cursor_default=0",
          "plymouth.force-scale=1"]
 RENDERED = ["panel.png", "splash.bmp", "manifest.json"] + [f"tile-{s}.png" for s in SCALES] + [
     f"icon-{s}.png" for s in SCALES]

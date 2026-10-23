@@ -97,6 +97,16 @@ class FileTests : public QObject
         QVERIFY(f.open(QIODevice::ReadOnly));
         QCOMPARE(f.readAll(), QByteArray("first"));
     }
+    void aDrivesFolderCreatedLaterIsStillAllowed()
+    {
+        // /run/media/<user> appears with the first mounted drive, after the desktop started.
+        QTemporaryDir home, outside;
+        const auto media = outside.path() + "/media/someone";
+        FileOperations ops(home.path(), home.path() + "/Trash", {media});
+        QVERIFY(QDir().mkpath(media + "/STICK"));
+        QVERIFY(ops.readableDirectory(media + "/STICK"));
+        QVERIFY(!ops.readableDirectory(outside.path()));
+    }
     void confinementRejectsSymlinkedParent()
     {
         QTemporaryDir root;

@@ -413,7 +413,15 @@ CHIME_NAMES = ("startup-chime.wav", "startup-chime.aiff", "startup-chime.aif", "
 # Log In it is still starting, and USB speakers appear later still (the first chime was silent,
 # 2026-10-22). At most 15 s, then half a second to settle; $1 may be empty (no wpctl: no wait).
 CHIME_HELPER = ('i=0; if [ -n "$1" ]; then while [ "$i" -lt 75 ] && ! "$1" inspect @DEFAULT_AUDIO_SINK@ '
-                '>/dev/null 2>&1; do sleep 0.2; i=$((i + 1)); done; sleep 0.5; fi; exec "$2" "$3"')
+                '>/dev/null 2>&1; do sleep 0.2; i=$((i + 1)); done; sleep 0.5; fi; exec "$2" "$3" "$4"')
+# Half volume: the chime at full volume startled psn_tch (2026-10-23). pw-play takes a factor,
+# paplay a value out of 65536.
+CHIME_VOLUME = 0.5
+
+
+def chime_volume_option(player):
+    return (f"--volume={int(65536 * CHIME_VOLUME)}" if Path(player).name == "paplay"
+            else f"--volume={CHIME_VOLUME}")
 
 
 def startup_chime(environment, home=None, boot_id=Path("/proc/sys/kernel/random/boot_id"),
@@ -446,7 +454,8 @@ def startup_chime(environment, home=None, boot_id=Path("/proc/sys/kernel/random/
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(boot + "\n")
     waiter = wpctl if wpctl and os.access(wpctl, os.X_OK) else ""
-    return subprocess.Popen(["/bin/sh", "-c", CHIME_HELPER, "startup-chime", waiter, player, str(sound)],
+    return subprocess.Popen(["/bin/sh", "-c", CHIME_HELPER, "startup-chime", waiter, player,
+                             chime_volume_option(player), str(sound)],
                             env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, start_new_session=True)
 
