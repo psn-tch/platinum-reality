@@ -1,0 +1,43 @@
+# Platinum Reality boot screen (scripts/boot-splash.py writes the numbers below).
+# The built-in panel shows panel.png, the same picture as the firmware's splash. Any other display
+# shows the 512 x 342 screen of the first Macintosh, scaled by a whole number: a 50% checkerboard
+# with the startup icon (the user's own, if imported, else the project's) where that screen had it.
+panel_width = @PANEL_WIDTH@;
+panel_height = @PANEL_HEIGHT@;
+icon_x = @ICON_X@;
+icon_y = @ICON_Y@;
+
+Window.SetBackgroundTopColor(0.5, 0.5, 0.5);
+Window.SetBackgroundBottomColor(0.5, 0.5, 0.5);
+width = Window.GetWidth();
+height = Window.GetHeight();
+left = Window.GetX();
+top = Window.GetY();
+
+if (width == panel_width && height == panel_height) {
+    panel = Sprite(Image("panel.png"));
+    panel.SetPosition(left, top, 0);
+} else {
+    scale = Math.Int(Math.Min(width / 512, height / 342));
+    if (scale < 1) scale = 1;
+    if (scale > 8) scale = 8;
+    tile = Image("tile-" + scale + ".png");
+    size = tile.GetWidth();
+    origin_x = Math.Int((width - 512 * scale) / 2);
+    origin_y = Math.Int((height - 342 * scale) / 2);
+    # Tiles are a whole number of checker pairs, so the pattern stays in step with the screen.
+    y = origin_y - (Math.Int(origin_y / size) + 1) * size;
+    count = 0;
+    while (y < height) {
+        x = origin_x - (Math.Int(origin_x / size) + 1) * size;
+        while (x < width) {
+            tiles[count] = Sprite(tile);
+            tiles[count].SetPosition(left + x, top + y, 0);
+            count = count + 1;
+            x = x + size;
+        }
+        y = y + size;
+    }
+    icon = Sprite(Image("icon-" + scale + ".png"));
+    icon.SetPosition(left + origin_x + icon_x * scale, top + origin_y + icon_y * scale, 1);
+}

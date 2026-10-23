@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Platinum Reality (Preview)
+Comment=Experimental classic Macintosh-inspired native Linux desktop
+Exec=platinum-reality
+Icon=platinum-reality
+Terminal=false
+Categories=System;
+StartupNotify=false

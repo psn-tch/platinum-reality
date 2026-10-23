@@ -1,0 +1,55 @@
+/* Platinum Reality application appearance v1. Browser UI only; no web content. */
+@-moz-document url("chrome://browser/content/browser.xhtml") {
+  :root {
+    --toolbar-bgcolor: #dddddd !important;
+    --toolbar-color: #111111 !important;
+    --toolbar-field-background-color: #ffffff !important;
+    --toolbar-field-color: #111111 !important;
+    --toolbar-field-border-color: #777777 !important;
+    --toolbar-field-focus-border-color: #333366 !important;
+    --lwt-accent-color: #cccccc !important;
+    --lwt-text-color: #111111 !important;
+    --tab-selected-bgcolor: #eeeeee !important;
+    --tab-selected-textcolor: #111111 !important;
+    --tab-border-radius: 0px !important;
+    --toolbarbutton-border-radius: 0px !important;
+    --arrowpanel-background: #eeeeee !important;
+    --arrowpanel-color: #111111 !important;
+    --arrowpanel-border-color: #222222 !important;
+    --arrowpanel-border-radius: 0px !important;
+    --panel-border-radius: 0px !important;
+    font-family: "Charcoal", "DejaVu Sans", sans-serif !important;
+    font-size: 12px !important;
+  }
+  #navigator-toolbox, #TabsToolbar, #nav-bar, #PersonalToolbar, #toolbar-menubar {
+    background: #dddddd !important;
+    color: #111111 !important;
+    box-shadow: none !important;
+  }
+  #nav-bar, #PersonalToolbar { border-top: 1px solid #ffffff !important; border-bottom: 1px solid #888888 !important; }
+  .tab-background {
+    border: 1px solid #888888 !important;
+    border-radius: 0 !important;
+    background: #cccccc !important;
+    box-shadow: inset 1px 1px #ffffff !important;
+  }
+  .tab-background[selected] { background: #eeeeee !important; border-bottom-color: #eeeeee !important; }
+  #urlbar-background, #searchbar {
+    background-color: #ffffff !important;
+    border: 1px solid #777777 !important;
+    border-radius: 0 !important;
+    box-shadow: inset 1px 1px #aaaaaa !important;
+  }
+  #urlbar[focused] > #urlbar-background { border-color: #333366 !important; }
+  #urlbar-input, #searchbar input { color: #111111 !important; }
+  toolbarbutton > .toolbarbutton-icon, toolbarbutton > .toolbarbutton-badge-stack {
+    border-radius: 0 !important;
+  }
+  toolbarbutton:hover > .toolbarbutton-icon, toolbarbutton:hover > .toolbarbutton-badge-stack {
+    background-color: #cccccc !important;
+    box-shadow: inset 1px 1px #ffffff, inset -1px -1px #888888 !important;
+  }
+  /* This dedicated profile receives the compositor's classic frame. Remove only
+     Firefox's duplicate caption buttons; keep tabs and browser security UI. */
+  .titlebar-buttonbox-container { display: none !important; }
+}

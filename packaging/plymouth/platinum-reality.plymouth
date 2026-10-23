@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Platinum Reality
+Description=A gray 1-bit startup screen, drawn as the first Macintosh drew it.
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/platinum-reality
+ScriptFile=/usr/share/plymouth/themes/platinum-reality/platinum-reality.script

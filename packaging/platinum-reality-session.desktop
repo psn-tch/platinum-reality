@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Platinum Reality
+Comment=A classic Platinum desktop for Linux
+Exec=platinum-reality-session
+TryExec=platinum-reality-session
+DesktopNames=PlatinumReality

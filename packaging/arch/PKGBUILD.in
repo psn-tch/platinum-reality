@@ -1,0 +1,70 @@
+# Platinum Reality for Arch Linux. scripts/package-arch.py writes this recipe beside a pinned source
+# snapshot; build it with makepkg (makepkg itself installs nothing unless asked to).
+pkgname=platinum-reality
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='A classic Platinum desktop for Linux: a whole session, or a window inside your current one'
+arch=('x86_64')
+# Platinum Reality was called Platinum Dreams.
+replaces=('platinum-dreams')
+conflicts=('platinum-dreams')
+url='https://github.com/psn-tch/platinum-reality'
+# The project's own code is MIT. The build links Qt Wayland Compositor (GPL-3.0-only), so the
+# package as a whole is distributed under GPL-3.0 terms. The title-bar drawings are MIT
+# (PlatinumWayland); the bundled X11 bridge is MPL-2.0 (xwayland-satellite).
+license=('MIT' 'GPL-3.0-only' 'MPL-2.0')
+depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'qt6-svg' 'glib2' 'wayland' 'libxkbcommon' 'pam'
+         'systemd-libs' 'dbus' 'python' 'fontconfig' 'xcb-util-cursor'
+         # The whole session: its display backend, idle handling and the lock's PAM service;
+         # polkit lets logind accept Special ▸ Sleep, Restart and Shut Down from the active session.
+         'sway' 'swayidle' 'swaylock' 'xorg-xwayland' 'polkit')
+makedepends=('cmake' 'ninja' 'pkgconf' 'gcc' 'vulkan-headers' 'vulkan-icd-loader' 'wayland-protocols'
+             # The X11 bridge (patched xwayland-satellite) is built from its pinned source.
+             'cargo' 'clang' 'patch'
+             # A test-only game-like client for pointer capture.
+             'sdl3')
+# check(): GTK's settings schemas and CSS, GIO's MIME lookup from Python, and the startup-screen drawing.
+checkdepends=('gtk3' 'python-gobject' 'imagemagick')
+optdepends=('pipewire-audio: interface and alert sounds, the startup chime'
+            'wireplumber: the startup chime waits for your speakers'
+            'libpulse: the Sound control panel'
+            'iwd: Wi-Fi networks in the Control Strip'
+            'bluez: the Bluetooth control panel and pairing'
+            'brightnessctl: built-in display brightness'
+            'ddcutil: external monitor brightness'
+            'fprintd: unlock with a fingerprint'
+            'plymouth: the gray startup screen (scripts/boot-splash.py)'
+            'imagemagick: drawing the startup screen from your own icon'
+            'firefox: browser with profile-local Platinum styling'
+            'plasma-integration: Qt application menus in the menu bar'
+            'kwallet: saved sign-ins through the KDE wallet'
+            'konsole: the Terminal command')
+_bridge=b83eab900644e4c7c77982ce3d44cb490f0c5e1d
+source=('platinum-reality-0.1.0.tar.gz'
+        "xwayland-satellite-$_bridge.tar.gz::https://codeload.github.com/Supreeeme/xwayland-satellite/tar.gz/$_bridge")
+noextract=("xwayland-satellite-$_bridge.tar.gz")
+sha256sums=('@SOURCE_SHA256@'
+            '45f06d0c7017d793fa20c85a6fa7e8b26ad3c681c579d455f697faddf3c57bdf')
+options=('!debug')
+
+build() {
+    cd "$srcdir/platinum-reality-$pkgver"
+    rm -rf "$srcdir/bridge"
+    python3 -B scripts/build-x11-bridge.py --output "$srcdir/bridge" \
+        --archive "$srcdir/xwayland-satellite-$_bridge.tar.gz"
+    cmake -S . -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_TESTING=ON \
+        -DPLATINUM_XWAYLAND_PROVENANCE="$srcdir/bridge" \
+        -DPLATINUM_XWAYLAND_SATELLITE="$srcdir/bridge/xwayland-satellite-$_bridge/target/release/xwayland-satellite"
+    cmake --build build
+}
+
+check() {
+    cd "$srcdir/platinum-reality-$pkgver"
+    QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+}
+
+package() {
+    cd "$srcdir/platinum-reality-$pkgver"
+    DESTDIR="$pkgdir" cmake --install build
+}

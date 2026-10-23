@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Start the installed, private nested desktop; leave the host session intact."""
+import argparse
+import getpass
+import fcntl
+import os
+from pathlib import Path
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+
+library = (Path(__file__).resolve().parent / "@PLATINUM_LIB_FROM_BIN@").resolve()
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(library))
+from session_support import (adopt_previous_name, cleanup_runtime, host_wallet_status, wallet_login_requested,
+                             write_bus_config)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Platinum Reality experimental native desktop, inside your current session.",
+        epilog="Close applications, then choose Special > Log Out to return.")
+    parser.add_argument("--workspace", type=Path,
+                        help="Hard Disk: the files available in Finder (default: your home folder)")
+    parser.add_argument("--profile", type=Path, help="Private desktop/application settings")
+    parser.add_argument("--windowed", action="store_true", help="Open a window instead of full screen")
+    parser.add_argument("--private-application-settings", action="store_true",
+                        help="Give applications a private settings profile instead of your normal ~/.config")
+    options, extra = parser.parse_known_args()
+    if not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
+        parser.error("An existing graphical session is required; this is not a login-session compositor.")
+    if not shutil.which("dbus-run-session"):
+        parser.error("dbus-run-session is required.")
+    executable = library / "frankenstein"
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        parser.error("Installed desktop executable is missing: " + str(executable))
+    data = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
+    if not data.is_absolute():
+        parser.error("XDG_DATA_HOME must be an absolute path.")
+    if not options.profile:  # only the user's own default profile, never a test's or another chosen one
+        adopt_previous_name(data)
+    profile = (options.profile or data / "platinum-reality/profile").expanduser().absolute()
+    workspace = (options.workspace or Path.home()).expanduser().absolute()
+    # The real places only for the real home (an explicit --workspace, as in tests, keeps the
+    # profile's own Trash): the Trash shared with other file managers, and mounted drives.
+    places = [] if options.workspace else ["--trash", str(data / "Trash"),
+                                           "--volume", "/run/media/" + getpass.getuser()]
+    environment = os.environ.copy()
+    wallet_requested = wallet_login_requested(environment, options.private_application_settings)
+    # Consume the supervisor's allowance. A launcher started by an application must not
+    # start another set of daemons against the same wallet on another private bus.
+    for key in ("PLATINUM_WALLET_LOGIN", "PLATINUM_WALLET_SERVICES", "PLATINUM_WALLET_REQUESTED",
+                "PLATINUM_WALLET_ERROR"):
+        environment.pop(key, None)
+    parent_display = environment.get("WAYLAND_DISPLAY")
+    if parent_display and not os.path.isabs(parent_display):
+        parent_runtime = environment.get("XDG_RUNTIME_DIR")
+        if not parent_runtime:
+            parser.error("XDG_RUNTIME_DIR is required for the parent Wayland display.")
+        environment["WAYLAND_DISPLAY"] = str(Path(parent_runtime) / parent_display)
+    runtime = Path(tempfile.mkdtemp(prefix="frankenstein-runtime."))
+    result = 1
+    profile_lock = None
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+            probe.bind(str(runtime / "preflight"))
+            probe.listen(1)
+        (runtime / "preflight").unlink()
+        profile.mkdir(parents=True, exist_ok=True, mode=0o700)
+        profile_lock = os.open(profile / "session.lock",
+                               os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        try:
+            fcntl.flock(profile_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("This Platinum Reality profile already has an active session.", file=sys.stderr)
+            return 1
+        workspace.mkdir(parents=True, exist_ok=True)
+        config = None
+        if wallet_requested:
+            environment["PLATINUM_WALLET_REQUESTED"] = "1"
+            status = host_wallet_status(environment)
+            if status == "idle":
+                try:
+                    config = write_bus_config(runtime, wallet_supervisor=library / "platinum-wallet-service")
+                    environment["PLATINUM_WALLET_SERVICES"] = "1"
+                except (OSError, ValueError) as error:
+                    environment["PLATINUM_WALLET_ERROR"] = str(error)
+            else:
+                environment["PLATINUM_WALLET_ERROR"] = (
+                    "The wallet is still in use by another desktop. Close that session before using saved sign-ins."
+                    if status == "busy" else "The existing wallet service could not be checked.")
+            if "PLATINUM_WALLET_ERROR" in environment:
+                print("Saved sign-ins unavailable: " + environment["PLATINUM_WALLET_ERROR"], file=sys.stderr)
+        if config is None:
+            config = write_bus_config(runtime)
+        environment["XDG_RUNTIME_DIR"] = str(runtime)
+        environment["FRANKENSTEIN_ISOLATED"] = "1"
+        arguments = ["dbus-run-session", "--config-file=" + str(config), "--", str(executable),
+                     "--workspace", str(workspace), "--profile", str(profile),
+                     "--application-settings", "private" if options.private_application_settings else "normal",
+                     *places]
+        if not options.windowed:
+            arguments.append("--fullscreen")
+        arguments.extend(extra)
+        result = subprocess.run(arguments, env=environment, check=False).returncode
+    except OSError as error:
+        print("Platinum Reality could not start: " + str(error), file=sys.stderr)
+    finally:
+        if profile_lock is not None:
+            os.close(profile_lock)
+        if not cleanup_runtime(runtime):
+            print("Runtime retained without recursive deletion: " + str(runtime), file=sys.stderr)
+            if result == 0:
+                result = 1
+    return result if result >= 0 else 128 - result
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,215 @@
+Platinum Dreams changes to xwayland-satellite 0.8.3 (MPL-2.0), applied with patch -p1 --fuzz=0:
+- Qt 6.12 compositor: xdg_wm_base from version 1; output names from xdg-output when wl_output is older than v4.
+- Monitor-aware fullscreen (2026-10-20): a mapped window's ignored move request is remembered, and
+  set_fullscreen names the output under the window's (requested) centre instead of None.
+- Minimize (2026-10-22): WM_CHANGE_STATE IconicState (XIconifyWindow, e.g. Steam's minimize button)
+  becomes xdg_toplevel.set_minimized; the desktop hides the application.
+
+--- a/src/server/event.rs
++++ b/src/server/event.rs
+@@ -1005,7 +1005,9 @@
+ pub(super) struct OnOutput(pub Entity);
+ struct OutputName(String);
+ fn get_output_name(output: Option<&OnOutput>, world: &World) -> Option<String> {
+-    output.map(|o| world.get::<&OutputName>(o.0).unwrap().0.clone())
++    // wl_output.name requires v4; older compositors may only advertise
++    // xdg-output names, or no names. An output name is optional for focus.
++    output.and_then(|o| world.get::<&OutputName>(o.0).ok().map(|name| name.0.clone()))
+ }
+ 
+ #[derive(Copy, Clone, PartialEq, Debug)]
+@@ -1403,11 +1405,14 @@
+                     xdg.logical_size(dimensions.width, dimensions.height);
+                 }
+             }
++            Event::Name { name } => {
++                state.world.get::<&XdgOutputServer>(target).unwrap().name(name.clone());
++                state.world.insert(target, (OutputName(name),)).unwrap();
++            }
+             _ => simple_event_shunt! {
+                 state.world.get::<&XdgOutputServer>(target).unwrap(),
+                 event: zxdg_output_v1::Event => [
+                     Done,
+-                    Name { name },
+                     Description { description }
+                 ]
+             },
+--- a/src/server/mod.rs
++++ b/src/server/mod.rs
+@@ -132,6 +132,9 @@
+     attrs: WindowAttributes,
+     output_offset: WindowOutputOffset,
+     activation_token: Option<String>,
++    /// Platinum Dreams: where a mapped toplevel last asked to move. The move is not applied (the
++    /// compositor places windows), but a following fullscreen request goes to that monitor.
++    requested_position: Option<(i16, i16)>,
+ }
+ 
+ impl WindowData {
+@@ -146,6 +149,7 @@
+             },
+             output_offset: WindowOutputOffset::default(),
+             activation_token,
++            requested_position: None,
+         }
+     }
+ 
+@@ -509,12 +513,12 @@
+         let qh = queue.handle();
+ 
+         let xdg_wm_base = global_list
+-            .bind::<XdgWmBase, _, _>(&qh, 2..=6, ())
++            .bind::<XdgWmBase, _, _>(&qh, 1..=6, ())
+             .expect("Could not bind xdg_wm_base");
+ 
+         if xdg_wm_base.version() < 3 {
+             warn!(
+-                "xdg_wm_base version 2 detected. Popup repositioning will not work, and some popups may not work correctly."
++                "xdg_wm_base version {} detected. Popup repositioning will not work, and some popups may not work correctly.", xdg_wm_base.version()
+             );
+         }
+ 
+@@ -1193,6 +1197,48 @@
+         self.last_focused_toplevel.unwrap_or(x::WINDOW_NONE)
+     }
+ 
++    /// Platinum Dreams: remember a mapped toplevel's ignored move request (see WindowData).
++    pub fn note_requested_position(&mut self, window: x::Window, x: Option<i16>, y: Option<i16>) {
++        let Some(mut win) = self
++            .windows
++            .get(&window)
++            .copied()
++            .and_then(|id| self.world.get::<&mut WindowData>(id).ok())
++        else {
++            return;
++        };
++        let (old_x, old_y) = win
++            .requested_position
++            .unwrap_or((win.attrs.dims.x, win.attrs.dims.y));
++        win.requested_position = Some((x.unwrap_or(old_x), y.unwrap_or(old_y)));
++    }
++
++    /// Platinum Dreams: the monitor an X11 window means when it asks for fullscreen, from the
++    /// centre of its requested (or current) X11 geometry. X11 programs pick a monitor by moving
++    /// their window onto it; xdg_toplevel.set_fullscreen(None) would leave the choice to the
++    /// compositor, which does not know X11 positions.
++    fn fullscreen_output(&self, win: &WindowData) -> Option<client::wl_output::WlOutput> {
++        let (x, y) = win
++            .requested_position
++            .unwrap_or((win.attrs.dims.x, win.attrs.dims.y));
++        let centre_x = x as i32 + win.attrs.dims.width as i32 / 2;
++        let centre_y = y as i32 + win.attrs.dims.height as i32 / 2;
++        let mut query = self
++            .world
++            .query::<(&client::wl_output::WlOutput, &OutputDimensions)>();
++        query
++            .iter()
++            .find(|(_, (_, d))| {
++                d.width > 0
++                    && d.height > 0
++                    && centre_x >= d.x
++                    && centre_x < d.x + d.width
++                    && centre_y >= d.y
++                    && centre_y < d.y + d.height
++            })
++            .map(|(_, (output, _))| output.clone())
++    }
++
+     pub fn set_fullscreen(&mut self, window: x::Window, state: super::xstate::SetState) {
+         let Some(data) = self
+             .windows
+@@ -1213,21 +1259,42 @@
+             warn!("Tried to set an unmapped toplevel or non toplevel fullscreen: {window:?}");
+             return;
+         };
++        let output = data
++            .get::<&WindowData>()
++            .and_then(|win| self.fullscreen_output(&win));
+ 
+         use crate::xstate::SetState;
+         match state {
+-            SetState::Add => toplevel.toplevel.set_fullscreen(None),
++            SetState::Add => toplevel.toplevel.set_fullscreen(output.as_ref()),
+             SetState::Remove => toplevel.toplevel.unset_fullscreen(),
+             SetState::Toggle => {
+                 if toplevel.fullscreen {
+                     toplevel.toplevel.unset_fullscreen()
+                 } else {
+-                    toplevel.toplevel.set_fullscreen(None)
++                    toplevel.toplevel.set_fullscreen(output.as_ref())
+                 }
+             }
+         }
+     }
+ 
++    pub fn set_minimized(&mut self, window: x::Window) {
++        let Some(data) = self
++            .windows
++            .get(&window)
++            .copied()
++            .and_then(|id| self.world.entity(id).ok())
++        else {
++            warn!("Tried to minimize unknown window {window:?}");
++            return;
++        };
++        let Some(role) = data.get::<&SurfaceRole>() else {
++            return;
++        };
++        if let SurfaceRole::Toplevel(Some(toplevel)) = &*role {
++            toplevel.toplevel.set_minimized();
++        }
++    }
++
+     pub fn set_transient_for(&mut self, window: x::Window, parent: x::Window) {
+         let Some(mut win) = self
+             .windows
+@@ -1510,7 +1577,8 @@
+         }
+ 
+         if fullscreen {
+-            toplevel.set_fullscreen(None);
++            // Platinum Dreams: a window mapped full screen goes to the monitor it was created on.
++            toplevel.set_fullscreen(self.fullscreen_output(&window).as_ref());
+         }
+ 
+         let wl_decoration = self.decoration_manager.as_ref().map(|decoration_manager| {
+--- a/src/xstate/mod.rs
++++ b/src/xstate/mod.rs
+@@ -487,6 +487,13 @@
+                         if mask.contains(x::ConfigWindowMask::Y) {
+                             list.push(x::ConfigWindow::Y(e.y().into()));
+                         }
++                    } else if mask.intersects(x::ConfigWindowMask::X | x::ConfigWindowMask::Y) {
++                        // Platinum Dreams: not applied, but remembered for fullscreen.
++                        server_state.note_requested_position(
++                            e.window(),
++                            mask.contains(x::ConfigWindowMask::X).then(|| e.x()),
++                            mask.contains(x::ConfigWindowMask::Y).then(|| e.y()),
++                        );
+                     }
+                     if mask.contains(x::ConfigWindowMask::WIDTH) {
+                         list.push(x::ConfigWindow::Width(e.width().into()));
+@@ -563,6 +570,15 @@
+             x if x == self.atoms.active_win => {
+                 server_state.activate_window(e.window());
+             }
++            // ICCCM 4.1.4: XIconifyWindow (a minimize button) asks for IconicState.
++            x if x == self.atoms.wm_change_state => {
++                let x::ClientMessageData::Data32(data) = e.data() else {
++                    unreachable!();
++                };
++                if data[0] == WmState::Iconic as u32 {
++                    server_state.set_minimized(e.window());
++                }
++            }
+             x if x == self.atoms.moveresize => {
+                 let x::ClientMessageData::Data32(data) = e.data() else {
+                     unreachable!();
+@@ -898,6 +914,7 @@
+         wm_delete_window => b"WM_DELETE_WINDOW" only_if_exists = false,
+         wm_transient_for => b"WM_TRANSIENT_FOR" only_if_exists = false,
+         wm_state => b"WM_STATE" only_if_exists = false,
++        wm_change_state => b"WM_CHANGE_STATE" only_if_exists = false,
+         wm_s0 => b"WM_S0" only_if_exists = false,
+         net_wm_cm_s0 => b"_NET_WM_CM_S0" only_if_exists = false,
+         wm_check => b"_NET_SUPPORTING_WM_CHECK" only_if_exists = false,

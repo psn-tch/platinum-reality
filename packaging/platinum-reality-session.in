@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Platinum Reality as a whole session, as a login screen starts it (wayland-sessions).
+
+The login screen has already authenticated the user; this starts the session supervisor
+(standalone-session.py) on the seat it was given, with the installed desktop. Each session
+keeps its own log folder in $XDG_STATE_HOME/platinum-reality/session-runs (the newest 20 are kept).
+"""
+from datetime import datetime, timezone
+import os
+from pathlib import Path
+import shutil
+import sys
+
+library = (Path(__file__).resolve().parent / "@PLATINUM_LIB_FROM_BIN@").resolve()
+launcher = Path(__file__).resolve().with_name("platinum-reality")
+KEEP = 20
+
+
+def runs_folder(environment):
+    state = Path(environment.get("XDG_STATE_HOME") or Path(environment.get("HOME") or Path.home()) / ".local/state")
+    if not state.is_absolute():
+        raise SystemExit("XDG_STATE_HOME must be an absolute path.")
+    return state / "platinum-reality/session-runs"
+
+
+def prune(runs, keep=KEEP):
+    """Old session logs go; never anything but our own run folders, never through a link."""
+    if not runs.is_dir() or runs.is_symlink():
+        return
+    folders = sorted((p for p in runs.iterdir() if p.is_dir() and not p.is_symlink()
+                      and p.name[:8].isdigit()), key=lambda p: p.name)
+    for old in folders[:-keep] if keep else folders:
+        shutil.rmtree(old, ignore_errors=True)
+
+
+def command(environment, extra):
+    runs = runs_folder(environment)
+    runs.mkdir(parents=True, exist_ok=True)
+    prune(runs, KEEP - 1)
+    run = runs / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + str(os.getpid()))
+    # One screen, as the supervisor's own login uses it: an external monitor when one is connected,
+    # else the built-in one, with its known or KDE-remembered rotation and scale (sway chooses the
+    # scale of any other). The Monitors panel's "all displays" choice is remembered and honoured.
+    return [sys.executable, "-B", str(library / "standalone-session.py"), "--launcher", str(launcher),
+            "--evidence", str(run), "--primary-output", "auto", "--single-output"] + extra
+
+
+def main():
+    if "--help" in sys.argv[1:] or "-h" in sys.argv[1:]:
+        print(__doc__.strip())
+        return 0
+    arguments = command(os.environ, sys.argv[1:])
+    if os.environ.get("PLATINUM_SESSION_PRINT_ONLY") == "1":  # Tests: show the command, start nothing.
+        print("\0".join(arguments))
+        return 0
+    os.execv(sys.executable, arguments)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,109 @@
+/* Platinum Reality application appearance v1. Original native adaptation. */
+@define-color theme_bg_color #dddddd;
+@define-color theme_fg_color #111111;
+@define-color theme_base_color #ffffff;
+@define-color theme_text_color #111111;
+@define-color theme_selected_bg_color #333366;
+@define-color theme_selected_fg_color #ffffff;
+
+window, dialog, popover, menu, menubar, toolbar, headerbar, notebook > header {
+    background-color: #dddddd;
+    background-image: none;
+    color: #111111;
+    text-shadow: none;
+}
+window {
+    font-family: "Charcoal", "DejaVu Sans", sans-serif;
+    font-size: 9pt;
+}
+/* No window shadow in any state. With normal settings this file is part of the theme, so
+   Adwaita's more specific inactive (backdrop) and CSD rules would otherwise win, and a
+   window gained a shadow margin, shifting its content, whenever it lost focus. */
+decoration, decoration:backdrop,
+.csd decoration, .csd decoration:backdrop,
+.solid-csd decoration, .solid-csd decoration:backdrop,
+.csd.popup decoration, tooltip.csd decoration, messagedialog.csd decoration {
+    border-radius: 0;
+    border-width: 0;
+    padding: 0;
+    margin: 0;
+    box-shadow: none;
+}
+button, entry, spinbutton, dropdown, combobox, popover, menu, headerbar,
+notebook > header > tabs > tab, scale trough, scale slider, scrollbar slider {
+    border-radius: 0;
+    text-shadow: none;
+}
+button {
+    color: #111111;
+    background-color: #dddddd;
+    background-image: none;
+    border: 1px solid #222222;
+    box-shadow: inset 1px 1px #ffffff, inset -1px -1px #888888;
+    min-height: 20px;
+    padding: 2px 8px;
+}
+button:hover { background-color: #e7e7e7; }
+button:active, button:checked {
+    background-color: #bbbbbb;
+    box-shadow: inset 1px 1px #777777, inset -1px -1px #ffffff;
+}
+button:disabled { color: #777777; }
+button:focus { outline: 1px dotted #333366; outline-offset: 2px; }
+entry, spinbutton, textview, textview text, treeview, list, listview, columnview, .view {
+    color: #111111;
+    background-color: #ffffff;
+    background-image: none;
+}
+entry, spinbutton {
+    min-height: 22px;
+    padding: 2px 4px;
+    border: 1px solid #777777;
+    box-shadow: inset 1px 1px #aaaaaa, 1px 1px #ffffff;
+}
+entry:focus, spinbutton:focus { border-color: #333366; }
+selection, row:selected, treeview.view:selected, iconview.view:selected,
+modelbutton:hover, menuitem:hover {
+    background-color: #333366;
+    color: #ffffff;
+}
+menubar, toolbar, headerbar { border-bottom: 1px solid #888888; box-shadow: none; }
+menu, popover > contents {
+    background-color: #eeeeee;
+    color: #111111;
+    border: 1px solid #222222;
+    border-radius: 0;
+    box-shadow: 2px 2px rgba(0, 0, 0, 0.35);
+}
+scrollbar { background-color: #cccccc; border-radius: 0; }
+scrollbar trough { background-color: #cccccc; border-radius: 0; }
+scrollbar slider {
+    min-width: 12px;
+    min-height: 12px;
+    background-color: #bbbbbb;
+    background-image: none;
+    border: 1px solid #555555;
+    box-shadow: inset 1px 1px #ffffff, inset -1px -1px #888888;
+}
+scale trough { min-height: 4px; min-width: 4px; background-color: #bbbbbb; border: 1px solid #777777; }
+scale slider { background: #dddddd; border: 1px solid #222222; box-shadow: inset 1px 1px #ffffff; }
+checkbutton check, checkbutton radio, radiobutton radio {
+    min-height: 12px;
+    min-width: 12px;
+    background-color: #ffffff;
+    color: #111111;
+    border: 1px solid #555555;
+    box-shadow: inset 1px 1px #aaaaaa;
+}
+checkbutton check { border-radius: 0; }
+checkbutton radio, radiobutton radio { border-radius: 50%; }
+notebook > header > tabs > tab {
+    background-color: #cccccc;
+    border: 1px solid #888888;
+    padding: 4px 10px;
+}
+notebook > header > tabs > tab:checked { background-color: #eeeeee; }
+tooltip { background-color: #ffffdd; color: #111111; border: 1px solid #222222; }
+/* Preserve semantic warnings and application document/content fonts. */
+button.destructive-action { color: #8b1010; }
+terminal, .monospace { font-family: monospace; }

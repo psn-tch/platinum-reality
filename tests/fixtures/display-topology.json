@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "session": "0123456789abcdef0123456789abcdef",
+  "generation": 1,
+  "mode": "extend",
+  "primary": "HEADLESS-1",
+  "outputs": [
+    {"name": "HEADLESS-1", "x": 0, "y": 0, "width": 1120, "height": 760, "scale": 1.5, "transform": "normal"},
+    {"name": "HEADLESS-2", "x": 1120, "y": 0, "width": 960, "height": 600, "scale": 2, "transform": "90"}
+  ]
+}

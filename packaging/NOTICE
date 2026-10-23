@@ -1,0 +1,23 @@
+Platinum Reality — notice
+
+Platinum Reality's own source code is licensed under the MIT licence (LICENSE): use, change and
+share it for any purpose.
+
+A built Platinum Reality links Qt Wayland Compositor, which is available under GPL-3.0-only (or a
+commercial licence). Anyone distributing builds therefore distributes them under GPL-3.0 terms as
+a whole (MIT code may be combined with GPL code). Other Qt modules, GLib, libwayland and the other
+system libraries keep their own terms and are dependencies, not bundled in this package.
+
+Bundled third-party work:
+- The title-bar box drawings (src/desktop/titlebar) come from PlatinumWayland, MIT licence
+  (LICENSE-PlatinumWayland alongside them).
+- The X11 bridge is xwayland-satellite 0.8.3 (MPL-2.0), built from its published source with a
+  recorded compatibility patch. Its licence, exact source archive, patch, Cargo.lock, build script
+  and binary provenance are installed alongside it. It uses the system Xwayland.
+
+Everything else the desktop draws or plays is original project work. No Apple software, ROM,
+artwork, sound or font is included. A user's own Mac OS 9 sounds, icons, pictures and cursors can
+be imported into their private data folder and are read from there at runtime.
+
+Mac OS, Macintosh and the Happy Mac are trademarks of Apple Inc. Platinum Reality is an independent
+project, not affiliated with or endorsed by Apple.

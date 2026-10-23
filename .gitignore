@@ -1,0 +1,10 @@
+/build/
+/build-*/
+/var/
+/docs/evidence/
+/HANDOFF.md
+.env
+.env.*
+__pycache__/
+*.py[cod]
+/handoff.md
