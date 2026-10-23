@@ -1,5 +1,9 @@
 # Source and licensing manifest
 
+> **Development log.** Paths, defaults, machines and earlier project names here describe the
+> developer's setup when each entry was written. Current behaviour is in the README and
+> [docs/install.md](install.md).
+
 ## Clipboard integration candidate — 2026-10-21
 
 The clipboard and Command-key adapter is original project source and uses

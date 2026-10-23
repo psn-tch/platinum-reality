@@ -1,5 +1,9 @@
 # Historical fidelity review: Platinum Reality native desktop vs Mac OS 9.x evidence
 
+> **Development log.** Paths, defaults, machines and earlier project names here describe the
+> developer's setup when each entry was written. Current behaviour is in the README and
+> [docs/install.md](install.md).
+
 Claude · 2026-10-19 · Research and comparison only. **No product code was changed by this review.**
 
 ## Summary

@@ -1,5 +1,9 @@
 # Finishing School, mapped onto the native desktop
 
+> **Development log.** Paths, defaults, machines and earlier project names here describe the
+> developer's setup when each entry was written. Current behaviour is in the README and
+> [docs/install.md](install.md).
+
 Source: `~/Projects/Platinum-Dreams-finishing-school/` ("Operation Macintosh Finishing School",
 2026-10-14). It is twelve phases of Mac OS 9 interaction contracts backed by Apple publications,
 with owner decisions D01–D12. It was written for the older KDE-hosted Platinum Reality. Here the

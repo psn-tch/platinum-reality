@@ -1,5 +1,9 @@
 # Implementation status
 
+> **Development log.** Paths, defaults, machines and earlier project names here describe the
+> developer's setup when each entry was written. Current behaviour is in the README and
+> [docs/install.md](install.md).
+
 ## Clipboard safety candidate — 2026-10-22
 
 The clipboard / Command-key batch plus its safety follow-up, integrated by Sammy after

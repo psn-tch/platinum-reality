@@ -1,5 +1,9 @@
 # Platinum Reality — development notes (the original README)
 
+> **Development log.** Paths, defaults, machines and earlier project names here describe the
+> developer's setup when each entry was written. Current behaviour is in the README and
+> [docs/install.md](install.md).
+
 Native Arch Linux desktop research and implementation · development version 0.1.0
 
 Reproduce the Mac OS 9.2.2 interaction model with native Linux applications.

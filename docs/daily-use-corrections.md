@@ -1,5 +1,9 @@
 # Physical-login follow-up — Rocky, 2026-10-20
 
+> **Development log.** Paths, defaults, machines and earlier project names here describe the
+> developer's setup when each entry was written. Current behaviour is in the README and
+> [docs/install.md](install.md).
+
 The selected tray release is unchanged while this work is qualified. The staged
 idle release and Claude's unfinished Appearance work are retained. This batch
 prioritizes the first physical-login problems over additional visual features.

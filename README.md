@@ -37,6 +37,15 @@ an emulator: no Apple software runs, and none is included.
 > up later. A ready-made Arch-based system with Platinum Reality set up from the start is planned,
 > so that installing it is one step on a clean machine.
 
+As a normal user with `sudo` and a working network (never as root), first update the system and
+add the build tools:
+
+```bash
+sudo pacman -Syu --needed base-devel git python
+```
+
+Then build and install the package:
+
 ```bash
 git clone https://github.com/psn-tch/platinum-reality.git
 cd platinum-reality
@@ -50,8 +59,11 @@ from source and runs the automatic tests (add `--nocheck` to skip them).
 
 ## Start it
 
-- **From your login screen** (SDDM, GDM, greetd, LightDM): log out, choose **Platinum Reality**
-  from the session list, and log in. Everything you need for a whole session (sway as the display
+- **From your login screen** (SDDM, GDM, LightDM): log out, choose **Platinum Reality**
+  from the session list, and log in. A minimal Arch install has no login screen yet: install and
+  enable one first, for example `sudo pacman -S sddm` and `sudo systemctl enable sddm`.
+  (greetd has no session list of its own; it needs a greeter such as tuigreet set up to read
+  `/usr/share/wayland-sessions`.) Everything you need for a whole session (sway as the display
   backend, swayidle, swaylock for the lock screen's password check, Xwayland) is a dependency.
 - **In a window inside your current desktop**, to try it first: run `platinum-reality`.
 
