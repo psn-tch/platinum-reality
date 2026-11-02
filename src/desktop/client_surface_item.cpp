@@ -7,6 +7,7 @@
 #include <QWaylandXdgSurface>
 #include <QWaylandXdgShell>
 #include <QtMath>
+#include <QtQuick/private/qquickitem_p.h>
 #include <QKeyEvent>
 #include <QLibraryInfo>
 #include <QMouseEvent>
@@ -189,6 +190,18 @@ void ClientSurfaceItem::reconcileChildren()
     constrainPopups(this);
 }
 
+// Qt Quick 6.12 caches, per item, whether every child lies within its bounds, and then skips
+// that item's children for presses outside it. Client menus are added several levels below a
+// window's frame and may hang past its edges, but the frame's cached answer was not refreshed:
+// a click on the overhanging part of Konsole's ☰ menu reached the desktop instead, deactivated
+// Konsole and closed the menu (psn_tch, 2026-10-31). Forget the answer up to the scene's root
+// whenever a popup is placed, so the next press recomputes it.
+static void forgetChildBounds(QQuickItem *item)
+{
+    for (; item; item = item->parentItem())
+        QQuickItemPrivate::get(item)->eventHandlingChildrenWithinBoundsSet = false;
+}
+
 void ClientSurfaceItem::constrainPopups(QQuickItem *parent)
 {
     for (auto *child : parent->childItems())
@@ -260,6 +273,7 @@ void ClientSurfaceItem::constrainPopup(QWaylandQuickShellSurfaceItem *item, QWay
         const auto position = parent->mapFromSurface(QPointF(popup->configuredGeometry().topLeft() + windowOffset));
         if (item->moveItem() && item->moveItem()->position() != position)
             item->moveItem()->setPosition(position);
+        forgetChildBounds(item);
     };
     connect(popup, &QWaylandXdgPopup::configuredGeometryChanged, item, follow);
     if (item->surface())
@@ -355,8 +369,29 @@ void ClientSurfaceItem::wheelEvent(QWheelEvent *event)
         QWaylandQuickShellSurfaceItem::wheelEvent(event);
 }
 
+void releaseDeferredTouch(QWaylandSeat *seat, QWaylandSurface *surface)
+{
+    if (surface && surface->property("platinumDeferredTouch").toBool())
+    {
+        surface->setProperty("platinumDeferredTouch", false);
+        cancelTouch(seat, surface);
+    }
+}
+
 void ClientSurfaceItem::touchEvent(QTouchEvent *event)
 {
+    // A finger that drags a file to the desktop lifts before the desktop has read the drop: as
+    // with the mouse button (deferDragRelease), the source keeps its touch until then, or it would
+    // end its drag and withdraw the files unread. The manager marks the source when it drops
+    // (platinumDeferTouchEnd); releaseDeferredTouch() ends the touch afterwards.
+    if (event->type() == QEvent::TouchEnd && surface() && surface()->property("platinumDeferTouchEnd").toBool())
+    {
+        surface()->setProperty("platinumDeferTouchEnd", false);
+        surface()->setProperty("platinumDeferredTouch", true);
+        m_touching = false;
+        event->accept();
+        return;
+    }
     if (!forwardTouch(this, event))
     {
         QWaylandQuickShellSurfaceItem::touchEvent(event);

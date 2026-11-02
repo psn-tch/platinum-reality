@@ -36,6 +36,17 @@ inline void pointerReleaseChord(QWindow *window)
     nativeKeyEvent(window, QEvent::KeyRelease, Qt::Key_Alt, Qt::ControlModifier, 56);
     nativeKeyEvent(window, QEvent::KeyRelease, Qt::Key_Control, Qt::NoModifier, 29);
 }
+// Command-Shift-digit: Shift-3 and Shift-4 arrive as # and $ (US layout), as from a keyboard.
+inline void commandShiftKey(QWindow *window, Qt::Key shifted, uint evdevCode)
+{
+    const auto both = Qt::MetaModifier | Qt::ShiftModifier;
+    nativeKeyEvent(window, QEvent::KeyPress, Qt::Key_Meta, Qt::MetaModifier, 125);
+    nativeKeyEvent(window, QEvent::KeyPress, Qt::Key_Shift, both, 42);
+    nativeKeyEvent(window, QEvent::KeyPress, shifted, both, evdevCode);
+    nativeKeyEvent(window, QEvent::KeyRelease, shifted, both, evdevCode);
+    nativeKeyEvent(window, QEvent::KeyRelease, Qt::Key_Shift, Qt::MetaModifier, 42);
+    nativeKeyEvent(window, QEvent::KeyRelease, Qt::Key_Meta, Qt::NoModifier, 125);
+}
 inline void screenshotKey(QWindow *window)
 {
     nativeKeyEvent(window, QEvent::KeyPress, Qt::Key_Alt, Qt::AltModifier, 56);
@@ -46,7 +57,7 @@ inline void screenshotKey(QWindow *window)
     nativeKeyEvent(window, QEvent::KeyRelease, Qt::Key_Alt, Qt::NoModifier, 56);
 }
 
-// Controlled US-letter/space fixtures only. QTest's char overload supplies an
+// Controlled US-letter/space/path fixtures only. QTest's char overload supplies an
 // uppercase text string without a physical Shift press; a compositor's XKB
 // translation can correctly turn that into lowercase. Supply the actual chord.
 inline bool typeAscii(QWindow *window, const QByteArray &text)
@@ -58,13 +69,26 @@ inline bool typeAscii(QWindow *window, const QByteArray &text)
     for (const char character : text)
     {
         const auto letter = QChar::fromLatin1(character);
-        const bool upper = character >= 'A' && character <= 'Z';
+        bool upper = character >= 'A' && character <= 'Z';
         const auto index = letters.indexOf(letter.toLower().toLatin1());
-        if (character != ' ' && index < 0)
-            return false;
-        const uint code = character == ' ' ? 57 : codes[index];
-        const auto key = character == ' ' ? Qt::Key_Space
-                                         : Qt::Key(letter.toUpper().unicode());
+        uint code;
+        Qt::Key key;
+        if (index >= 0) {
+            code = codes[index];
+            key = Qt::Key(letter.toUpper().unicode());
+        } else if (const auto digit = QByteArray("1234567890").indexOf(character); digit >= 0) {
+            code = 2 + digit;
+            key = Qt::Key(character);
+        } else {
+            switch (character) {
+            case ' ': code=57; key=Qt::Key_Space; break;
+            case '/': code=53; key=Qt::Key_Slash; break;
+            case '.': code=52; key=Qt::Key_Period; break;
+            case '-': code=12; key=Qt::Key_Minus; break;
+            case '_': code=12; key=Qt::Key_Underscore; upper=true; break;
+            default: return false;
+            }
+        }
         const auto modifiers = upper ? Qt::ShiftModifier : Qt::NoModifier;
         if (upper)
             nativeKeyEvent(window, QEvent::KeyPress, Qt::Key_Shift, modifiers, 42);

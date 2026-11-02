@@ -60,8 +60,11 @@ class LockSessionTests(unittest.TestCase):
         environment = {k: v for k, v in os.environ.items()
                        if k not in ('WAYLAND_DISPLAY', 'DISPLAY', 'SWAYSOCK', 'I3SOCK', 'XDG_SESSION_ID',
                                     'WAYLAND_SOCKET', 'QT_QPA_PLATFORM', 'QT_PLUGIN_PATH', 'QT_STYLE_OVERRIDE')}
+        renderer = os.environ.get('PLATINUM_LOCK_TEST_RENDERER', 'software')
+        if renderer not in ('software', 'opengl'):
+            raise ValueError('PLATINUM_LOCK_TEST_RENDERER must be software or opengl')
         environment.update(XDG_RUNTIME_DIR=str(cls.runtime), WLR_BACKENDS='headless', WLR_HEADLESS_OUTPUTS='2',
-                           WLR_LIBINPUT_NO_DEVICES='1', WLR_RENDERER='pixman')
+                           WLR_LIBINPUT_NO_DEVICES='1', WLR_RENDERER='pixman' if renderer == 'software' else 'gles2')
         cls.log = open(root / 'sway.txt', 'wb')
         cls.sway = subprocess.Popen(['sway', '--config', str(root / 'sway.conf')], env=environment,
                                     stdin=subprocess.DEVNULL, stdout=cls.log, stderr=subprocess.STDOUT,
@@ -74,7 +77,7 @@ class LockSessionTests(unittest.TestCase):
         display = [p for p in cls.runtime.glob('wayland-*') if p.is_socket()][0]
         cls.environment = dict(environment, WAYLAND_DISPLAY=str(display),
                                SWAYSOCK=str(next(cls.runtime.glob('sway-ipc.*.sock'))),
-                               QT_QUICK_BACKEND='software')
+                               QT_QUICK_BACKEND='software' if renderer == 'software' else 'rhi')
         for key in ('WLR_BACKENDS', 'WLR_HEADLESS_OUTPUTS', 'WLR_LIBINPUT_NO_DEVICES', 'WLR_RENDERER'):
             cls.environment.pop(key)
         # The test window (a fixed-size, so floating and centred, 320 x 240) opens on HEADLESS-1.
@@ -108,7 +111,7 @@ class LockSessionTests(unittest.TestCase):
         self.assertEqual(self.keyboard.stdout.readline().strip(), 'ok')
 
     def pixel(self, output, x, y):
-        capture = subprocess.run(['grim', '-o', output, '-t', 'ppm', '-'], env=self.environment,
+        capture = subprocess.run(['grim', '-o', output, '-s', '1', '-t', 'ppm', '-'], env=self.environment,
                                  capture_output=True, timeout=10, check=True).stdout
         fields, offset = [], 0
         while len(fields) < 4:  # P6 width height maxval, separated by whitespace
@@ -125,15 +128,34 @@ class LockSessionTests(unittest.TestCase):
 
     def locker(self, extra=(), pass_fds=()):
         reader, writer = os.pipe()
+        diagnostics = os.environ.get('PLATINUM_LOCK_TEST_EVIDENCE')
+        environment = self.environment.copy()
+        log = None
+        if diagnostics:
+            directory = Path(diagnostics)
+            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            log = (directory / (self._testMethodName + '-' + str(writer) + '-' + str(time.monotonic_ns()) + '.txt')).open('xb')
+            # Optional private-fixture trace; never set by the physical launcher.
+            # All keys here are the source's disposable test passwords.
+            if os.environ.get('PLATINUM_LOCK_TEST_TRACE') == '1':
+                environment['WAYLAND_DEBUG'] = 'client'
         # An empty disposable profile: no desktop picture, so the plain lock color is measurable.
         process = subprocess.Popen([str(BUILD / 'platinum-lock'), '--ready-fd', str(writer),
                                     '--pam-service', 'platinum-lock-test', '--pam-confdir', str(self.pam),
                                     '--profile', str(self.pam.parent / 'profile'), *extra],
-                                   env=self.environment, pass_fds=(writer, *pass_fds), stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                   env=environment, pass_fds=(writer, *pass_fds), stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.DEVNULL, stderr=log or subprocess.DEVNULL)
+        if log:
+            log.close()
         os.close(writer)
         self.addCleanup(lambda: process.poll() is None and (process.kill(), process.wait(5)))
         return process, reader
+
+    def output(self, command):
+        import json
+        result = subprocess.run(['swaymsg', '-r', command], env=self.environment,
+                                capture_output=True, text=True, timeout=10, check=True)
+        self.assertTrue(all(item.get('success') for item in json.loads(result.stdout)), result.stdout)
 
     def ready(self, reader, timeout=15):
         try:
@@ -210,11 +232,140 @@ class LockSessionTests(unittest.TestCase):
         third, reader = self.locker()
         self.assertTrue(self.ready(reader), 'A replacement locker could not take over')
         self.assertTrue(wait(lambda: self.pixel('HEADLESS-1', 5, 5) == LOCK_COLOR, 5))
+        # The ready pipe confirms secure compositor coverage, not a rendered
+        # password widget. Observe the replacement's dialog before injecting
+        # the first synthetic key burst, just as for the initial locker above.
+        self.assertTrue(wait(lambda: any(dialog(*s) == DIALOG_COLOR for s in screens), 5),
+                        'The replacement is locked but has no rendered Log In dialog')
         self.type('type correct horse')
         self.type('key return')
         self.assertEqual(third.wait(15), 0)
         self.assertTrue(wait(lambda: self.pixel('HEADLESS-1', 512, 350) == PROBE_COLOR, 5),
                         'The desktop did not return after unlocking')
+
+    def test_output_disappearance_and_return_keep_a_usable_lock(self):
+        # Sleep/docking can withdraw every wl_output, briefly leaving Qt's placeholder
+        # QScreen. Exercise that transition without suspending or touching the real seat.
+        def output(command):
+            result = subprocess.run(['swaymsg', '-r', command], env=self.environment,
+                                    capture_output=True, text=True, timeout=10, check=True)
+            import json
+            self.assertTrue(all(item.get('success') for item in json.loads(result.stdout)), result.stdout)
+
+        def restore():
+            output('output HEADLESS-1 enable resolution 1024x700 scale 1 transform normal position 0 0')
+            output('output HEADLESS-2 enable resolution 800x600 scale 1 transform normal position 1024 0')
+            output('focus output HEADLESS-1')
+
+        self.addCleanup(restore)
+        process, reader = self.locker()
+        self.assertTrue(self.ready(reader), 'The lock was not confirmed')
+        self.assertTrue(wait(lambda: self.pixel('HEADLESS-1', 5, 5) == LOCK_COLOR, 5))
+        def dialog_present():
+            return any(self.pixel(name, x, y) == DIALOG_COLOR for name, x, y in
+                       (('HEADLESS-1', 302, 450), ('HEADLESS-2', 190, 400)))
+        self.assertTrue(wait(dialog_present, 5), 'The initial lock has no dialog on either screen')
+        output('output * power off')
+        time.sleep(0.3)
+        output('output * power on')
+        self.assertTrue(wait(dialog_present, 5),
+                        'The Log In dialog did not return after output power cycling')
+        output('output HEADLESS-1 disable')
+        self.assertTrue(wait(lambda: self.pixel('HEADLESS-2', 5, 5) == LOCK_COLOR, 5))
+        output('output HEADLESS-2 disable')
+        time.sleep(0.3)  # Allow the client to receive both removed globals and the placeholder.
+        self.assertIsNone(process.poll(), 'Losing all displays killed the locker')
+        output('output HEADLESS-1 enable resolution 1024x700 scale 1 transform normal position 0 0')
+        self.assertTrue(wait(lambda: self.pixel('HEADLESS-1', 5, 5) == LOCK_COLOR, 5),
+                        'The returning screen has no lock surface')
+        # A colored background alone is not a usable lock: assert the dialog and real
+        # keyboard authentication return, without releasing ext-session-lock between them.
+        self.assertTrue(wait(lambda: self.pixel('HEADLESS-1', 302, 450) == DIALOG_COLOR, 5),
+                        'The returning screen has no usable Log In dialog')
+        # The laptop panel also returns with its own rotation and fractional scale.
+        # grim's explicit scale makes these pixel assertions use logical coordinates.
+        output('output HEADLESS-1 resolution 1610x2300 transform 270 scale 2.3 position 0 0')
+        self.assertTrue(wait(lambda: self.pixel('HEADLESS-1', 290, 450) == DIALOG_COLOR, 5),
+                        'The rotated 2.3x screen lost its Log In dialog')
+        self.type('type wrong horse')
+        self.type('key return')
+        time.sleep(1.5)
+        self.assertIsNone(process.poll(), 'A wrong password released the returning display')
+        self.type('type correct horse')
+        self.type('key return')
+        self.assertEqual(process.wait(15), 0)
+        self.assertTrue(wait(lambda: self.pixel('HEADLESS-1', 512, 350) == PROBE_COLOR, 5),
+                        'The desktop did not return after authenticating on the returned screen')
+
+    def test_replacement_without_outputs_authenticates_on_returning_external(self):
+        # The resume replacement can start before a sleeping dock exports any
+        # wl_output. It must survive Qt's placeholder and draw on the external
+        # screen when that alone returns; process/readiness alone are not enough.
+        def restore():
+            self.output('output HEADLESS-1 enable resolution 1024x700 scale 1 transform normal position 0 0')
+            self.output('output HEADLESS-2 enable resolution 800x600 scale 1 transform normal position 1024 0')
+            self.output('focus output HEADLESS-1')
+
+        self.addCleanup(restore)
+        first, reader = self.locker()
+        self.assertTrue(self.ready(reader))
+        self.assertTrue(wait(lambda: self.pixel('HEADLESS-2', 5, 5) == LOCK_COLOR, 5))
+        first.kill()
+        first.wait(5)
+        self.output('output HEADLESS-1 disable')
+        self.output('output HEADLESS-2 disable')
+        time.sleep(0.3)
+        replacement, reader = self.locker()
+        self.assertTrue(self.ready(reader), 'The no-output replacement did not acquire the abandoned lock')
+        time.sleep(0.4)
+        self.assertIsNone(replacement.poll(), 'A replacement exited without authentication while no outputs existed')
+        self.output('output HEADLESS-2 enable resolution 900x680 scale 1 transform normal position 0 0')
+        self.assertTrue(wait(lambda: self.pixel('HEADLESS-2', 240, 440) == DIALOG_COLOR, 5),
+                        'The external display returned without a usable Log In dialog')
+        self.type('type wrong horse')
+        self.type('key return')
+        time.sleep(1.5)
+        self.assertIsNone(replacement.poll(), 'A wrong password unlocked the returning external display')
+        self.assertEqual(self.pixel('HEADLESS-2', 5, 5), LOCK_COLOR)
+        self.type('type correct horse')
+        self.type('key return')
+        self.assertEqual(replacement.wait(15), 0)
+
+    def test_focused_panel_disappears_but_external_still_accepts_authentication(self):
+        # Unlike losing every output, a docked laptop may remove only the
+        # focused panel. The surviving external must show a dialog and accept
+        # actual keys, rather than leaving a wallpaper-only locked surface.
+        def restore():
+            self.output('output HEADLESS-1 enable resolution 1024x700 scale 1 transform normal position 0 0')
+            self.output('output HEADLESS-2 enable resolution 800x600 scale 1 transform normal position 1024 0')
+            self.output('focus output HEADLESS-1')
+
+        self.addCleanup(restore)
+        self.output('focus output HEADLESS-1')
+        process, reader = self.locker()
+        self.assertTrue(self.ready(reader))
+        self.assertTrue(wait(lambda: self.pixel('HEADLESS-1', 5, 5) == LOCK_COLOR, 5))
+        # The compositor chooses the initial lock-surface keyboard focus. Read
+        # the actual dialog location instead of assuming a focus-output command
+        # is a lock-surface activation request. Either output represents the
+        # focused panel that is about to disappear.
+        screens = (('HEADLESS-1', 302, 450), ('HEADLESS-2', 190, 400))
+        def focused_output():
+            shown = [name for name, x, y in screens if self.pixel(name, x, y) == DIALOG_COLOR]
+            return shown[0] if len(shown) == 1 else None
+        focused = wait(focused_output, 5)
+        self.assertIsNotNone(focused, 'The initial lock has no single focused dialog')
+        survivor, x, y = next(s for s in screens if s[0] != focused)
+        self.output('output ' + focused + ' disable')
+        self.assertTrue(wait(lambda: self.pixel(survivor, x, y) == DIALOG_COLOR, 5),
+                        'Removing the focused panel left only the wallpaper on the external')
+        self.type('type wrong horse')
+        self.type('key return')
+        time.sleep(1.5)
+        self.assertIsNone(process.poll(), 'A wrong password unlocked the external display')
+        self.type('type correct horse')
+        self.type('key return')
+        self.assertEqual(process.wait(15), 0)
 
 
 if __name__ == '__main__':

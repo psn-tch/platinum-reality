@@ -17,6 +17,9 @@ import subprocess
 import tempfile
 import time
 
+# Never access the host HTTP daemon during installed-production-path checks.
+os.environ["PLATINUM_DISABLE_HOST_HANDHELD"] = "1"
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--launcher', type=Path, required=True)
 parser.add_argument('--evidence', type=Path, required=True)
@@ -55,10 +58,12 @@ def wait(predicate, child, timeout=20):
     raise AssertionError('Timed out; inspect evidence')
 
 
-def supervise(name, stage_launcher, fixture, environment):
+def supervise(name, stage_launcher, fixture, environment, *, saved_display_mode=False):
     arguments = ['python3', '-B', str(project / 'scripts/standalone-session.py'), '--nested-check',
                  '--start-locked', '--launcher', str(stage_launcher), '--evidence', str(evidence / name),
                  '--workspace', str(fixture / 'Workspace'), '--profile', str(fixture / 'Profile')]
+    if saved_display_mode:
+        arguments.append('--single-output')
     log = (evidence / (name + '-supervisor.txt')).open('wb')
     return subprocess.Popen(arguments, env=environment, stdout=log, stderr=subprocess.STDOUT), log
 
@@ -136,6 +141,27 @@ with tempfile.TemporaryDirectory(prefix='platinum-login-check-') as temporary:
     state = read(evidence / 'kde/session.json')
     assert state['login_session'] == 'kde' and 'launcher_pid' not in state and state['runtime_removed'], state
     checks['kde_choice_ends_supervisor_before_any_desktop'] = True
+
+    # The real login asks for single-output, then the profile may opt into Extend.
+    # Choosing KDE before Platinum maps must leave that wrapper with exit10 once,
+    # not silently prompt again in its one-display startup-recovery path.
+    profile = fixture / 'Profile'
+    profile.mkdir(exist_ok=True)
+    (profile / 'displays.json').write_text('{"version":1,"mode":"extend"}\n')
+    child, log = supervise('kde-extended', stage / 'bin/platinum-reality', fixture, environment,
+                           saved_display_mode=True)
+    try:
+        assert child.wait(timeout=30) == session.KDE_SESSION_EXIT
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=10)
+        log.close()
+    state = read(evidence / 'kde-extended/session.json')
+    assert state['login_session'] == 'kde' and 'launcher_pid' not in state and state['runtime_removed'], state
+    assert not (evidence / 'kde-extended-one-display').exists(), 'Authenticated KDE choice reran Log In'
+    checks['extended_kde_choice_preserves_exit_code_without_second_log_in'] = True
+    (profile / 'displays.json').unlink()
 
     # 3. Both Log Ins fail: the session ends, never a desktop (and never a shell: the caller exits).
     stand_in('sys.exit(1)\n')

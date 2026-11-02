@@ -46,7 +46,7 @@ def main():
     # The real places only for the real home (an explicit --workspace, as in tests, keeps the
     # profile's own Trash): the Trash shared with other file managers, and mounted drives.
     places = [] if options.workspace else ["--trash", str(data / "Trash"),
-                                           "--volume", "/run/media/" + getpass.getuser()]
+                                           "--volume", "/run/media/" + getpass.getuser(), "--whole-computer"]
     environment = os.environ.copy()
     wallet_requested = wallet_login_requested(environment, options.private_application_settings)
     # Consume the supervisor's allowance. A launcher started by an application must not

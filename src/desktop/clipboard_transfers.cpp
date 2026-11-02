@@ -15,6 +15,7 @@ struct ClipboardTransfers::Control
 {
     Limits limits;
     std::atomic<unsigned> active{0};
+    std::atomic<quint64> bytes{0};
     std::atomic<bool> cancelled{false};
 };
 struct ClipboardTransfers::Job
@@ -30,11 +31,13 @@ ClipboardTransfers::ClipboardTransfers(Limits limits) : m_control(std::make_shar
     limits.maxConcurrent = std::max(1u, limits.maxConcurrent);
     limits.idleTimeoutMs = std::max(1, limits.idleTimeoutMs);
     limits.totalTimeoutMs = std::max(1, limits.totalTimeoutMs);
+    limits.maxBytes = std::max<quint64>(1, limits.maxBytes);
     m_control->limits = limits;
 }
 ClipboardTransfers::~ClipboardTransfers() { cancel(); }
 void ClipboardTransfers::cancel() { m_control->cancelled.store(true); }
 unsigned ClipboardTransfers::active() const { return m_control->active.load(); }
+quint64 ClipboardTransfers::activeBytes() const { return m_control->bytes.load(); }
 
 bool ClipboardTransfers::submit(int fd, QByteArray bytes)
 {
@@ -56,8 +59,17 @@ bool ClipboardTransfers::submit(int fd, QByteArray bytes)
         if (count >= m_control->limits.maxConcurrent)
             return fail();
     } while (!m_control->active.compare_exchange_weak(count, count + 1));
+    const auto size = quint64(bytes.size());
+    auto held = m_control->bytes.load();
+    do {
+        if (size > m_control->limits.maxBytes - held) {
+            --m_control->active;
+            return fail();
+        }
+    } while (!m_control->bytes.compare_exchange_weak(held, held + size));
     auto *job = new (std::nothrow) Job{m_control, fd, std::move(bytes)};
     if (!job) {
+        m_control->bytes.fetch_sub(size);
         --m_control->active;
         return fail();
     }
@@ -75,6 +87,7 @@ bool ClipboardTransfers::submit(int fd, QByteArray bytes)
         pthread_attr_destroy(&attributes);
     if (error) {
         delete job;
+        m_control->bytes.fetch_sub(size);
         --m_control->active;
         return fail();
     }
@@ -123,6 +136,9 @@ void *ClipboardTransfers::run(void *argument)
         const timespec immediate{0,0};
         while (sigtimedwait(&pipe, nullptr, &immediate) > 0) {}
     }
+    const auto size = quint64(job->bytes.size());
+    job->bytes.clear();
+    control->bytes.fetch_sub(size);
     --control->active;
     return nullptr;
 }

@@ -195,6 +195,21 @@ class WalletSupportTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2, result.stderr)
             self.assertFalse(marker.exists())
 
+    def test_the_qualifier_sees_a_process_reaped_while_it_looks(self):
+        # Gate 23 (2026-10-30): the process exited between kill(0) and reading /proc/PID/stat,
+        # which then fails with ESRCH; that is a process that is gone, not a qualification error.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "qualify_wallet", Path(__file__).resolve().parents[1] / "scripts/qualify-wallet.py")
+        qualifier = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(qualifier)
+        with mock.patch.object(qualifier.os, "kill"), \
+                mock.patch.object(Path, "read_text", side_effect=ProcessLookupError(3, "No such process")):
+            self.assertTrue(qualifier.absent(12345))
+        with mock.patch.object(qualifier.os, "kill"), \
+                mock.patch.object(Path, "read_text", return_value="1 (sleep) S 1"):
+            self.assertFalse(qualifier.absent(12345))
+
 
 if __name__ == "__main__":
     unittest.main()

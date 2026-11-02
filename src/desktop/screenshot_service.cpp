@@ -1,4 +1,8 @@
 #include "screenshot_service.hpp"
+#include <QBuffer>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QMimeData>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -120,6 +124,21 @@ bool ScreenshotService::save(QString path)
         output.remove();
         return fail("The screenshot could not be saved: " + message);
     }
+    m_error.clear();
+    emit changed();
+    return true;
+}
+bool ScreenshotService::copy()
+{
+    if (m_data->image.isNull() || m_selection.isEmpty())
+        return fail("Take a screenshot first.");
+    QByteArray png;
+    QBuffer buffer(&png);
+    if (!buffer.open(QIODevice::WriteOnly) || !m_data->image.copy(m_selection).save(&buffer, "PNG"))
+        return fail("The screenshot could not be copied.");
+    auto *data = new QMimeData;
+    data->setData("image/png", png);
+    QGuiApplication::clipboard()->setMimeData(data); // The desktop's clipboard offers it to applications.
     m_error.clear();
     emit changed();
     return true;

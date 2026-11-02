@@ -3,6 +3,7 @@
 #include <QDBusMetaType>
 #include <QDBusPendingCallWatcher>
 #include <QDBusServiceWatcher>
+#include <QNetworkInterface>
 #include <QRegularExpression>
 #include <QSet>
 
@@ -535,4 +536,35 @@ void WifiService::propertiesChanged(const QString &interface, const QVariantMap 
         m_refresh.start();
     if (visible)
         scheduleChanged();
+}
+
+QVariantList WifiService::connections() const
+{
+    QVariantList result;
+    for (const auto &interface : QNetworkInterface::allInterfaces())
+    {
+        const auto flags = interface.flags();
+        if (!flags.testFlag(QNetworkInterface::IsUp) || !flags.testFlag(QNetworkInterface::IsRunning) ||
+            flags.testFlag(QNetworkInterface::IsLoopBack))
+            continue;
+        QVariantList addresses;
+        for (const auto &entry : interface.addressEntries())
+        {
+            const auto ip = entry.ip();
+            // Link-local IPv6 addresses (fe80::) say nothing useful about the connection.
+            if (ip.isNull() || ip.isLinkLocal())
+                continue;
+            addresses.append(QVariantMap{{"address", ip.toString()},
+                                         {"version", ip.protocol() == QAbstractSocket::IPv6Protocol ? 6 : 4}});
+        }
+        if (addresses.isEmpty())
+            continue;
+        const auto type = interface.type();
+        result.append(QVariantMap{{"name", interface.humanReadableName()},
+                                  {"kind", type == QNetworkInterface::Wifi ? "Wi-Fi"
+                                           : type == QNetworkInterface::Ethernet ? "Ethernet" : "Other"},
+                                  {"hardware", interface.hardwareAddress()},
+                                  {"addresses", addresses}});
+    }
+    return result;
 }

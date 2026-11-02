@@ -1,7 +1,9 @@
 import QtQuick
 import QtQuick.Controls
 
-ShellDialog {
+// Quick Controls: the Control Strip's switches gathered in one place, a panel of the Control
+// Panels window. The strip reads its values from here (values, service).
+Item {
     id: controls
     // The Appearance sound track (InterfaceSounds); silent without the user's own import.
     function themeSound(tag) { if (typeof manager !== "undefined" && manager && manager.interfaceSounds) manager.interfaceSounds.play(tag) }
@@ -10,13 +12,22 @@ ShellDialog {
     property var bluetooth: null
     readonly property bool bluetoothReady: Boolean(bluetooth) && bluetooth.available
     objectName: "quick-controls"
-    title: "Control Strip"
-    width: 350
-    standardButtons: Dialog.Close
+    readonly property string panelId: "quick-controls"
+    readonly property string title: "Quick Controls"
+    readonly property string glyph: "status"
+    // Set by the Control Panels window: it, and whether this panel is the one on screen.
+    property var host: null
+    property bool shown: false
+    readonly property bool opened: shown
+    width: parent ? parent.width : 350
+    implicitHeight: body.implicitHeight
     property var values: service.state
-    function showControls() { open(); service.refresh() }
+    function showControls() { if (host) host.show(panelId) }
+    onShownChanged: if (shown) service.refresh()
     function item(name) { return values[name] || ({available:false}) }
-    contentItem: Column {
+    Column {
+        id: body
+        width: parent.width
         spacing: 12
         Text {text:"Quick settings";font.pixelSize:12;color:"#111"}
         Repeater {

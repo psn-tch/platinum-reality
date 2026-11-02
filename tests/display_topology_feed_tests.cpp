@@ -60,6 +60,61 @@ class DisplayTopologyFeedTests final:public QObject
         output["x"]=500;outputs[1]=output;object["outputs"]=outputs;
         QVERIFY(!parseDisplaySnapshot(QJsonDocument(object).toJson()));
     }
+    void managedSessionsNameMonitorsAndListDisplaysThatAreOff()
+    {
+        // The Monitors panel's details are optional: an unmanaged snapshot has none.
+        auto plain=parseDisplaySnapshot(golden);
+        QVERIFY(plain && !plain->details.managed && plain->details.available.isEmpty() && !plain->details.pending);
+        auto object=document();
+        object["labels"]=QJsonObject{{"HEADLESS-1","PM1561P"},{"HEADLESS-2","Built-in panel"}};
+        object["available"]=QJsonArray{QJsonObject{{"name","HDMI-A-1"},{"label","Samsung"},{"lid_closed",false}},
+                                       QJsonObject{{"name","eDP-1"},{"label","eDP-1"},{"lid_closed",true}}};
+        object["pending"]=true;
+        QString error;
+        auto managed=parseDisplaySnapshot(QJsonDocument(object).toJson(),&error);
+        QVERIFY2(managed,qPrintable(error));
+        QVERIFY(managed->details.managed && managed->details.pending);
+        QCOMPARE(managed->details.labels.value("HEADLESS-1").toString(),QString("PM1561P"));
+        QCOMPARE(managed->details.available.size(),2);
+        QCOMPARE(managed->details.available[1].toMap().value("lidClosed").toBool(),true);
+        // Bad names, an "off" display that is also on, a non-boolean flag: the whole snapshot is refused.
+        const auto refused=[&](const char *key,const QJsonValue &value){
+            auto bad=object; bad[key]=value;
+            return !parseDisplaySnapshot(QJsonDocument(bad).toJson());
+        };
+        QVERIFY(refused("labels",QJsonObject{{"DP-1; exit","x"}}));
+        QVERIFY(refused("labels",QJsonObject{{"DP-1",QString(65,'x')}}));
+        QVERIFY(refused("labels",QJsonArray{}));
+        QVERIFY(refused("available",QJsonArray{QJsonObject{{"name","HEADLESS-1"},{"label","on"},{"lid_closed",false}}}));
+        QVERIFY(refused("available",QJsonArray{QJsonObject{{"name","DP-9"},{"label","x"}}}));
+        QVERIFY(refused("available",QJsonObject{}));
+        QVERIFY(refused("pending",1));
+    }
+    void mirroringShowsTheMainDisplayInsideABiggerCanvas()
+    {
+        auto object=document();
+        object["outputs"]=QJsonArray{QJsonObject{{"name","DP-2"},{"x",0},{"y",40},{"width",1280},{"height",720},
+                                                 {"scale",1.5},{"transform","normal"}}};
+        object["primary"]="DP-2";
+        object["canvas"]=QJsonObject{{"width",1280},{"height",800}};
+        object["labels"]=QJsonObject{{"DP-2","PM1561P"}};
+        object["mirrors"]=QJsonArray{QJsonObject{{"name","eDP-1"},{"label","eDP-1"}}};
+        QString error;
+        const auto snapshot=parseDisplaySnapshot(QJsonDocument(object).toJson(),&error);
+        QVERIFY2(snapshot,qPrintable(error));
+        QCOMPARE(snapshot->layout.hostBounds(),QRect(0,0,1280,800));
+        QCOMPARE(snapshot->layout.primaryRect(),QRect(0,40,1280,720)); // Not moved to the canvas origin.
+        QCOMPARE(snapshot->details.mirrors.size(),1);
+        // The display must lie inside the canvas; mirrors need a canvas and cannot also be screens.
+        auto bad=object; bad["canvas"]=QJsonObject{{"width",1280},{"height",700}};
+        QVERIFY(!parseDisplaySnapshot(QJsonDocument(bad).toJson()));
+        bad=object; bad.remove("canvas");
+        QVERIFY(!parseDisplaySnapshot(QJsonDocument(bad).toJson()));
+        bad=object; bad["mirrors"]=QJsonArray{QJsonObject{{"name","DP-2"},{"label","x"}}};
+        QVERIFY(!parseDisplaySnapshot(QJsonDocument(bad).toJson()));
+        bad=object; bad["canvas"]=QJsonObject{{"width",99999},{"height",800}};
+        QVERIFY(!parseDisplaySnapshot(QJsonDocument(bad).toJson()));
+    }
     void invalidOrStaleUpdatesRetainTheLastGoodLayout()
     {
         QTemporaryDir directory;

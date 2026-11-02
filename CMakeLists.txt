@@ -7,16 +7,18 @@ set(CMAKE_AUTORCC ON)
 find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets DBus Test Quick Qml WaylandCompositor Concurrent Network)
 # Pointer capture needs the host wl_surface of the desktop window and wl_region contents, and
 # precise scrolling needs the clients' wl_pointer resources. All are private Qt API, confined to
-# src/desktop/host_pointer.cpp, pointer_constraints.cpp and client_surface_item.cpp.
-find_package(Qt6 REQUIRED COMPONENTS GuiPrivate WaylandCompositorPrivate)
+# src/desktop/host_pointer.cpp, pointer_constraints.cpp and client_surface_item.cpp. Qt Quick's is
+# used only in client_surface_item.cpp (a stale event-bounds cache; see forgetChildBounds).
+find_package(Qt6 REQUIRED COMPONENTS GuiPrivate WaylandCompositorPrivate QuickPrivate)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(WAYLAND_SERVER REQUIRED IMPORTED_TARGET wayland-server>=1.26)
 pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client)
 pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
+find_package(OpenGL REQUIRED COMPONENTS EGL)
 add_library(frankenstein-applications src/applications/desktop_entry.cpp src/applications/desktop_entry.hpp src/applications/application_catalog.cpp src/applications/application_catalog.hpp src/applications/launch_environment.cpp src/applications/launch_environment.hpp)
 target_sources(frankenstein-applications PRIVATE src/applications/application_appearance.cpp src/applications/application_appearance.hpp)
 target_sources(frankenstein-applications PRIVATE src/applications/emulator_launch.cpp src/applications/emulator_launch.hpp)
-qt_add_resources(frankenstein-applications application_appearance PREFIX "/application-appearance" FILES src/appearance/gtk-platinum.css src/appearance/firefox-userChrome.css)
+qt_add_resources(frankenstein-applications application_appearance PREFIX "/application-appearance" FILES src/appearance/gtk-platinum.css src/appearance/gtk3-platinum.css src/appearance/platinum-scroll-up.svg src/appearance/platinum-scroll-up-idle.svg src/appearance/platinum-scroll-down.svg src/appearance/platinum-scroll-down-idle.svg src/appearance/platinum-scroll-left.svg src/appearance/platinum-scroll-left-idle.svg src/appearance/platinum-scroll-right.svg src/appearance/platinum-scroll-right-idle.svg src/appearance/firefox-userChrome.css)
 target_include_directories(frankenstein-applications PUBLIC src)
 set_source_files_properties(src/applications/desktop_entry.cpp PROPERTIES COMPILE_DEFINITIONS QT_NO_KEYWORDS)
 target_link_libraries(frankenstein-applications PUBLIC Qt6::Core Qt6::Concurrent PRIVATE PkgConfig::GIO)
@@ -53,6 +55,7 @@ platinum_wayland_protocol(xdg-activation ${WAYLAND_PROTOCOLS_DIR}/staging/xdg-ac
 platinum_wayland_protocol(xdg-system-bell ${WAYLAND_PROTOCOLS_DIR}/staging/xdg-system-bell/xdg-system-bell-v1.xml)
 platinum_wayland_protocol(primary-selection ${WAYLAND_PROTOCOLS_DIR}/unstable/primary-selection/primary-selection-unstable-v1.xml)
 platinum_wayland_protocol(ext-data-control ${WAYLAND_PROTOCOLS_DIR}/staging/ext-data-control/ext-data-control-v1.xml)
+platinum_wayland_protocol(gtk-shell ${CMAKE_CURRENT_SOURCE_DIR}/src/desktop/protocols/gtk-shell-v1.xml)
 platinum_wayland_protocol(ext-session-lock ${WAYLAND_PROTOCOLS_DIR}/staging/ext-session-lock/ext-session-lock-v1.xml)
 # Test driver only. Copied from wayland-protocols-wlr 0.3.9 (wlr-protocols), SHA-256
 # 3ff6d540be0bc5228195bf072bde42117ea17945a5c2061add5d3cf97d6bb524; see docs/relative-pointer-plan.md.
@@ -62,6 +65,7 @@ platinum_wayland_protocol(virtual-keyboard ${CMAKE_CURRENT_SOURCE_DIR}/tests/pro
 add_library(frankenstein-desktop src/desktop/manager.cpp src/desktop/manager.hpp src/desktop/desktop_items.cpp src/desktop/desktop_items.hpp src/desktop/client_surface_item.cpp src/desktop/client_surface_item.hpp src/desktop/menu_bridge.cpp src/desktop/menu_bridge.hpp src/desktop/menu_broker.cpp src/desktop/menu_broker.hpp ${CMAKE_CURRENT_BINARY_DIR}/appmenu-server.h ${CMAKE_CURRENT_BINARY_DIR}/appmenu-protocol.c)
 target_sources(frankenstein-desktop PRIVATE src/desktop/document_service.cpp src/desktop/document_service.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/appearance_settings.cpp src/desktop/appearance_settings.hpp)
+target_sources(frankenstein-desktop PRIVATE src/desktop/input_settings.cpp src/desktop/input_settings.hpp src/desktop/energy_settings.cpp src/desktop/energy_settings.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/keyboard_broadcast.cpp src/desktop/keyboard_broadcast.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/clipboard.cpp src/desktop/clipboard.hpp)
 find_package(Threads REQUIRED)
@@ -70,6 +74,11 @@ target_include_directories(platinum-clipboard-transfers PUBLIC ${CMAKE_CURRENT_S
 target_link_libraries(platinum-clipboard-transfers PUBLIC Qt6::Core PRIVATE Threads::Threads)
 target_compile_options(platinum-clipboard-transfers PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(frankenstein-desktop PRIVATE platinum-clipboard-transfers)
+add_library(platinum-clipboard-reader src/desktop/clipboard_reader.cpp src/desktop/clipboard_reader.hpp)
+target_include_directories(platinum-clipboard-reader PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(platinum-clipboard-reader PUBLIC Qt6::Core)
+target_compile_options(platinum-clipboard-reader PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(frankenstein-desktop PRIVATE platinum-clipboard-reader)
 target_sources(frankenstein-desktop PRIVATE src/desktop/command_keys.cpp src/desktop/command_keys.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/screenshot_service.cpp src/desktop/screenshot_service.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/system_controls.cpp src/desktop/system_controls.hpp)
@@ -77,7 +86,8 @@ target_sources(frankenstein-desktop PRIVATE src/desktop/output_geometry.cpp src/
 target_sources(frankenstein-desktop PRIVATE src/desktop/display_layout.cpp src/desktop/display_layout.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/popup_placement.cpp src/desktop/popup_placement.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/display_topology_feed.cpp src/desktop/display_topology_feed.hpp)
-target_sources(frankenstein-desktop PRIVATE src/desktop/dmabuf_formats.cpp src/desktop/graphics_integration.hpp)
+target_sources(frankenstein-desktop PRIVATE src/desktop/dmabuf_formats.cpp src/desktop/graphics_integration.cpp src/desktop/graphics_integration.hpp)
+target_link_libraries(frankenstein-desktop PRIVATE OpenGL::EGL)
 target_sources(frankenstein-desktop PRIVATE src/desktop/x11_bridge.cpp src/desktop/x11_bridge.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/wallet_activation.cpp src/desktop/wallet_activation.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/host_pointer.cpp src/desktop/host_pointer.hpp
@@ -87,6 +97,8 @@ target_sources(frankenstein-desktop PRIVATE src/desktop/host_pointer.cpp src/des
                src/desktop/session_control.cpp src/desktop/session_control.hpp
                src/desktop/power_control.cpp src/desktop/power_control.hpp
                src/desktop/removable_media.cpp src/desktop/removable_media.hpp
+               src/desktop/handheld.cpp src/desktop/handheld.hpp
+               src/desktop/scroll_bar_art.cpp src/desktop/scroll_bar_art.hpp
                src/desktop/icon_store.cpp src/desktop/icon_store.hpp
                src/desktop/notifications.cpp src/desktop/notifications.hpp
                src/desktop/bluetooth.cpp src/desktop/bluetooth.hpp
@@ -109,6 +121,8 @@ target_sources(frankenstein-desktop PRIVATE src/desktop/host_pointer.cpp src/des
                src/desktop/primary_selection.cpp src/desktop/primary_selection.hpp
                ${PLATINUM_PROTOCOLS}/primary-selection-server.h ${PLATINUM_PROTOCOLS}/primary-selection-protocol.c
                src/desktop/data_control.cpp src/desktop/data_control.hpp
+               src/desktop/gtk_shell.cpp src/desktop/gtk_shell.hpp
+               ${PLATINUM_PROTOCOLS}/gtk-shell-server.h ${PLATINUM_PROTOCOLS}/gtk-shell-protocol.c
                ${PLATINUM_PROTOCOLS}/ext-data-control-server.h ${PLATINUM_PROTOCOLS}/ext-data-control-protocol.c)
 # Explicit user-local, provenance-recorded dependency. Configuration never
 # downloads or builds third-party code. See scripts/build-x11-bridge.py.
@@ -144,11 +158,11 @@ configure_file(src/desktop/system_controls.py system_controls.py COPYONLY)
 configure_file(src/desktop/audio_controls.py audio_controls.py COPYONLY)
 target_sources(frankenstein-desktop PRIVATE src/desktop/audio_service.cpp src/desktop/audio_service.hpp)
 target_include_directories(frankenstein-desktop PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(frankenstein-desktop PUBLIC frankenstein-policy frankenstein-applications Qt6::Quick Qt6::Qml Qt6::DBus Qt6::WaylandCompositor PRIVATE PkgConfig::WAYLAND_SERVER PkgConfig::WAYLAND_CLIENT Qt6::GuiPrivate Qt6::WaylandCompositorPrivate Qt6::Network)
+target_link_libraries(frankenstein-desktop PUBLIC frankenstein-policy frankenstein-applications Qt6::Quick Qt6::Qml Qt6::DBus Qt6::WaylandCompositor PRIVATE PkgConfig::WAYLAND_SERVER PkgConfig::WAYLAND_CLIENT Qt6::GuiPrivate Qt6::WaylandCompositorPrivate Qt6::QuickPrivate Qt6::Network)
 target_include_directories(frankenstein-desktop PRIVATE ${PLATINUM_PROTOCOLS})
 target_compile_options(frankenstein-desktop PRIVATE -Wall -Wextra -Wpedantic)
-qt_add_resources(frankenstein-desktop desktop-assets PREFIX "/desktop" FILES src/desktop/Desktop.qml src/desktop/ClientSurface.qml src/desktop/DesktopIcon.qml src/desktop/MenuGlyph.qml src/desktop/ShellDialog.qml src/desktop/PlatinumButton.qml src/desktop/TitleBox.qml src/desktop/titlebar/close-active.svg src/desktop/titlebar/close-pressed.svg src/desktop/titlebar/close-inactive.svg src/desktop/titlebar/zoom-active.svg src/desktop/titlebar/zoom-pressed.svg src/desktop/titlebar/zoom-inactive.svg src/desktop/titlebar/shade-active.svg src/desktop/titlebar/shade-pressed.svg src/desktop/titlebar/shade-inactive.svg src/desktop/PlatinumCheckBox.qml src/desktop/ApplicationBrowser.qml src/desktop/NotificationAlerts.qml src/desktop/MonitorsPanel.qml src/desktop/InfoWindow.qml src/desktop/ClipboardWindow.qml)
-qt_add_resources(frankenstein-desktop appearance-assets PREFIX "/desktop" FILES src/desktop/WindowRoll.qml src/desktop/AppearanceDialog.qml src/desktop/ControlStrip.qml src/desktop/StripGlyph.qml)
+qt_add_resources(frankenstein-desktop desktop-assets PREFIX "/desktop" FILES src/desktop/Desktop.qml src/desktop/ClientSurface.qml src/desktop/DesktopIcon.qml src/desktop/MenuGlyph.qml src/desktop/ShellDialog.qml src/desktop/PlatinumButton.qml src/desktop/TitleBox.qml src/desktop/titlebar/close-active.svg src/desktop/titlebar/close-pressed.svg src/desktop/titlebar/close-inactive.svg src/desktop/titlebar/zoom-active.svg src/desktop/titlebar/zoom-pressed.svg src/desktop/titlebar/zoom-inactive.svg src/desktop/titlebar/shade-active.svg src/desktop/titlebar/shade-pressed.svg src/desktop/titlebar/shade-inactive.svg src/desktop/PlatinumCheckBox.qml src/desktop/PlatinumRadioButton.qml src/desktop/ApplicationBrowser.qml src/desktop/NotificationAlerts.qml src/desktop/MonitorsPanel.qml src/desktop/InfoWindow.qml src/desktop/ClipboardWindow.qml src/desktop/HelpWindow.qml src/desktop/ControlPanelsWindow.qml src/desktop/NetworkPanel.qml src/desktop/DateTimePanel.qml src/desktop/KeyboardPanel.qml src/desktop/EnergySaverPanel.qml src/desktop/MousePanel.qml src/desktop/PlatinumSlider.qml src/desktop/FieldBackground.qml)
+qt_add_resources(frankenstein-desktop appearance-assets PREFIX "/desktop" FILES src/desktop/WindowRoll.qml src/desktop/AppearanceDialog.qml src/desktop/ControlStrip.qml src/desktop/StripGlyph.qml src/desktop/PlatinumScrollBar.qml)
 qt_add_resources(frankenstein-desktop picture-assets PREFIX "/desktop" FILES src/desktop/DesktopPictureDialog.qml)
 qt_add_resources(frankenstein-desktop screenshot-assets PREFIX "/desktop" FILES src/desktop/ScreenshotDialog.qml)
 qt_add_resources(frankenstein-desktop controls-assets PREFIX "/desktop" FILES src/desktop/QuickControls.qml)
@@ -167,7 +181,7 @@ target_include_directories(frankenstein-files PUBLIC src)
 # backend instead of relying on a fragile include order.
 target_compile_definitions(frankenstein-files PRIVATE QT_NO_KEYWORDS)
 target_link_libraries(frankenstein-files PUBLIC Qt6::Core PRIVATE PkgConfig::GIO)
-target_link_libraries(frankenstein-desktop PRIVATE frankenstein-files Qt6::Concurrent)
+target_link_libraries(frankenstein-desktop PRIVATE frankenstein-files frankenstein-appearance Qt6::Concurrent)
 add_library(frankenstein-appearance STATIC src/finder/platinum_style.cpp src/finder/platinum_style.hpp)
 set_target_properties(frankenstein-appearance PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(frankenstein-appearance PUBLIC src)
@@ -191,6 +205,15 @@ target_compile_options(frankenstein-puzzle-ui PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(frankenstein-puzzle src/puzzle/main.cpp)
 target_link_libraries(frankenstein-puzzle PRIVATE frankenstein-puzzle-ui)
 add_dependencies(frankenstein frankenstein-puzzle)
+# Install Platinum Reality: the installation disk's installer window. The install engine does
+# the disk work (distro/installer-engine).
+add_library(platinum-installer-ui src/installer/engine_client.cpp src/installer/engine_client.hpp
+            src/installer/installer_window.cpp src/installer/installer_window.hpp)
+target_include_directories(platinum-installer-ui PUBLIC src)
+target_link_libraries(platinum-installer-ui PUBLIC frankenstein-appearance Qt6::Widgets)
+target_compile_options(platinum-installer-ui PRIVATE -Wall -Wextra -Wpedantic)
+add_executable(platinum-reality-installer src/installer/main.cpp)
+target_link_libraries(platinum-reality-installer PRIVATE platinum-installer-ui)
 add_dependencies(frankenstein frankenstein-finder frankenstein-editor frankenstein-style frankenstein-drop-receiver)
 
 # The Platinum screen lock (Mac OS 9.2.2 Log In style) for the session supervisor. PAM decides
@@ -252,8 +275,23 @@ install(FILES packaging/platinum-reality.svg DESTINATION "${CMAKE_INSTALL_DATADI
 install(FILES docs/install.md docs/first-session.md docs/x11-integration.md DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 install(FILES LICENSE packaging/NOTICE
         DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/platinum-reality")
+# Install Platinum Reality (the installation disk's installer). The live ISO puts the launcher on
+# its desktop and supplies /usr/bin/platinum-reality-install (the engine); installed systems
+# have no launcher for it.
+# The Platinum Log In for SDDM, on installed systems (docs/sddm-theme.md); selected by the installer.
+install(DIRECTORY packaging/sddm/platinum-reality DESTINATION "${CMAKE_INSTALL_DATADIR}/sddm/themes")
+install(TARGETS platinum-reality-installer RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(FILES packaging/installer/ReadMe.txt LICENSE packaging/installer/platinum-reality-installer.desktop
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/platinum-reality/installer")
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(graphics-integration-tests tests/graphics_integration_tests.cpp
+                   src/desktop/graphics_integration.cpp src/desktop/dmabuf_formats.cpp)
+    target_include_directories(graphics-integration-tests PRIVATE src)
+    target_link_libraries(graphics-integration-tests PRIVATE Qt6::GuiPrivate Qt6::Test OpenGL::EGL)
+    target_link_options(graphics-integration-tests PRIVATE "LINKER:--export-dynamic-symbol=eglGetProcAddress")
+    add_test(NAME graphics-integration COMMAND graphics-integration-tests)
+    set_tests_properties(graphics-integration PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=generic")
     # Installed GTK toolkits are optional qualification dependencies, not runtime
     # dependencies of the shell. No package is installed by this build.
     pkg_check_modules(GTK3 QUIET IMPORTED_TARGET gtk+-3.0)
@@ -262,7 +300,7 @@ if(BUILD_TESTING)
         if(GTK${gtk_version}_FOUND)
             add_executable(gtk-css-tests${gtk_version} tests/gtk_css_tests.c)
             target_link_libraries(gtk-css-tests${gtk_version} PRIVATE PkgConfig::GTK${gtk_version})
-            target_compile_definitions(gtk-css-tests${gtk_version} PRIVATE PLATINUM_CSS_FILE="${CMAKE_CURRENT_SOURCE_DIR}/src/appearance/gtk-platinum.css")
+            target_compile_definitions(gtk-css-tests${gtk_version} PRIVATE PLATINUM_CSS_FILE="${CMAKE_CURRENT_SOURCE_DIR}/src/appearance/gtk-platinum.css" PLATINUM_GTK3_CSS_FILE="${CMAKE_CURRENT_SOURCE_DIR}/src/appearance/gtk3-platinum.css")
             add_test(NAME gtk${gtk_version}-css COMMAND gtk-css-tests${gtk_version})
             add_executable(gtk-appearance-probe${gtk_version} tests/gtk_appearance_probe.c)
             target_link_libraries(gtk-appearance-probe${gtk_version} PRIVATE PkgConfig::GTK${gtk_version})
@@ -272,6 +310,19 @@ if(BUILD_TESTING)
     add_executable(puzzle-tests tests/puzzle_tests.cpp)
     target_link_libraries(puzzle-tests PRIVATE frankenstein-puzzle-ui Qt6::Test)
     add_test(NAME puzzle COMMAND puzzle-tests)
+    add_executable(installer-tests tests/installer_tests.cpp)
+    target_link_libraries(installer-tests PRIVATE platinum-installer-ui Qt6::Test)
+    add_test(NAME installer COMMAND installer-tests)
+    set_tests_properties(installer PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=generic")
+    add_test(NAME installer-kde-defaults COMMAND dbus-run-session -- $<TARGET_FILE:installer-tests>
+        realQuestionUsesItsExplicitDefault)
+    set_tests_properties(installer-kde-defaults PROPERTIES TIMEOUT 60 ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=kde;PLATINUM_TEST_REQUIRE_KDE_THEME=1")
+    add_executable(sddm-theme-tests tests/sddm_theme_tests.cpp)
+    target_link_libraries(sddm-theme-tests PRIVATE Qt6::Quick Qt6::Qml Qt6::Gui Qt6::Test)
+    target_compile_definitions(sddm-theme-tests PRIVATE SDDM_THEME_DIR="${CMAKE_CURRENT_SOURCE_DIR}/packaging/sddm/platinum-reality")
+    add_test(NAME sddm-theme COMMAND sddm-theme-tests)
+    set_tests_properties(sddm-theme PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=generic")
     set_tests_properties(puzzle PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=generic")
     target_link_libraries(application-probe PRIVATE Qt6::Core)
     add_executable(application-tests tests/application_tests.cpp)
@@ -295,6 +346,7 @@ if(BUILD_TESTING)
     target_link_libraries(wallet-activation-tests PRIVATE Qt6::Core Qt6::DBus Qt6::Test)
     add_test(NAME wallet-activation COMMAND wallet-activation-tests)
     add_test(NAME output-selection COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/output_selection_tests.py)
+    add_test(NAME input-settings COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/input_settings_tests.py)
     add_test(NAME boot-splash COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/boot_splash_tests.py)
     add_test(NAME session-entry COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/session_entry_tests.py ${CMAKE_CURRENT_BINARY_DIR}/platinum-reality-session)
     add_test(NAME macos9-import COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/macos9_import_tests.py)
@@ -352,12 +404,20 @@ if(BUILD_TESTING)
     target_link_libraries(gui-tests PRIVATE frankenstein-finder-ui Qt6::Test)
     add_test(NAME gui COMMAND gui-tests)
     set_tests_properties(gui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=generic")
+    add_test(NAME gui-kde-defaults COMMAND dbus-run-session -- $<TARGET_FILE:gui-tests>
+        finderWindowMenuListsFoldersAndEmptyTrashConfirms returnInSaveChangesSavesEvenWithDiscardFocused)
+    set_tests_properties(gui-kde-defaults PROPERTIES TIMEOUT 60 ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_QPA_PLATFORMTHEME=kde;PLATINUM_TEST_REQUIRE_KDE_THEME=1")
     add_executable(menu-tests tests/menu_tests.cpp)
     add_executable(clipboard-transfer-tests tests/clipboard_transfer_tests.cpp)
     target_link_libraries(clipboard-transfer-tests PRIVATE platinum-clipboard-transfers Qt6::Test Threads::Threads)
     target_link_options(clipboard-transfer-tests PRIVATE -Wl,--wrap=pthread_create -Wl,--wrap=write)
     add_test(NAME clipboard-transfers COMMAND clipboard-transfer-tests)
     set_tests_properties(clipboard-transfers PROPERTIES TIMEOUT 15)
+    add_executable(clipboard-reader-tests tests/clipboard_reader_tests.cpp)
+    target_link_libraries(clipboard-reader-tests PRIVATE platinum-clipboard-reader Qt6::Test)
+    add_test(NAME clipboard-reader COMMAND clipboard-reader-tests)
+    set_tests_properties(clipboard-reader PROPERTIES TIMEOUT 20)
     target_link_libraries(menu-tests PRIVATE frankenstein-desktop Qt6::Test)
     add_test(NAME menus COMMAND menu-tests)
     add_executable(desktop-tests tests/desktop_tests.cpp src/desktop/drop_receiver_window.cpp src/desktop/drop_receiver_window.hpp)
@@ -368,6 +428,9 @@ if(BUILD_TESTING)
     target_link_libraries(bluetooth-tests PRIVATE frankenstein-desktop Qt6::Test)
     add_test(NAME bluetooth COMMAND bluetooth-tests)
     set_tests_properties(bluetooth PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
+    add_executable(handheld-tests tests/handheld_tests.cpp)
+    target_link_libraries(handheld-tests PRIVATE frankenstein-desktop Qt6::Test)
+    add_test(NAME handheld COMMAND handheld-tests)
     add_executable(removable-media-tests tests/removable_media_tests.cpp)
     target_link_libraries(removable-media-tests PRIVATE frankenstein-desktop Qt6::Test)
     add_test(NAME removable-media COMMAND removable-media-tests)
@@ -401,6 +464,8 @@ if(BUILD_TESTING)
                    ${PLATINUM_PROTOCOLS}/idle-inhibit-client.h ${PLATINUM_PROTOCOLS}/idle-inhibit-protocol.c)
     add_executable(paste-probe tests/paste_probe.c
                    ${PLATINUM_PROTOCOLS}/xdg-shell-client.h ${PLATINUM_PROTOCOLS}/xdg-shell-protocol.c)
+    add_executable(data-control-probe tests/data_control_probe.c
+                   ${PLATINUM_PROTOCOLS}/ext-data-control-client.h ${PLATINUM_PROTOCOLS}/ext-data-control-protocol.c)
     add_executable(virtual-pointer-driver tests/virtual_pointer_driver.c
                    ${PLATINUM_PROTOCOLS}/wlr-virtual-pointer-client.h ${PLATINUM_PROTOCOLS}/wlr-virtual-pointer-protocol.c)
     pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
@@ -410,7 +475,7 @@ if(BUILD_TESTING)
                    ${PLATINUM_PROTOCOLS}/xdg-shell-client.h ${PLATINUM_PROTOCOLS}/xdg-shell-protocol.c
                    ${PLATINUM_PROTOCOLS}/xdg-activation-client.h ${PLATINUM_PROTOCOLS}/xdg-activation-protocol.c)
     target_link_libraries(relative-mouse-probe PRIVATE PkgConfig::SDL3)
-    foreach(probe pointer-probe paste-probe virtual-pointer-driver relative-mouse-probe output-race-probe activation-probe)
+    foreach(probe pointer-probe paste-probe data-control-probe virtual-pointer-driver relative-mouse-probe output-race-probe activation-probe)
         set_target_properties(${probe} PROPERTIES AUTOMOC OFF)
         target_include_directories(${probe} PRIVATE ${PLATINUM_PROTOCOLS})
         target_link_libraries(${probe} PRIVATE PkgConfig::WAYLAND_CLIENT)
@@ -442,6 +507,7 @@ if(BUILD_TESTING)
     add_dependencies(native-tests native-probe frankenstein-finder frankenstein-editor frankenstein-style frankenstein-drop-receiver)
     add_dependencies(native-tests frankenstein-puzzle)
     add_dependencies(native-tests vulkan-probe pointer-probe paste-probe virtual-pointer-driver relative-mouse-probe fixture-ptracer activation-probe)
+    add_dependencies(native-tests data-control-probe)
     if(GTK3_FOUND AND GTK4_FOUND)
         target_compile_definitions(native-tests PRIVATE FRANKENSTEIN_GTK_PROBES=1)
         add_dependencies(native-tests gtk-appearance-probe3 gtk-appearance-probe4)

@@ -3,6 +3,8 @@
 #include "desktop/system_controls.hpp"
 #include "desktop/wifi.hpp"
 #include "fake_iwd.hpp"
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QDBusPendingReply>
 #include <QProcess>
 #include <QQmlContext>
@@ -389,6 +391,137 @@ class WifiTests final : public QObject
         QVERIFY(click("wifi-forget-dialog-accept"));
         QTRY_COMPARE(f.fake.calls.filter("Forget ").size(), 2);
         QTRY_VERIFY(!find(service.networks(), "Home").value("known").toBool());
+    }
+    void networkPanelJoinsDisconnectsForgetsAndShowsTheRadio()
+    {
+        if (!busReady())
+            QSKIP("dbus-daemon is not available");
+        Fixture f(connection("iwd"), connection("client"));
+        const auto home = f.fake.addNetwork("Home", "psk", -5000, true, true);
+        const auto cafe = f.fake.addNetwork("Cafe", "open", -7600);
+        f.fake.addNetwork("Neighbour", "psk", -7000);
+        QVERIFY(f.start());
+        WifiService service(f.client);
+        QTRY_VERIFY(service.agentRegistered());
+        QTRY_COMPARE(service.networks().size(), 3);
+
+        // The controls helper: records each request; "set wifi 0" turns the radio off.
+        QTemporaryDir root;
+        const auto helper = root.filePath("controls.py");
+        const auto requests = root.filePath("requests.txt");
+        QFile script(helper);
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write(QString("import json, sys\n"
+                             "open(%1, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+                             "on = sys.argv[1:4] != ['set', 'wifi', '0']\n"
+                             "print(json.dumps({'error':'','state':{'wifi':{'available':True,'enabled':on}}}))\n")
+                         .arg(QString::fromUtf8(QJsonDocument(QJsonArray{requests}).toJson(QJsonDocument::Compact)) + "[0]")
+                         .toUtf8());
+        script.close();
+        SystemControls controls(helper);
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.filePath("profile"), {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        auto *alert = view.rootObject()->findChild<QObject *>("wifi-alert");
+        QVERIFY(alert && alert->setProperty("service", QVariant::fromValue(static_cast<QObject *>(&service))));
+        QVERIFY(view.rootObject()->findChild<QObject *>("quick-controls")->setProperty(
+            "service", QVariant::fromValue(static_cast<QObject *>(&controls))));
+        auto *panel = view.rootObject()->findChild<QObject *>("network-panel");
+        QVERIFY(panel);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto shown = [&](const QString &name) -> QQuickItem *
+        {
+            for (int attempt = 0; attempt < 150; ++attempt)
+            {
+                if (!view.grabWindow().isNull())
+                    if (auto *item = visualItem(view.contentItem(), name); item && item->isVisible())
+                        return item;
+                QTest::qWait(20);
+            }
+            return nullptr;
+        };
+        const auto click = [&](const QString &name, bool twice = false)
+        {
+            auto *item = shown(name);
+            if (!item || !item->isEnabled())
+                return false;
+            const auto point = item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint();
+            if (twice)
+                QTest::mouseDClick(&view, Qt::LeftButton, {}, point);
+            else
+                QTest::mouseClick(&view, Qt::LeftButton, {}, point);
+            return true;
+        };
+        const auto label = [&](const QString &name)
+        {
+            auto *item = shown(name);
+            return item ? item->property("text").toString() : QString();
+        };
+
+        // The Wi-Fi module's first item opens the Network panel; opening it scans.
+        controls.refresh();
+        QTRY_VERIFY(controls.state().contains("wifi"));
+        QVERIFY(click("control-strip-wifi"));
+        f.fake.finishScan();
+        QVERIFY(click("desktop-command-network"));
+        QTRY_VERIFY(panel->property("opened").toBool());
+        QVERIFY(!manager.shellModal());
+        QCOMPARE(label("control-panels-heading"), QString("Network"));
+        QTRY_COMPARE(label("network-wifi-state"), QString("Wi-Fi: On, connected to “Home”"));
+        QCOMPARE(label("network-status-Home"), QString("Connected"));
+        QCOMPARE(label("network-status-Cafe"), QString("Open"));
+        QCOMPARE(label("network-status-Neighbour"), QString("Secured"));
+        QVERIFY(shown("network-connections"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/network-panel.png"));
+
+        // Join and Disconnect act on the chosen row; double-clicking a row joins it.
+        QVERIFY(!shown("network-join")->isEnabled());
+        QVERIFY(click("network-row-Cafe"));
+        QCOMPARE(label("network-join"), QString("Join"));
+        QVERIFY(click("network-join"));
+        QTRY_VERIFY(f.fake.calls.contains("Connect " + cafe));
+        QTRY_COMPARE(label("network-status-Cafe"), QString("Connected"));
+        QTRY_COMPARE(label("network-join"), QString("Disconnect"));
+        QVERIFY(!shown("network-forget")->isEnabled()); // Never joined before: nothing to forget.
+        QVERIFY(click("network-join"));
+        QTRY_VERIFY(f.fake.calls.contains("Disconnect"));
+        QTRY_COMPARE(label("network-status-Cafe"), QString("Open"));
+        QVERIFY(click("network-row-Home", true));
+        QTRY_VERIFY(f.fake.calls.contains("Connect " + home));
+        QTRY_COMPARE(label("network-status-Home"), QString("Connected"));
+
+        // Forget asks first, with Cancel the default.
+        auto *forget = view.rootObject()->findChild<QObject *>("wifi-forget-dialog");
+        QVERIFY(click("network-forget"));
+        QTRY_VERIFY(forget->property("opened").toBool());
+        QTest::keyClick(&view, Qt::Key_Return);
+        QTRY_VERIFY(!forget->property("visible").toBool());
+        QVERIFY(f.fake.calls.filter("Forget ").isEmpty());
+        QVERIFY(click("network-forget"));
+        QTRY_VERIFY(forget->property("opened").toBool());
+        QVERIFY(click("wifi-forget-dialog-accept"));
+        QTRY_COMPARE(f.fake.calls.filter("Forget ").size(), 1);
+        QTRY_VERIFY(!find(service.networks(), "Home").value("known").toBool());
+        // The keyboard comes back to the window after the confirmation.
+        QTRY_VERIFY(shown("control-panels-window")->hasActiveFocus());
+
+        // Turn Off asks the helper; the list goes away with the radio.
+        QVERIFY(click("network-wifi-power"));
+        QTRY_COMPARE(label("network-wifi-state"), QString("Wi-Fi: Off"));
+        const auto asked = [&] {
+            QFile recorded(requests);
+            return recorded.open(QIODevice::ReadOnly) && recorded.readAll().contains("set wifi 0");
+        };
+        QTRY_VERIFY(asked());
+        QTRY_VERIFY(!visualItem(view.contentItem(), "network-list")->isVisible());
+        QCOMPARE(label("network-wifi-power"), QString("Turn On"));
+        QTest::keyClick(&view, Qt::Key_Escape);
+        QTRY_VERIFY(!panel->property("opened").toBool());
     }
 };
 

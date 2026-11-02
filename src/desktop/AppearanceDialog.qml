@@ -3,52 +3,45 @@ import QtQuick.Controls
 
 // The Mac OS 9 Appearance control panel is tabbed (docs/historical-fidelity-review.md F10,
 // V922 E17/E18): Appearance · Fonts · Desktop · Sound · Options. There is only one theme here,
-// so the Themes tab is left out rather than shown with nothing to choose. Changes still apply
-// with OK, as before; the desktop picture applies from its own chooser.
-ShellDialog {
+// so the Themes tab is left out rather than shown with nothing to choose. It is a panel of the
+// Control Panels window, and every change applies at once, as in Mac OS 9.
+Item {
     id: panel
     // The Appearance sound track (InterfaceSounds); silent without the user's own import.
     function themeSound(tag) { if (typeof manager !== "undefined" && manager && manager.interfaceSounds) manager.interfaceSounds.play(tag) }
     required property var settings
+    property var sessionManager: null
     objectName: "appearance-dialog"
-    title: "Appearance"
-    width: 500
-    standardButtons: Dialog.Ok | Dialog.Cancel
-    property int draftDuration: 240
-    property bool draftStripVisible: true
-    property string draftAccent: "blue"
-    property bool draftDoubleClick: true
-    property bool draftKeepAwake: false
-    property bool draftSoundTrack: false
+    readonly property string panelId: "appearance"
+    readonly property string title: "Appearance"
+    readonly property string glyph: "appearance"
+    // Set by the Control Panels window: it, and whether this panel is the one on screen.
+    property var host: null
+    property bool shown: false
+    readonly property bool opened: shown
+    width: parent ? parent.width : 500
+    implicitHeight: body.implicitHeight
     readonly property var interfaceSounds: sessionManager ? sessionManager.interfaceSounds : null
+    readonly property bool soundTrackOn: !!interfaceSounds && interfaceSounds.available && interfaceSounds.enabled
     property bool previewCollapsed: false
     property int tab: 0
-    property bool placeAfterClose: false
     readonly property var tabs: ["Appearance", "Fonts", "Desktop", "Sound", "Options"]
-    // Place Picture… closes the panel (keeping its changes) and asks for the picture chooser.
+    // Place Picture… shows the Desktop Picture panel.
     signal placePictureRequested()
     function edit(page) {
-        if (visible || sessionManager.shellModal) return
-        draftDuration = settings.shadeDuration
-        draftStripVisible = settings.controlStripVisible
-        draftAccent = settings.accent
-        draftDoubleClick = settings.doubleClickCollapse
-        draftKeepAwake = settings.keepScreenAwake
         if (interfaceSounds) interfaceSounds.refresh()
-        draftSoundTrack = !!interfaceSounds && interfaceSounds.available && interfaceSounds.enabled
         previewCollapsed = false
-        placeAfterClose = false
         tab = Math.max(0, tabs.indexOf(page === undefined ? "Appearance" : page))
-        open()
+        if (host) host.show(panelId)
     }
-    onAccepted: {
-        settings.apply(draftDuration, draftStripVisible)
-        settings.applyOptions(draftAccent, draftDoubleClick)
-        settings.setKeepScreenAwake(draftKeepAwake)
-        if (interfaceSounds && interfaceSounds.available) interfaceSounds.enabled = draftSoundTrack
-    }
-    onClosed: if (placeAfterClose) {placeAfterClose = false; placePictureRequested()}
-    contentItem: Column {
+    function setShadeDuration(ms) { settings.apply(ms, settings.controlStripVisible) }
+    function setStripVisible(on) { settings.apply(settings.shadeDuration, on) }
+    function setAccent(name) { settings.applyOptions(name, settings.doubleClickCollapse) }
+    function setDoubleClick(on) { settings.applyOptions(settings.accent, on) }
+    function setSoundTrack(on) { if (interfaceSounds && interfaceSounds.available) interfaceSounds.enabled = on }
+    Column {
+        id: body
+        width: parent.width
         spacing: 0
         Row {
             x: 4; height: 24; spacing: -4
@@ -113,8 +106,8 @@ ShellDialog {
                             required property var modelData
                             objectName: "appearance-accent-" + modelData.value
                             text: modelData.name; implicitWidth: 110
-                            defaultAction: panel.draftAccent === modelData.value
-                            onClicked: panel.draftAccent = modelData.value
+                            defaultAction: panel.settings.accent === modelData.value
+                            onClicked: panel.setAccent(modelData.value)
                             Rectangle {x: 8; anchors.verticalCenter: parent.verticalCenter; width: 12; height: 12
                                        color: parent.modelData.color; border.color: "#222"}
                         }
@@ -127,7 +120,7 @@ ShellDialog {
                         x: 3; y: 3; width: parent.width - 6
                         Rectangle {width: parent.width; height: 25; color: "transparent"
                             Text {x: 12; anchors.verticalCenter: parent.verticalCenter; text: "Menu Item"; font.pixelSize: 12}}
-                        Rectangle {width: parent.width; height: 25; color: panel.draftAccent === "graphite" ? "#656565" : "#2c2994"
+                        Rectangle {width: parent.width; height: 25; color: panel.settings.accent === "graphite" ? "#656565" : "#2c2994"
                             Text {x: 12; anchors.verticalCenter: parent.verticalCenter; text: "Selected Item"; font.pixelSize: 12; color: "white"}}
                     }
                 }
@@ -178,7 +171,7 @@ ShellDialog {
                     }
                     PlatinumButton {
                         objectName: "appearance-place-picture"; text: "Place Picture…"; implicitWidth: 150
-                        onClicked: {panel.placeAfterClose = true; panel.accept()}
+                        onClicked: panel.placePictureRequested()
                     }
                     PlatinumButton {
                         objectName: "appearance-remove-picture"; text: "Remove Picture"; implicitWidth: 150
@@ -203,7 +196,7 @@ ShellDialog {
                         width: 180; height: 22; color: soundTab.available ? "white" : "#ddd"
                         border.color: soundTab.available ? "#222" : "#888"
                         Text {x: 8; anchors.verticalCenter: parent.verticalCenter; font.pixelSize: 12
-                              text: panel.draftSoundTrack ? "Platinum Sounds" : "None"
+                              text: panel.soundTrackOn ? "Platinum Sounds" : "None"
                               color: soundTab.available ? "black" : "#888"}
                         Text {anchors.right: parent.right; anchors.rightMargin: 6; anchors.verticalCenter: parent.verticalCenter
                               text: "\u25BE"; font.pixelSize: 12; visible: soundTab.available}
@@ -211,9 +204,9 @@ ShellDialog {
                         Menu {
                             id: trackMenu
                             MenuItem {objectName: "sound-track-platinum"; text: "Platinum Sounds"; checkable: true
-                                      checked: panel.draftSoundTrack; onTriggered: panel.draftSoundTrack = true}
+                                      checked: panel.soundTrackOn; onTriggered: panel.setSoundTrack(true)}
                             MenuItem {objectName: "sound-track-none"; text: "None"; checkable: true
-                                      checked: !panel.draftSoundTrack; onTriggered: panel.draftSoundTrack = false}
+                                      checked: !panel.soundTrackOn; onTriggered: panel.setSoundTrack(false)}
                         }
                     }
                 }
@@ -231,25 +224,26 @@ ShellDialog {
                 x: 20; y: 14; width: parent.width - 40; spacing: 10
                 PlatinumCheckBox {
                     objectName: "option-double-click-collapse"; text: "Double-click title bar to collapse windows"
-                    checked: panel.draftDoubleClick; onToggled: panel.draftDoubleClick = checked
+                    checked: panel.settings.doubleClickCollapse; onToggled: panel.setDoubleClick(checked)
                 }
                 PlatinumCheckBox {
                     objectName: "show-control-strip"; text: "Show Control Strip"
-                    checked: panel.draftStripVisible; onToggled: panel.draftStripVisible = checked
+                    checked: panel.settings.controlStripVisible; onToggled: panel.setStripVisible(checked)
                 }
                 PlatinumCheckBox {
                     objectName: "keep-screen-awake"; text: "Never turn the screen off automatically"
-                    checked: panel.draftKeepAwake; onToggled: panel.draftKeepAwake = checked
+                    checked: panel.settings.keepScreenAwake; onToggled: panel.settings.setKeepScreenAwake(checked)
                 }
                 Rectangle {width: parent.width; height: 1; color: "#999"}
                 Row {
                     width: parent.width; spacing: 10
                     Text {text: "WindowShade speed:"; font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter}
                     Slider {
-                        onPressedChanged: if (pressed) panel.themeSound("sltp")
+                        // Saved when the slider is let go, not on every step of a drag.
+                        onPressedChanged: if (pressed) panel.themeSound("sltp"); else panel.setShadeDuration(Math.round(value))
                         id: speed; objectName: "shade-speed"; width: 170; height: 26
-                        from: 0; to: 1200; stepSize: 10; value: panel.draftDuration
-                        onMoved: panel.draftDuration = Math.round(value)
+                        from: 0; to: 1200; stepSize: 10; value: panel.settings.shadeDuration
+                        onMoved: if (!pressed) panel.setShadeDuration(Math.round(value))
                         background: Rectangle {x: speed.leftPadding; y: (speed.height - height) / 2; width: speed.availableWidth
                                                height: 5; color: "white"; border.color: "#777"}
                         handle: Rectangle {
@@ -261,15 +255,15 @@ ShellDialog {
                         }
                     }
                     Text {
-                        text: panel.draftDuration === 0 ? "Instant" : (panel.draftDuration / 1000).toFixed(2) + " s"
+                        text: Math.round(speed.value) === 0 ? "Instant" : (speed.value / 1000).toFixed(2) + " s"
                         font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter
                     }
                 }
                 Row {
                     spacing: 8
-                    PlatinumButton {text: "Fast"; implicitWidth: 64; onClicked: panel.draftDuration = 120}
-                    PlatinumButton {text: "Normal"; implicitWidth: 70; onClicked: panel.draftDuration = 240}
-                    PlatinumButton {text: "Slow"; implicitWidth: 64; onClicked: panel.draftDuration = 600}
+                    PlatinumButton {text: "Fast"; implicitWidth: 64; onClicked: panel.setShadeDuration(120)}
+                    PlatinumButton {text: "Normal"; implicitWidth: 70; onClicked: panel.setShadeDuration(240)}
+                    PlatinumButton {text: "Slow"; implicitWidth: 64; onClicked: panel.setShadeDuration(600)}
                     PlatinumButton {objectName: "shade-preview-button"; text: "Try It"; implicitWidth: 64
                                     onClicked: panel.previewCollapsed = !panel.previewCollapsed}
                 }
@@ -277,7 +271,7 @@ ShellDialog {
                     width: parent.width; height: 104
                     WindowRoll {
                         objectName: "shade-preview"; width: parent.width - 12; x: 6
-                        contentHeight: 72; collapsed: panel.previewCollapsed; animationDuration: panel.draftDuration
+                        contentHeight: 72; collapsed: panel.previewCollapsed; animationDuration: Math.round(speed.value)
                         Rectangle {anchors.fill: parent; color: "#ccc"; border.color: "#333"}
                         Rectangle {x: 2; y: 2; width: parent.width - 4; height: 19; color: "#bbb"
                             Text {anchors.centerIn: parent; text: "WindowShade Preview"; font.pixelSize: 12}}

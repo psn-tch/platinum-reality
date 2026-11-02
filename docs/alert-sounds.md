@@ -43,6 +43,23 @@ does the same (Finishing School Phase 11, 2026-10-21).
   and in native tests (`FRANKENSTEIN_NATIVE_TEST=1`), alerts flash the menu bar for 140 ms. **No
   test ever plays through the speakers.**
 
+## The startup sound
+
+- The user's own `startup-chime.wav` (or `.aiff`, `.aif`, `.flac`, `.ogg`) in the asset folder plays
+  once per boot, when the Log In first appears. The session supervisor plays it
+  (`scripts/standalone-session.py` `startup_chime`), not the desktop. Nothing is bundled: Macs played
+  it from ROM.
+- **Sound ▸ Startup** (the fourth tab; psn_tch asked for it on 2026-10-29) has three controls:
+  - a checkbox to turn the sound on or off;
+  - a volume slider, which plays a sample when you let go, like the alert slider;
+  - a Play button.
+  The panel says which file plays, or where to put one when there's none.
+- `StartupSound` (`src/desktop/alert_sounds.*`, `manager.startupSound`) saves the choice in
+  `<profile>/startup-sound.json` (`{"version": 1, "enabled": true, "volume": 50}`). The supervisor
+  reads it at the next Log In: small, regular, owned by the user, never through a link. Anything
+  else keeps the defaults, which are on, at half volume (the level used before this setting existed).
+  Off, or volume 0, means no chime.
+
 ## Tests
 
 `desktop_tests` `alertSoundsUseOriginalBeepPersonalWavsAndFlashWhenSilent` uses a fake player
@@ -57,4 +74,18 @@ that records its arguments. It covers:
 - a click outside sounding, while a click inside the dialog doesn't;
 - the Alert Sounds tab.
 
-Screenshot: `build/artifacts/sound-alerts.png`.
+`desktop_tests` `startupSoundCanBeTurnedOffAndSetLouderOrQuieter` covers:
+- the defaults;
+- linked and empty files skipped;
+- the preview;
+- persistence;
+- the Startup tab's checkbox, slider and Play button;
+- the message shown when no sound is installed.
+
+`output_selection_tests` `test_startup_chime_follows_the_sound_panel_setting` covers the supervisor side:
+- off;
+- volume;
+- `--profile`;
+- malformed and linked settings.
+
+Screenshots: `build/artifacts/sound-alerts.png`, `build/artifacts/sound-startup.png`.

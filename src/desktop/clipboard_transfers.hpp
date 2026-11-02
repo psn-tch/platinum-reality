@@ -12,6 +12,7 @@ class ClipboardTransfers
         unsigned maxConcurrent = 8;
         int idleTimeoutMs = 30000;
         int totalTimeoutMs = 120000;
+        quint64 maxBytes = 64 * 1024 * 1024;
     };
     ClipboardTransfers();
     explicit ClipboardTransfers(Limits);
@@ -21,6 +22,7 @@ class ClipboardTransfers
     bool submit(int fd, QByteArray bytes);
     void cancel();
     unsigned active() const;
+    quint64 activeBytes() const;
 
   private:
     struct Control;

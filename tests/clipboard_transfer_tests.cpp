@@ -117,6 +117,34 @@ class ClipboardTransferTests : public QObject
         struct sigaction after{};QVERIFY(sigaction(SIGPIPE,nullptr,&after)==0);
         QVERIFY(after.sa_handler==SIG_DFL); // No process-wide SIGPIPE ignore workaround.
     }
+    void byteAdmissionIsBoundedSeparatelyFromWriterCount()
+    {
+        ClipboardTransfers transfers({8, 3000, 5000, 65536});
+        Pipe first, rejected;
+        QCOMPARE(fcntl(first.writer, F_SETPIPE_SZ, 4096), 4096);
+        QVERIFY(transfers.submit(first.takeWriter(), QByteArray(40000, 'a')));
+        QCOMPARE(transfers.activeBytes(), quint64(40000));
+        QVERIFY(!transfers.submit(rejected.takeWriter(), QByteArray(40000, 'b')));
+        QCOMPARE(transfers.active(), 1u);
+        QCOMPARE(transfers.activeBytes(), quint64(40000));
+        char byte;
+        QCOMPARE(::read(rejected.reader, &byte, 1), ssize_t(0));
+        QByteArray data;
+        QVERIFY(readToEnd(first.reader, data));
+        QCOMPARE(data, QByteArray(40000, 'a'));
+        QTRY_COMPARE(transfers.active(), 0u);
+        QCOMPARE(transfers.activeBytes(), quint64(0));
+        refuseNextThread.store(true);
+        Pipe refused;
+        QVERIFY(!transfers.submit(refused.takeWriter(), QByteArray(40000, 'c')));
+        QCOMPARE(transfers.activeBytes(), quint64(0));
+        Pipe next;
+        QVERIFY(transfers.submit(next.takeWriter(), QByteArray(40000, 'd')));
+        data.clear();
+        QVERIFY(readToEnd(next.reader, data));
+        QCOMPARE(data, QByteArray(40000, 'd'));
+        QTRY_COMPARE(transfers.activeBytes(), quint64(0));
+    }
     void totalDeadlineDoesNotDependOnIdleTimeout()
     {
         ClipboardTransfers transfers({1,3000,150});

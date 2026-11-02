@@ -23,6 +23,7 @@ inputs.extend(path for path in sorted((project / "packaging").rglob("*"))
 inputs.extend(build / name for name in ("frankenstein", "platinum-wallet-service", "wallet-activation-tests", "native-tests", "multi-display-tests", "audio-service-tests", "sound-integration-tests", "display-layout-tests", "display-topology-feed-tests", "native-probe", "vulkan-probe", "frankenstein-finder", "frankenstein-editor", "frankenstein-drop-receiver", "frankenstein-puzzle", "gtk-appearance-probe3", "gtk-appearance-probe4",
                                                   "pointer-probe", "paste-probe", "virtual-pointer-driver", "relative-mouse-probe", "output-race-probe",
                                                   "platinum-lock", "lock-tests", "virtual-keyboard-driver"))
+inputs.append(build / "data-control-probe")
 inputs.append(build / "plugins/styles/libfrankenstein-style.so")
 inputs.extend(build / name for name in ("xwayland/Xwayland", "xwayland/libplatinum-xwayland-implicit-sync.so"))
 inputs.append(build / "CMakeCache.txt")

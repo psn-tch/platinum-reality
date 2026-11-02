@@ -68,10 +68,45 @@ the DOM without mousedown, and Tab remained responsive. This fixture synchroniza
 is not a new protocol acknowledgement requirement for production clients. The
 original single pointer focus and exact text/reacquisition assertions remain.
 
-Current qualified release: `0.1.0-native-update-20261019T071331Z`. The durable
+Earlier qualified release: `0.1.0-native-update-20261019T071331Z`. The durable
 [normal/sanitized ledger](evidence/native-update-20261019/summary.json) records
 all five saving cases and the separate Firefox typing/frame case passing in each
 full run. Qt linux-dmabuf-v1 is now selected on native Wayland/OpenGL when
 available; the old EGL-bind initialization failure is avoided. Earlier Firefox
 stalls are still an unresolved limitation, not a proven graphics-backend defect.
 No private account, production profile or live download was used for these tests.
+
+## GTK modal chooser ownership (2026-10-26)
+
+An upload chooser behind a blocked Firefox parent is a separate, reproduced
+activation defect. GTK3 sets modality using `gtk_shell1` / `gtk_surface1`, while
+Qt's compositor exposes `xdg-dialog` modality. The latter alone does not receive
+GTK3's request. A private unmodified-runtime negative control recorded an
+explicit chooser parent with `modal=false`; activating Firefox selected that
+blocked parent instead of the chooser. This is evidence of the policy mismatch,
+not proof that every browser stall has the same cause.
+
+The desktop now advertises version 1 of GTK's shell protocol, with capabilities
+zero. Independently transcribed wire declarations implement set/unset modality;
+the manager combines it with xdg-dialog modality and updates parent/activation
+policy both on initial map and after changes. Leaving modal state recalculates
+server-decoration shade eligibility. GTK startup IDs, menu metadata and timestamp-
+only presentation requests grant no focus permission; global GTK menus and
+xdg_foreign are not implemented by this adapter. GTK system-bell requests use the
+existing alert-sound service.
+
+The new owned Firefox case cancels twice, reactivating the application while each
+chooser is open, then chooses a disposable local text file and checks the bytes
+reported by the page. Another owned GTK case toggles modality after mapping,
+checks modal chrome and restored controls, then exits while modal. Existing real
+Firefox/Chromium Save Image As cases remain in the gate. The late-modality probe
+uses the production keyfile GSettings backend inside its scene's private config
+home; cleanup is still strict and does not delete unexpected runtime contents.
+
+Primary references: [GTK3 protocol declarations](https://raw.githubusercontent.com/GNOME/gtk/gtk-3-24/gdk/wayland/protocol/gtk-shell.xml),
+Mozilla's [GTK file picker](https://raw.githubusercontent.com/mozilla/gecko-dev/master/widget/gtk/nsFilePicker.cpp)
+and [GTK window modality](https://raw.githubusercontent.com/mozilla/gecko-dev/master/widget/gtk/nsWindow.cpp).
+These branch URLs identify the consulted source locations; local negative-control
+and pre-run source hashes identify this project's tested implementation. They are
+not immutable upstream version pins. The previously captured libxul futex stall
+and missing-xdg_foreign warnings remain separate unresolved observations.

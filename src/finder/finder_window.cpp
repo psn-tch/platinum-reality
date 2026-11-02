@@ -18,6 +18,13 @@
 #include <QCloseEvent>
 #include <QCryptographicHash>
 #include <QDrag>
+#include <QPointingDevice>
+#include <QMouseEvent>
+#include <QLineEdit>
+#include <QSplitter>
+#include <QListWidget>
+#include <QToolButton>
+#include <QProcess>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFileDialog>
@@ -62,6 +69,61 @@ FolderIcons::FolderIcons(QWidget *parent) : QListView(parent)
 }
 namespace
 {
+// A finger held still for 0.6 s on a folder view opens its menu, as a right click does: the
+// handheld's touchscreen has no right button (psn_tch, 2026-10-29). Touch arrives here as Qt's
+// synthesized mouse events from a touchscreen device; moving more than a few pixels cancels.
+class LongPressMenu final : public QObject
+{
+  public:
+    explicit LongPressMenu(QAbstractItemView *view) : QObject(view), m_view(view)
+    {
+        m_timer.setSingleShot(true);
+        m_timer.setInterval(600);
+        connect(&m_timer, &QTimer::timeout, this, [this] {
+            m_fired = true;
+            emit m_view->customContextMenuRequested(m_at);
+        });
+        view->viewport()->installEventFilter(this);
+    }
+
+  protected:
+    bool eventFilter(QObject *, QEvent *event) override
+    {
+        if (event->type() != QEvent::MouseButtonPress && event->type() != QEvent::MouseMove &&
+            event->type() != QEvent::MouseButtonRelease)
+            return false;
+        auto *mouse = static_cast<QMouseEvent *>(event);
+        const bool finger = mouse->pointingDevice() &&
+                            mouse->pointingDevice()->type() == QInputDevice::DeviceType::TouchScreen;
+        if (event->type() == QEvent::MouseButtonPress)
+        {
+            m_fired = false;
+            if (finger && mouse->button() == Qt::LeftButton)
+            {
+                m_at = mouse->position().toPoint();
+                m_timer.start();
+            }
+            return false;
+        }
+        if (event->type() == QEvent::MouseMove)
+        {
+            if (m_timer.isActive() && (mouse->position().toPoint() - m_at).manhattanLength() > 12)
+                m_timer.stop();
+            return m_fired; // The menu is open: no drag or rubber band from the same finger.
+        }
+        m_timer.stop();
+        const bool fired = m_fired;
+        m_fired = false;
+        return fired; // The finger that opened the menu does not also click.
+    }
+
+  private:
+    QAbstractItemView *m_view;
+    QTimer m_timer;
+    QPoint m_at;
+    bool m_fired = false;
+};
+
 QPointer<QDrag> activeFileDrag;
 void startFileDrag(QAbstractItemView *view, const QModelIndexList &indexes)
 {
@@ -237,11 +299,7 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
       m_icons(new FolderIcons), m_list(new FolderList), m_views(new QStackedWidget)
 {
     setAttribute(Qt::WA_DeleteOnClose);
-    setWindowTitle(m_directory == m_operations.trashBase() + "/files" ? "Trash"
-                   : m_directory == m_root                            ? FinderPlaces::diskName(m_profile)
-                   : QFileInfo(m_directory).fileName().isEmpty()
-                       ? FinderPlaces::diskName(m_profile)
-                       : QFileInfo(m_directory).fileName());
+    updateTitle();
     setObjectName("finderWindow");
     QDir().mkpath(m_profile);
     m_settings = std::make_unique<QSettings>(m_profile + "/finder.ini", QSettings::IniFormat);
@@ -254,25 +312,36 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
     auto *layout = new QVBoxLayout(content);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    // Mac OS 9 folder window header: "19 items, 47.32 GB available", centred
-    // (docs/historical-fidelity-review.md F05). No path or status bar below.
-    const auto header = [directory = m_directory](int count)
+    // Navigation, as in Dolphin: Back, Forward, Enclosing Folder and the folder's path (type a path
+    // and press Return to go there). Then Mac OS 9's folder window header, "19 items, 47.32 GB
+    // available", centred (docs/historical-fidelity-review.md F05).
+    auto *navigation = new QHBoxLayout;
+    navigation->setContentsMargins(4, 3, 4, 3);
+    navigation->setSpacing(3);
+    const auto arrowButton = [&](Qt::ArrowType arrow, const char *name, const QString &tip)
     {
-        auto text = QString("%1 item%2").arg(count).arg(count == 1 ? "" : "s");
-        const QStorageInfo volume(directory);
-        if (volume.isValid() && volume.isReady())
-            text += ", " + QLocale::system().formattedDataSize(volume.bytesAvailable(), 2,
-                                                                QLocale::DataSizeTraditionalFormat) +
-                    " available";
-        return text;
+        auto *button = new QToolButton;
+        button->setArrowType(arrow);
+        button->setObjectName(name);
+        button->setToolTip(tip);
+        button->setAutoRaise(false);
+        navigation->addWidget(button);
+        return button;
     };
-    auto *info = new QLabel(
-        header(QDir(m_directory).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size()));
-    info->setObjectName("folderItemCount");
-    info->setAlignment(Qt::AlignCenter);
-    info->setFrameStyle(QFrame::Panel | QFrame::Sunken);
-    info->setMinimumHeight(23);
-    layout->addWidget(info);
+    m_backButton = arrowButton(Qt::LeftArrow, "backButton", "Back");
+    m_forwardButton = arrowButton(Qt::RightArrow, "forwardButton", "Forward");
+    m_upButton = arrowButton(Qt::UpArrow, "upButton", "Enclosing Folder");
+    m_path = new QLineEdit;
+    m_path->setObjectName("pathField");
+    navigation->addWidget(m_path, 1);
+    layout->addLayout(navigation);
+    m_header = new QLabel;
+    m_header->setObjectName("folderItemCount");
+    m_header->setAlignment(Qt::AlignCenter);
+    m_header->setFrameStyle(QFrame::Panel | QFrame::Sunken);
+    m_header->setMinimumHeight(23);
+    layout->addWidget(m_header);
+    updateHeader();
     installPlatinumIcons(m_model);
     m_model->setReadOnly(true);
     m_model->setFilter(QSettings(m_profile + "/finder.ini", QSettings::IniFormat).value("showHiddenFiles", false).toBool()
@@ -281,15 +350,18 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
     m_model->setRootPath(m_directory);
     m_icons->setObjectName("iconView");
     m_list->setObjectName("listView");
+    // A 9.2.2 Finder window always shows both scroll bars, idle when there is nothing to scroll.
+    for (QAbstractScrollArea *view : {static_cast<QAbstractScrollArea *>(m_icons), static_cast<QAbstractScrollArea *>(m_list)})
+    {
+        view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+        view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+    }
     m_icons->setModel(m_model);
     m_list->setModel(m_model);
     const auto rootIndex = m_model->index(m_directory);
     m_icons->setRootIndex(rootIndex);
     m_list->setRootIndex(rootIndex);
-    const auto updateCount = [this, info, header]
-    {
-        info->setText(header(m_model->rowCount(m_icons->rootIndex())));
-    };
+    const auto updateCount = [this] { updateHeader(); };
     connect(m_model, &QFileSystemModel::rowsInserted, this, updateCount);
     connect(m_model, &QFileSystemModel::rowsRemoved, this, updateCount);
     connect(m_model, &QFileSystemModel::modelReset, this, updateCount);
@@ -306,9 +378,45 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
     m_list->setColumnWidth(0, 230);
     m_views->addWidget(m_icons);
     m_views->addWidget(m_list);
-    layout->addWidget(m_views);
+    // Places, as in Dolphin's sidebar: the home disk and its standard folders, drives, Trash.
+    m_places = new QListWidget;
+    m_places->setObjectName("placesList");
+    m_places->setIconSize(QSize(16, 16));
+    m_places->setMinimumWidth(110);
+    m_places->setFrameShape(QFrame::NoFrame);
+    connect(m_places, &QListWidget::itemClicked, this, [this](QListWidgetItem *item)
+            { navigate(item->data(Qt::UserRole).toString()); });
+    auto *split = new QSplitter;
+    split->setObjectName("placesSplitter");
+    split->addWidget(m_places);
+    split->addWidget(m_views);
+    split->setStretchFactor(1, 1);
+    split->setSizes({140, 500});
+    split->setChildrenCollapsible(false);
+    layout->addWidget(split, 1); // The folder takes the height, not the header.
+    updatePlaces();
+    connect(m_backButton, &QToolButton::clicked, this, [this] {
+        if (!m_back.isEmpty()) { m_forward.prepend(m_directory); navigate(m_back.takeLast(), false); }
+    });
+    connect(m_forwardButton, &QToolButton::clicked, this, [this] {
+        if (!m_forward.isEmpty()) { m_back.append(m_directory); navigate(m_forward.takeFirst(), false); }
+    });
+    connect(m_upButton, &QToolButton::clicked, this, [this] { navigate(QFileInfo(m_directory).absolutePath()); });
+    connect(m_path, &QLineEdit::returnPressed, this, [this] {
+        auto path = m_path->text().trimmed();
+        if (path == "~" || path.startsWith("~/"))
+            path = QDir::homePath() + path.mid(1);
+        if (!navigate(QDir(m_directory).absoluteFilePath(path)))
+            m_path->setText(QDir::toNativeSeparators(m_directory));
+    });
     setCentralWidget(content);
     setViewMode(m_settings->value("list", false).toBool());
+    m_path->setText(QDir::toNativeSeparators(m_directory));
+    m_backButton->setEnabled(false);
+    m_forwardButton->setEnabled(false);
+    m_upButton->setEnabled(m_directory != "/" && m_operations.readableDirectory(QFileInfo(m_directory).absolutePath()));
+    new LongPressMenu(m_icons);
+    new LongPressMenu(m_list);
     connect(m_icons, &QListView::doubleClicked, this, &FinderWindow::openIndex);
     connect(m_list, &QTreeView::doubleClicked, this, &FinderWindow::openIndex);
     connect(m_model, &QFileSystemModel::directoryLoaded, this,
@@ -351,6 +459,7 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
                     return result;
                 }, bytes, cancel);
     };
+    m_receiveFiles = receiveFiles;
     connect(m_icons, &FolderIcons::filesDropped, this, receiveFiles);
     connect(m_list, &FolderList::filesDropped, this, receiveFiles);
     // Paste follows the clipboard (files copied here, in another Finder or another file manager).
@@ -378,12 +487,16 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
                            [ops, dir, name] { return ops.createFolder(dir, name); });
                }
            });
-    action(file, "Open", "open", QKeySequence(Qt::CTRL | Qt::Key_O),
+    auto *openAction = action(file, "Open", "open", QKeySequence(Qt::CTRL | Qt::Key_O),
            [this]
            {
-               for (const auto &p : selectedPaths())
-                   openIndex(m_model->index(p));
+               const auto paths = selectedPaths();
+               for (const auto &p : paths)
+                   if (paths.size() == 1 || !QFileInfo(p).isDir())
+                       openIndex(m_model->index(p));
            });
+    openAction->setShortcuts(openAction->shortcuts() << QKeySequence(Qt::Key_Return) << QKeySequence(Qt::Key_Enter)
+                                         << QKeySequence(Qt::CTRL | Qt::Key_Down));
     action(file, "Close Window", "closeWindow", QKeySequence(Qt::CTRL | Qt::Key_W),
            [this] { close(); });
     action(file, "Open With…", "openWith", {},
@@ -412,6 +525,35 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
                    perform("Duplicating…", [ops, path = p.first()] { return ops.duplicate(path); });
                }
            });
+    action(file, "Make Alias", "makeAlias", QKeySequence(Qt::CTRL | Qt::Key_M),
+           [this]
+           {
+               const auto p = selectedPaths();
+               if (p.isEmpty())
+                   return;
+               auto ops = m_operations;
+               perform("Making alias…", [ops, p] {
+                   FileResult r{true, {}, {}};
+                   for (const auto &path : p)
+                       if (!(r = ops.makeAlias(path)).ok)
+                           break;
+                   return r;
+               });
+           });
+    action(file, "New Text File", "newFile", {},
+           [this]
+           {
+               auto ops = m_operations;
+               perform("Creating file…", [ops, dir = m_directory] { return ops.createFile(dir, "untitled.txt"); });
+           });
+    action(file, "Open in Terminal", "openTerminal", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_T),
+           [this]
+           {
+               // The selected folder, else this window's folder.
+               const auto p = selectedPaths();
+               const auto folder = p.size() == 1 && QFileInfo(p.first()).isDir() ? p.first() : m_directory;
+               QProcess::startDetached("konsole", {"--separate", "--workdir", folder});
+           });
     action(file, "Find…", "find", QKeySequence(Qt::CTRL | Qt::Key_F),
            [this]
            {
@@ -438,7 +580,7 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
                }
            });
     file->addSeparator();
-    action(file, "Move to Trash", "trash", QKeySequence(Qt::CTRL | Qt::Key_Backspace),
+    auto *trashAction = action(file, "Move to Trash", "trash", QKeySequence(Qt::CTRL | Qt::Key_Backspace),
            [this]
            {
                auto p = selectedPaths();
@@ -458,6 +600,8 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
                            return r;
                        });
            });
+    // Delete, as in Dolphin and other Linux file managers, besides Command-Delete.
+    trashAction->setShortcuts(trashAction->shortcuts() << QKeySequence(Qt::Key_Delete));
     action(file, "Put Away", "restore", QKeySequence(Qt::CTRL | Qt::Key_Y),
            [this]
            {
@@ -501,21 +645,12 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
     };
     action(edit, "Cut", "cut", QKeySequence::Cut, [putOnClipboard] { putOnClipboard(true); });
     action(edit, "Copy", "copy", QKeySequence::Copy, [putOnClipboard] { putOnClipboard(false); });
-    action(edit, "Paste", "paste", QKeySequence::Paste,
-           [this, receiveFiles]
+    action(edit, "Paste", "paste", QKeySequence::Paste, [this] { pasteInto(m_directory); });
+    action(edit, "Copy Path", "copyPath", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C),
+           [this]
            {
-               const auto *mime = QGuiApplication::clipboard()->mimeData();
-               if (!mime || !mime->hasUrls())
-                   return;
-               QStringList paths;
-               for (const auto &url : mime->urls())
-                   if (url.isLocalFile())
-                       paths << url.toLocalFile();
-               const bool cut = mime->data("application/x-kde-cutselection") == "1" ||
-                                mime->data("x-special/gnome-copied-files").startsWith("cut\n");
-               receiveFiles(paths, m_directory, !cut);
-               if (cut)
-                   QGuiApplication::clipboard()->clear(); // A moved item cannot be pasted again.
+               const auto paths = selectedPaths();
+               QGuiApplication::clipboard()->setText(paths.isEmpty() ? m_directory : paths.join('\n'));
            });
     unavailable("Clear", "clear", {});
     action(edit, "Select All", "selectAll", QKeySequence::SelectAll,
@@ -550,9 +685,7 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
     auto *go = menuBar()->addMenu("Go");
     const auto place = [this](const QString &path)
     {
-        if (m_operations.readableDirectory(path))
-            emit openFolder(QDir::cleanPath(path));
-        else
+        if (!navigate(path))
             QMessageBox::information(this, "Go", "“" + QDir::toNativeSeparators(path) +
                                                      "” is not available.");
     };
@@ -610,11 +743,17 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
             });
     auto *window = menuBar()->addMenu("Window");
     action(window, "Open Parent", "parent", QKeySequence(Qt::CTRL | Qt::Key_Up),
+           [this] { navigate(QFileInfo(m_directory).absolutePath()); });
+    auto *back = action(go, "Back", "back", QKeySequence(Qt::CTRL | Qt::Key_BracketLeft), [this] { m_backButton->click(); });
+    back->setShortcuts(back->shortcuts() << QKeySequence(Qt::ALT | Qt::Key_Left) << QKeySequence(Qt::Key_Backspace));
+    auto *forward = action(go, "Forward", "forward", QKeySequence(Qt::CTRL | Qt::Key_BracketRight), [this] { m_forwardButton->click(); });
+    forward->setShortcuts(forward->shortcuts() << QKeySequence(Qt::ALT | Qt::Key_Right));
+    findChild<QAction *>("parent")->setShortcuts(findChild<QAction *>("parent")->shortcuts() << QKeySequence(Qt::ALT | Qt::Key_Up));
+    action(window, "Open in New Window", "openNewWindow", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_O),
            [this]
            {
-               auto p = QFileInfo(m_directory).absolutePath();
-               if (m_operations.readableDirectory(p))
-                   emit openFolder(p);
+               const auto p = selectedPaths();
+               emit openFolder(p.size() == 1 && QFileInfo(p.first()).isDir() ? p.first() : m_directory);
            });
     // The open Finder windows, rebuilt each time the menu opens (Mac OS 9.1 Window menu).
     auto *windowList = window->addSeparator();
@@ -647,6 +786,7 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
                                    .arg(items.size() == 1 ? "this item" : "these items"),
                                QMessageBox::Ok | QMessageBox::Cancel, this);
                ask.setDefaultButton(QMessageBox::Cancel); // Destructive: Cancel is the default.
+               keepReturnOnTheDefault(ask);
                if (ask.exec() != QMessageBox::Ok)
                    return;
                auto ops = m_operations;
@@ -759,6 +899,9 @@ void FinderWindow::updateActions()
     enable("paste", clipboard && clipboard->hasUrls() && m_directory != m_operations.trashBase() + "/files");
     enable("rename", writable && paths.size() == 1);
     enable("duplicate", writable && paths.size() == 1);
+    enable("makeAlias", writable && !paths.isEmpty());
+    enable("newFile", writable);
+    enable("openTerminal", !trash);
     enable("trash", writable && !paths.isEmpty());
     enable("restore", trash && paths.size() == 1);
     enable("cleanUp", m_views->currentIndex() == 0);
@@ -822,6 +965,127 @@ void FinderWindow::showInfo(const QString &path)
     m_infoWindows.insert(path, window);
     window->show();
 }
+void FinderWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    // Places beside a small, Mac-sized window would leave too little room for the folder.
+    if (m_places)
+        m_places->setVisible(width() >= 480);
+}
+void FinderWindow::updateTitle()
+{
+    setWindowTitle(m_directory == m_operations.trashBase() + "/files" ? "Trash"
+                   : m_directory == m_root                            ? FinderPlaces::diskName(m_profile)
+                   : QFileInfo(m_directory).fileName().isEmpty()
+                       ? (m_directory == "/" ? QString("Computer") : FinderPlaces::diskName(m_profile))
+                       : QFileInfo(m_directory).fileName());
+}
+void FinderWindow::updateHeader()
+{
+    const int count = m_model->rowCount(m_icons->rootIndex());
+    auto text = QString("%1 item%2").arg(count).arg(count == 1 ? "" : "s");
+    const QStorageInfo volume(m_directory);
+    if (volume.isValid() && volume.isReady())
+        text += ", " + QLocale::system().formattedDataSize(volume.bytesAvailable(), 2,
+                                                            QLocale::DataSizeTraditionalFormat) +
+                " available";
+    m_header->setText(text);
+}
+void FinderWindow::updatePlaces()
+{
+    if (!m_places)
+        return;
+    m_places->clear();
+    const auto add = [this](const QString &label, const QString &path, QStyle::StandardPixmap icon)
+    {
+        if (path.isEmpty() || !m_operations.readableDirectory(path))
+            return;
+        auto *item = new QListWidgetItem(style()->standardIcon(icon), label, m_places);
+        item->setData(Qt::UserRole, QDir::cleanPath(path));
+        item->setToolTip(QDir::toNativeSeparators(path));
+        if (QFileInfo(path).canonicalFilePath() == QFileInfo(m_directory).canonicalFilePath())
+            m_places->setCurrentItem(item);
+    };
+    add(FinderPlaces::diskName(m_profile), m_root, QStyle::SP_DriveHDIcon);
+    for (const auto &[label, location] : QList<std::pair<QString, QStandardPaths::StandardLocation>>{
+             {"Desktop", QStandardPaths::DesktopLocation}, {"Documents", QStandardPaths::DocumentsLocation},
+             {"Downloads", QStandardPaths::DownloadLocation}, {"Pictures", QStandardPaths::PicturesLocation},
+             {"Music", QStandardPaths::MusicLocation}, {"Videos", QStandardPaths::MoviesLocation}})
+    {
+        const auto path = location == QStandardPaths::DesktopLocation ? m_root + "/Desktop"
+                                                                      : QStandardPaths::writableLocation(location);
+        if (QFileInfo(path).canonicalFilePath() != QFileInfo(m_root).canonicalFilePath())
+            add(label, path, QStyle::SP_DirIcon);
+    }
+    for (const auto &volumes : FinderPlaces::volumes)
+        for (const auto &drive : QDir(volumes).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+            add(drive.fileName(), drive.absoluteFilePath(), QStyle::SP_DriveFDIcon);
+    if (FinderPlaces::wholeComputer)
+        add("Computer", "/", QStyle::SP_ComputerIcon);
+    add("Trash", m_operations.trashBase() + "/files", QStyle::SP_TrashIcon);
+}
+bool FinderWindow::navigate(const QString &requested, bool record)
+{
+    const auto path = QFileInfo(requested).canonicalFilePath();
+    if (path.isEmpty() || !m_operations.readableDirectory(path) || m_busy)
+        return false;
+    if (path == m_directory)
+        return true;
+    saveState();
+    m_settings->endGroup();
+    if (record)
+    {
+        m_back.append(m_directory);
+        m_forward.clear();
+    }
+    const auto from = m_directory;
+    m_directory = path;
+    m_stateKey = QString::fromLatin1(QCryptographicHash::hash(m_directory.toUtf8(), QCryptographicHash::Sha256).toHex());
+    m_settings->beginGroup(m_stateKey);
+    m_directoryReady = false;
+    m_icons->clearSelection();
+    m_list->clearSelection();
+    m_model->setRootPath(m_directory);
+    const auto rootIndex = m_model->index(m_directory);
+    m_icons->setRootIndex(rootIndex);
+    m_list->setRootIndex(rootIndex);
+    if (m_settings->contains("list"))
+        setViewMode(m_settings->value("list").toBool());
+    updateTitle();
+    updateHeader();
+    updatePlaces();
+    m_path->setText(QDir::toNativeSeparators(m_directory));
+    m_backButton->setEnabled(!m_back.isEmpty());
+    m_forwardButton->setEnabled(!m_forward.isEmpty());
+    m_upButton->setEnabled(m_directory != "/" && m_operations.readableDirectory(QFileInfo(m_directory).absolutePath()));
+    // An already loaded folder sends no directoryLoaded again.
+    QTimer::singleShot(0, this, [this, path] {
+        if (m_directory == path && !m_model->canFetchMore(m_model->index(path)))
+        {
+            m_directoryReady = true;
+            restorePositions();
+            updateHeader();
+        }
+    });
+    updateActions();
+    emit navigated(from, m_directory);
+    return true;
+}
+void FinderWindow::pasteInto(const QString &destination)
+{
+    const auto *mime = QGuiApplication::clipboard()->mimeData();
+    if (!mime || !mime->hasUrls() || !m_receiveFiles)
+        return;
+    QStringList paths;
+    for (const auto &url : mime->urls())
+        if (url.isLocalFile())
+            paths << url.toLocalFile();
+    const bool cut = mime->data("application/x-kde-cutselection") == "1" ||
+                     mime->data("x-special/gnome-copied-files").startsWith("cut\n");
+    m_receiveFiles(paths, destination, !cut);
+    if (cut)
+        QGuiApplication::clipboard()->clear(); // A moved item cannot be pasted again.
+}
 void FinderWindow::showContextMenu(QAbstractItemView *view, QPoint point)
 {
     if (m_busy)
@@ -843,27 +1107,50 @@ void FinderWindow::showContextMenu(QAbstractItemView *view, QPoint point)
         if (auto *action = findChild<QAction *>(name))
             menu->addAction(action);
     };
+    // Like Dolphin's: the file commands where people look for them, in Mac OS 9's order.
     if (index.isValid())
     {
+        const auto clicked = m_model->filePath(index);
+        const bool folder = m_model->isDir(index);
         add("open");
         add("openWith");
         menu->addSeparator();
-        add("getInfo");
+        add("cut");
+        add("copy");
+        if (folder)
+        {
+            auto *into = menu->addAction("Paste Into Folder");
+            into->setObjectName("pasteInto");
+            into->setEnabled(findChild<QAction *>("paste")->isEnabled() && selectedPaths().size() == 1);
+            connect(into, &QAction::triggered, this, [this, clicked] { pasteInto(clicked); });
+        }
+        add("copyPath");
         menu->addSeparator();
+        add("getInfo");
         add("rename");
         add("duplicate");
+        add("makeAlias");
+        if (folder)
+            add("openTerminal");
         menu->addSeparator();
         add(m_directory == m_operations.trashBase() + "/files" ? "restore" : "trash");
     }
     else
     {
         add("newFolder");
+        add("newFile");
+        menu->addSeparator();
+        add("paste");
+        menu->addSeparator();
+        add("openTerminal");
+        add("copyPath");
         menu->addSeparator();
         add("selectAll");
         add("cleanUp");
         auto *views = menu->addMenu("View");
         views->addAction(findChild<QAction *>("icons"));
         views->addAction(findChild<QAction *>("list"));
+        add("showHidden");
     }
     menu->popup(view->viewport()->mapToGlobal(point));
 }
@@ -932,11 +1219,13 @@ void FinderWindow::openIndex(const QModelIndex &index)
     QFileInfo info(path);
     if (info.isDir())
     {
-        if (m_operations.readableDirectory(path))
+        // In this window, as Dolphin does; with Option held, in its own window, as on a Mac.
+        if (!m_operations.readableDirectory(path))
+            QMessageBox::warning(this, "Open Folder", "This folder is unavailable.");
+        else if (QApplication::keyboardModifiers() & Qt::AltModifier)
             emit openFolder(path);
         else
-            QMessageBox::warning(this, "Open Folder",
-                                 "This folder is outside the selected workspace.");
+            navigate(path);
         return;
     }
     if (!m_operations.readableFile(path))

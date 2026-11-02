@@ -84,7 +84,7 @@ class SoundIntegrationTests final : public QObject {
         return nullptr;
     }
   private slots:
-    void soundPanelOpensFromBothDesktopMenusAndOwnsModalInput() {
+    void soundPanelOpensInControlPanelsFromBothDesktopMenus() {
         QTest::failOnWarning(QRegularExpression(".*(Binding loop|ReferenceError|TypeError|is not a type).*"));
         Fixture fixture; QVERIFY(fixture.initialize());
         AudioService sound(fixture.helper());
@@ -115,7 +115,10 @@ class SoundIntegrationTests final : public QObject {
         QVERIFY(click("control-strip-sound"));
         QTRY_VERIFY(item(view.contentItem(),"desktop-command-sound"));
         QVERIFY(click("desktop-command-sound"));
-        QTRY_VERIFY(panel->property("opened").toBool()); QVERIFY(manager.shellModal());
+        // The Control Panels window opens at Sound. It is modeless, and takes the keyboard.
+        auto *window=item(view.contentItem(),"control-panels-window"); QVERIFY(window);
+        QTRY_VERIFY(panel->property("opened").toBool()); QVERIFY(!manager.shellModal());
+        QVERIFY(window->isVisible()); QTRY_VERIFY(window->hasActiveFocus());
         QTRY_VERIFY(!sound.busy());
         QVERIFY2(sound.error().isEmpty(),qPrintable(sound.error()));
         QVERIFY(click("sound-device-bluez_output.headset"));
@@ -124,8 +127,8 @@ class SoundIntegrationTests final : public QObject {
         QDir().mkpath(QCoreApplication::applicationDirPath()+"/artifacts");
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath()+"/artifacts/integrated-sound.png"));
         QTest::keyClick(&view,Qt::Key_Escape);
-        QTRY_VERIFY(!manager.shellModal());
-        QTRY_VERIFY(!panel->property("visible").toBool());
+        QTRY_VERIFY(!window->isVisible());
+        QTRY_VERIFY(!panel->property("visible").toBool()); QVERIFY(!panel->property("opened").toBool());
         const auto count=fixture.commands().size();
         QTest::qWait(2200); QCOMPARE(fixture.commands().size(),count);
         QTest::mouseClick(&view,Qt::LeftButton,{},QPoint(25,13));
@@ -133,8 +136,8 @@ class SoundIntegrationTests final : public QObject {
         QVERIFY(click("desktop-command-control-panels"));
         QTRY_VERIFY(item(view.contentItem(),"desktop-command-sound"));
         QVERIFY(click("desktop-command-sound"));
-        QTRY_VERIFY(panel->property("opened").toBool()); QVERIFY(manager.shellModal());
-        QTest::keyClick(&view,Qt::Key_Escape); QTRY_VERIFY(!manager.shellModal());
+        QTRY_VERIFY(panel->property("opened").toBool()); QVERIFY(!manager.shellModal());
+        QTest::keyClick(&view,Qt::Key_Escape); QTRY_VERIFY(!panel->property("opened").toBool());
         QVERIFY(owned->state().isEmpty()); QVERIFY(!owned->busy());
     }
 };

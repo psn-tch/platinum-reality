@@ -2,10 +2,13 @@
 
 Version 0.1.0 is a development prototype, not completion of the requested desktop.
 
-The selected release is `0.1.0-touchscreen-20261021T124926Z`: 26 local suites,
-56 full native checks and 12 two-monitor checks per build (normal and ASan/UBSan),
-plus 16 install, 25 session and 10 extended-session checks. See the
-[current status and limits](status.md) and [handoff](../HANDOFF.md).
+This document describes source capabilities and remaining work, not the release
+selected on a particular computer. Release manifests identify each candidate's
+actual checks; the dated [implementation status](status.md) is a development log.
+The last completed candidate gate before the wake-recovery work ran 37 component
+suites, 87 full native cases and 12 two-monitor cases in normal and ASan/UBSan
+builds, with separate installed/session/wallet/login checks. Those results do not
+qualify later edits, physical suspend or uninstrumented external software.
 
 psn_tch's current priority is a native daily driver that replaces KDE. The next
 steps are concrete service/application gaps; historical certification remains a
@@ -13,18 +16,21 @@ separate workstream.
 
 | Area | Current state | Next gate |
 | --- | --- | --- |
+| Sleep and recovery | Lock coverage, disposable PAM/fprintd authentication and abandoned-lock recovery have software evidence; fresh-client wake recovery and a locked-session recovery key are in development | Resolve the reported frozen desktop after wake; actual lid/dock/authentication feedback. See [lock-screen scope](lock-screen.md). Replacing a lock client cannot repair a frozen outer compositor/DRM path |
+| Graphics fallback | Capability-based buffers verified in owned GL and plain-virtio guests, with real Wayland/X11 input and pixels; see [rendering evidence](software-rendering.md) | Broader physical GPU/driver trials; VM rendering is not suspend or scanout qualification |
 | Bluetooth | Selected panel, Control Strip and Applications entry; existing pairings, connection actions and default pairing agent; qualified against fake BlueZ | User's mice/headsets/controller reconnection and pairing trial |
 | Saved sign-ins | Selected after13 fake-wallet checks per build and full native/session qualification | Real wallet/VS Code/Chromium sign-in trial |
 | Audio routing | Sound and alert sounds selected after full release gate; offscreen panel and installed backend tested with owned virtual PipeWire | Direct native panel/virtual-server workflow, real WirePlumber and headset/microphone trial |
-| Displays | Extend opt-in and fullscreen fix selected; owned two-monitor checks pass | Physical monitor/hotplug/rollback coverage; production Mirror stays disabled |
+| Displays | Explicit Use all displays activates connected screens; remembered main-display choice follows matching monitor identities across extended logins, with failed-save rollback | Physical dock/EDID/lid and mixed-monitor performance feedback; arbitrary configuration with timed confirmation and production Mirror remain unfinished. See [display topology](display-topology-session.md) for source tests versus historical checkpoints |
 | Game/application lifetime | Selected shared-X11 lifetime fix; readable supplied Steam-title fallback, native windowless apps retained | Hello Kitty Island Adventure launch/exit trial; actual games remain unqualified |
 | Touchscreen | Selected multi-binding delivery fix; real Firefox/Chromium mouse and touch rows, raw cancellation/binding-release checks, owned rotated2.3x venues pass | Physical Firefox links/typing/swipe trial after chosen next login; calibration/general X11 touch and unexplained earlier exit deadlines remain open |
-| Clipboard and Command keys | Batch-1 source integration under independent normal/sanitizer qualification; held-key focus and deferred-copy ordering defects reproduced and corrected | Complete source gate, then installed/session/wallet qualification before a next-login release; later attention/primary-selection batches remain separate |
+| Clipboard and Command keys | Bounded asynchronous writers and per-offer snapshots qualified; primary selection, command-line clipboard interfaces and Command-key routing have owned native coverage | Rich-format/application breadth; Qt reads offered formats without a byte/time budget, so bounded writers do not isolate hostile sources |
 | Application breadth and session services | Browsers, X11, input capture, tray, notifications, keep-awake and lock have bounded software gates | Ordinary game/application/OAuth trials; physical authentication/suspend and remaining portal/service integration |
 
-The wallet gate completed in Rocky's owned host venue; the other executor's
-socket restrictions did not apply here. Its verified source checkpoint was saved
-before Sound integration. No selected release is replaced by an unqualified source build.
+No selected release is replaced by an unqualified source build. Public 1.0 readiness
+depends on daily use and recovery, hardware/application feedback, fresh installation
+and rollback, and review of the final source/licence/export. A staged user-local
+candidate is not a public release; publication still requires an explicit go.
 
 The older milestone table below retains its original counts and scope.
 

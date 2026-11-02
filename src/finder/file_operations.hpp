@@ -24,6 +24,9 @@ struct FinderPlaces
 {
     static inline QString trash;
     static inline QStringList volumes;
+    // The whole computer can be browsed (read-only outside the home folder and drives), as in
+    // Dolphin. Set only for the real home; tests keep their workspace boundary.
+    static inline bool wholeComputer = false;
     static QString trashFor(const QString &profile) { return trash.isEmpty() ? profile + "/data/Trash" : trash; }
     // The home folder's disk name: "Hard Disk", or the profile's finder.ini diskName (for example
     // "Macintosh HD"). Shared by the Finder and the desktop.
@@ -56,6 +59,10 @@ class FileOperations
     FileResult duplicate(const QString &source) const;
     FileResult rename(const QString &source, const QString &name) const;
     FileResult createFolder(const QString &directory, const QString &name) const;
+    // An empty file ("untitled.txt", "untitled 2.txt", …) and an alias: a symbolic link to the
+    // item, "<name> alias", beside it (Mac OS 9's Make Alias).
+    FileResult createFile(const QString &directory, const QString &name) const;
+    FileResult makeAlias(const QString &source) const;
     FileResult trash(const QString &source) const;
     FileResult restore(const QString &trashedPath) const;
     // Special > Empty Trash…, after the user confirmed: permanently removes one

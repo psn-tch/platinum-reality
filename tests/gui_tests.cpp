@@ -20,6 +20,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QListWidget>
+#include <QToolButton>
 #include <QMenuBar>
 #include <QMimeData>
 #include <QTreeWidget>
@@ -34,6 +36,7 @@
 #include <QTextEdit>
 #include <QTimer>
 #include <QtTest>
+#include "qt_theme_evidence.hpp"
 
 class GuiTests : public QObject
 {
@@ -95,6 +98,102 @@ class GuiTests : public QObject
         QTRY_VERIFY(QFileInfo::exists(root.path() + "/dst/C.txt") && !QFileInfo::exists(root.path() + "/src/C.txt"));
         // The move is visible before its worker reports back; closing a busy window asks the user to wait.
         QTRY_VERIFY(!target->directoryState().value("busy").toBool());
+    }
+    void rightClickMenusOfferTheFileCommandsLikeDolphin()
+    {
+        // psn_tch, 2026-10-29: Finder should be as usable as Dolphin. Right-click is where
+        // Cut, Copy and Paste are looked for.
+        QTemporaryDir root, profile;
+        QVERIFY(QDir(root.path()).mkpath("Folder"));
+        {
+            QFile f(root.path() + "/Note.txt");
+            QVERIFY(f.open(QIODevice::WriteOnly) && f.write("note") > 0);
+        }
+        QPointer<FinderWindow> window = new FinderWindow(root.path(), profile.path(), root.path());
+        const auto close = qScopeGuard([&] { if (window) window->close(); });
+        window->show();
+        QTRY_VERIFY(window->directoryState().value("loaded").toBool());
+        auto *icons = window->findChild<FolderIcons *>();
+        auto *model = qobject_cast<QFileSystemModel *>(icons->model());
+        QTRY_VERIFY(model->index(root.path() + "/Note.txt").isValid() && model->index(root.path() + "/Folder").isValid());
+        const auto menuFor = [&](const QString &name) -> QStringList
+        {
+            for (auto *old : window->findChildren<QMenu *>("finderContextMenu"))
+                old->close();
+            if (!QTest::qWaitFor([&] { return window->findChildren<QMenu *>("finderContextMenu").isEmpty(); }))
+                return {};
+            QPoint point(icons->viewport()->width() - 5, icons->viewport()->height() - 5);
+            if (!name.isEmpty())
+                point = icons->visualRect(model->index(root.path() + "/" + name)).center();
+            emit icons->customContextMenuRequested(point);
+            QMenu *menu = nullptr;
+            if (!QTest::qWaitFor([&] {
+                    for (auto *m : window->findChildren<QMenu *>("finderContextMenu"))
+                        if (m->isVisible())
+                            menu = m;
+                    return menu != nullptr; }))
+                return {};
+            QStringList texts;
+            for (auto *action : menu->actions())
+                texts << (action->isSeparator() ? QString("-") : action->text() + (action->isEnabled() ? "" : " (off)"));
+            menu->close();
+            return texts;
+        };
+        const auto onFile = menuFor("Note.txt");
+        for (const auto &command : {"Open", "Cut", "Copy", "Copy Path", "Get Info…", "Rename…", "Duplicate",
+                                    "Make Alias", "Move to Trash"})
+            QVERIFY2(onFile.contains(command), qPrintable(onFile.join(", ")));
+        QVERIFY(!onFile.contains("Paste Into Folder") && !onFile.contains("Open in Terminal"));
+        const auto onFolder = menuFor("Folder");
+        QVERIFY2(onFolder.contains("Paste Into Folder (off)") && onFolder.contains("Open in Terminal"),
+                 qPrintable(onFolder.join(", ")));
+        const auto onBackground = menuFor({});
+        for (const auto &command : {"New Folder", "New Text File", "Paste (off)", "Open in Terminal", "Select All", "Show Hidden Files"})
+            QVERIFY2(onBackground.contains(command), qPrintable(onBackground.join(", ")));
+        const auto trigger = [&](const char *name)
+        {
+            auto *action = window->findChild<QAction *>(name);
+            QVERIFY(action);
+            QTRY_VERIFY(action->isEnabled());
+            action->trigger();
+        };
+        const auto select = [&](const QString &name)
+        {
+            icons->selectionModel()->clearSelection();
+            icons->selectionModel()->select(model->index(root.path() + "/" + name), QItemSelectionModel::Select);
+        };
+        // Copy, then Paste Into Folder on the folder's own menu.
+        select("Note.txt");
+        trigger("copy");
+        const auto intoFolder = menuFor("Folder");
+        QVERIFY2(intoFolder.contains("Paste Into Folder"), qPrintable(intoFolder.join(", ")));
+        // Open the folder's menu again and choose it.
+        for (auto *old : window->findChildren<QMenu *>("finderContextMenu"))
+            old->close();
+        QTRY_VERIFY(window->findChildren<QMenu *>("finderContextMenu").isEmpty());
+        emit icons->customContextMenuRequested(icons->visualRect(model->index(root.path() + "/Folder")).center());
+        QAction *into = nullptr;
+        QTRY_VERIFY((into = window->findChild<QAction *>("pasteInto")) && into->isEnabled());
+        into->trigger();
+        QTRY_VERIFY(QFileInfo::exists(root.path() + "/Folder/Note.txt"));
+        QTRY_VERIFY(!window->directoryState().value("busy").toBool());
+        // Copy Path puts the path on the clipboard as text.
+        select("Note.txt");
+        trigger("copyPath");
+        QCOMPARE(QGuiApplication::clipboard()->text(), root.path() + "/Note.txt");
+        // Make Alias: a link beside it. New Text File: untitled.txt, then untitled 2.txt.
+        trigger("makeAlias");
+        QTRY_VERIFY(QFileInfo(root.path() + "/Note.txt alias").isSymLink());
+        QCOMPARE(QFileInfo(root.path() + "/Note.txt alias").symLinkTarget(), root.path() + "/Note.txt");
+        QTRY_VERIFY(!window->directoryState().value("busy").toBool());
+        trigger("newFile");
+        QTRY_VERIFY(QFileInfo::exists(root.path() + "/untitled.txt"));
+        QTRY_VERIFY(!window->directoryState().value("busy").toBool());
+        trigger("newFile");
+        QTRY_VERIFY(QFileInfo::exists(root.path() + "/untitled 2.txt"));
+        QTRY_VERIFY(!window->directoryState().value("busy").toBool());
+        // The Delete key moves the selection to the Trash, as in Dolphin.
+        QVERIFY(window->findChild<QAction *>("trash")->shortcuts().contains(QKeySequence(Qt::Key_Delete)));
     }
     void findListsMatchingNamesButNotHiddenFoldersOrLinkedOnes()
     {
@@ -180,8 +279,8 @@ class GuiTests : public QObject
 
     void goMenuOpensStandardFoldersAndMountedDrives()
     {
-        // Go (native adaptation): Macintosh HD's Desktop, and each mounted drive, open in their own
-        // windows; drives come and go as they are mounted; nothing outside the places appears.
+        // Go (native adaptation): Macintosh HD's Desktop, and each mounted drive, shown in this window
+        // as in Dolphin; drives come and go as they are mounted; nothing outside the places appears.
         QTemporaryDir root, profile, drives;
         QVERIFY(QDir(root.path()).mkdir("Desktop") && QDir(drives.path()).mkdir("USB STICK"));
         FinderPlaces::volumes = {drives.path()};
@@ -194,8 +293,8 @@ class GuiTests : public QObject
         auto *desktop = window->findChild<QAction *>("goDesktop");
         QVERIFY(desktop && window->findChild<QAction *>("goHome") && window->findChild<QAction *>("goToFolder"));
         desktop->trigger();
-        QCOMPARE(opened.size(), 1);
-        QCOMPARE(opened.last().first().toString(), root.path() + "/Desktop");
+        QCOMPARE(window->directory(), QFileInfo(root.path() + "/Desktop").canonicalFilePath());
+        QCOMPARE(opened.size(), 0);
         QMenu *go = nullptr;
         for (auto *menu : window->menuBar()->findChildren<QMenu *>())
             if (menu->title() == "Go")
@@ -209,7 +308,8 @@ class GuiTests : public QObject
         QCOMPARE(found.size(), 1);
         QCOMPARE(found.first()->text(), QString("USB STICK"));
         found.first()->trigger();
-        QCOMPARE(opened.last().first().toString(), drives.path() + "/USB STICK");
+        QCOMPARE(window->directory(), QFileInfo(drives.path() + "/USB STICK").canonicalFilePath());
+        window->findChild<QAction *>("goHome")->trigger(); // Leave the drive before it is unmounted.
         // Unmounted: gone the next time the menu opens.
         QVERIFY(QDir(drives.path() + "/USB STICK").removeRecursively());
         emit go->aboutToShow();
@@ -257,14 +357,14 @@ class GuiTests : public QObject
         QVERIFY(operations.trash(root.path() + "/Old").ok);
         auto *empty = alpha->findChild<QAction *>("emptyTrash");
         QVERIFY(empty);
-        bool cancelWasDefault = false;
+        bool cancelWasDefault = false, returnWasDelivered = false, focusOnOk = false;
         const auto answer = [&](bool accept)
         {
             // Poll until the modal question exists; a fixed delay can fire before
             // exec() shows it and leave the test blocked forever.
             auto *poll = new QTimer(this);
             poll->setInterval(20);
-            connect(poll, &QTimer::timeout, poll, [poll, accept, &cancelWasDefault]
+            connect(poll, &QTimer::timeout, poll, [poll, accept, &cancelWasDefault, &returnWasDelivered, &focusOnOk]
             {
                 for (auto *widget : QApplication::topLevelWidgets())
                     if (auto *box = qobject_cast<QMessageBox *>(widget); box && box->isVisible())
@@ -272,7 +372,25 @@ class GuiTests : public QObject
                         poll->stop();
                         poll->deleteLater();
                         cancelWasDefault = box->defaultButton() == box->button(QMessageBox::Cancel);
-                        (accept ? box->button(QMessageBox::Ok) : box->defaultButton())->click();
+                        if (accept)
+                            box->button(QMessageBox::Ok)->click();
+                        else if (focusOnOk)
+                        {
+                            // The destructive button has focus (Tab, or a pointer pressed on it), and
+                            // Return still means the ringed default, Cancel, as in Mac OS 9.
+                            box->button(QMessageBox::Ok)->setFocus(Qt::TabFocusReason);
+                            returnWasDelivered = box->button(QMessageBox::Ok)->hasFocus();
+                            QTest::keyClick(box->button(QMessageBox::Ok), Qt::Key_Return);
+                        }
+                        else if (auto *focused = box->focusWidget(); focused && focused->hasFocus())
+                        {
+                            qInfo() << "Empty Trash initial focus" << focused->objectName()
+                                    << "default" << box->defaultButton()->text();
+                            returnWasDelivered = true;
+                            QTest::keyClick(focused, Qt::Key_Return);
+                        }
+                        else
+                            box->reject(); // Fail the focus assertion without trapping the test.
                         return;
                     }
             });
@@ -282,7 +400,15 @@ class GuiTests : public QObject
         answer(false);
         empty->trigger();
         QVERIFY(cancelWasDefault);
+        QVERIFY(returnWasDelivered);
         QCOMPARE(operations.trashedItems().size(), 1);
+        focusOnOk = true;
+        returnWasDelivered = false;
+        answer(false);
+        empty->trigger();
+        QVERIFY(returnWasDelivered);
+        QCOMPARE(operations.trashedItems().size(), 1); // Return with OK focused kept the Trash.
+        focusOnOk = false;
         answer(true);
         empty->trigger();
         QTRY_VERIFY(operations.trashedItems().isEmpty());
@@ -294,6 +420,8 @@ class GuiTests : public QObject
     }
     void initTestCase()
     {
+        if (qEnvironmentVariableIsSet("PLATINUM_TEST_REQUIRE_KDE_THEME"))
+            QVERIFY2(kdePlatformThemeLoaded(), "The actual KDE Qt platform theme is not loaded; fallback cannot qualify this test.");
         QApplication::setStyle(new PlatinumStyle);
         QApplication::setFont(classicInterfaceFont());
     }
@@ -530,25 +658,73 @@ class GuiTests : public QObject
         QTRY_VERIFY(!photos);
         QCOMPARE(listing(), before);
     }
-    void folderDoubleClickOpensSpatialWindow()
+    void foldersOpenInTheSameWindowWithBackForwardAndPlacesLikeDolphin()
     {
-        QTemporaryDir root;
-        QTemporaryDir profile;
-        QDir(root.path()).mkdir("Documents");
+        // psn_tch, 2026-10-29: as usable as Dolphin. A folder opens in the same window; Back,
+        // Forward and Enclosing Folder, the path field and the Places list move around; Option
+        // still opens a folder in its own window, as on a Mac.
+        QTemporaryDir root, profile;
+        QVERIFY(QDir(root.path()).mkpath("Documents/Letters") && QDir(root.path()).mkpath("Desktop"));
+        const auto canonical = [](const QString &path) { return QFileInfo(path).canonicalFilePath(); };
         auto *w = new FinderWindow(root.path(), profile.path(), root.path());
+        const auto close = qScopeGuard([&] { w->close(); });
         w->show();
         QSignalSpy opened(w, &FinderWindow::openFolder);
+        QSignalSpy navigated(w, &FinderWindow::navigated);
         auto *view = w->findChild<FolderIcons *>("iconView");
         auto *model = qobject_cast<QFileSystemModel *>(view->model());
-        auto index = model->index(root.path() + "/Documents");
-        QTRY_VERIFY(view->visualRect(index).isValid());
-        QTest::qWait(100);
-        const auto point = view->visualRect(index).center();
-        QTest::mouseClick(view->viewport(), Qt::LeftButton, {}, point);
-        QTest::mouseDClick(view->viewport(), Qt::LeftButton, {}, point);
+        auto *back = w->findChild<QToolButton *>("backButton");
+        auto *forward = w->findChild<QToolButton *>("forwardButton");
+        auto *up = w->findChild<QToolButton *>("upButton");
+        auto *path = w->findChild<QLineEdit *>("pathField");
+        QVERIFY(back && forward && up && path);
+        QVERIFY(!back->isEnabled() && !forward->isEnabled() && !up->isEnabled()); // Home is the top.
+        const auto doubleClick = [&](const QString &name, Qt::KeyboardModifiers modifiers = {})
+        {
+            QTRY_VERIFY(w->directoryState().value("loaded").toBool());
+            const auto index = model->index(w->directory() + "/" + name);
+            QTRY_VERIFY(view->visualRect(index).isValid());
+            QTest::qWait(150);
+            const auto point = view->visualRect(index).center();
+            QTest::mouseClick(view->viewport(), Qt::LeftButton, modifiers, point);
+            QTest::mouseDClick(view->viewport(), Qt::LeftButton, modifiers, point);
+        };
+        doubleClick("Documents");
+        QTRY_COMPARE(w->directory(), canonical(root.path() + "/Documents"));
+        QCOMPARE(opened.count(), 0);
+        QCOMPARE(w->windowTitle(), QString("Documents"));
+        QCOMPARE(path->text(), QDir::toNativeSeparators(canonical(root.path() + "/Documents")));
+        QVERIFY(back->isEnabled() && up->isEnabled() && !forward->isEnabled());
+        QTRY_VERIFY(w->directoryState().value("loaded").toBool());
+        doubleClick("Letters");
+        QTRY_COMPARE(w->directory(), canonical(root.path() + "/Documents/Letters"));
+        back->click();
+        QCOMPARE(w->directory(), canonical(root.path() + "/Documents"));
+        QVERIFY(forward->isEnabled());
+        forward->click();
+        QCOMPARE(w->directory(), canonical(root.path() + "/Documents/Letters"));
+        up->click();
+        QCOMPARE(w->directory(), canonical(root.path() + "/Documents"));
+        // A typed path, and the Places list.
+        path->setText("~nowhere");
+        QTest::keyClick(path, Qt::Key_Return);
+        QCOMPARE(w->directory(), canonical(root.path() + "/Documents")); // Unknown: stays.
+        path->setText(root.path() + "/Documents/Letters");
+        QTest::keyClick(path, Qt::Key_Return);
+        QCOMPARE(w->directory(), canonical(root.path() + "/Documents/Letters"));
+        auto *places = w->findChild<QListWidget *>("placesList");
+        QVERIFY(places && places->count() >= 2);
+        QCOMPARE(places->item(1)->text(), QString("Desktop"));
+        QCOMPARE(places->item(0)->data(Qt::UserRole).toString(), QDir::cleanPath(root.path()));
+        emit places->itemClicked(places->item(0));
+        QCOMPARE(w->directory(), canonical(root.path()));
+        QVERIFY(navigated.count() >= 6);
+        // Option-double-click: its own window, as on a Mac.
+        QTRY_VERIFY(w->directoryState().value("loaded").toBool());
+        doubleClick("Documents", Qt::AltModifier);
         QTRY_COMPARE(opened.count(), 1);
         QCOMPARE(opened.first().first().toString(), root.path() + "/Documents");
-        w->close();
+        QCOMPARE(w->directory(), canonical(root.path()));
     }
     void contextMenusSelectTheClickedItemPreserveGroupsAndOfferBackgroundActions()
     {
@@ -1034,6 +1210,63 @@ class GuiTests : public QObject
                                dialog->button(QMessageBox::Discard)->click();
                            });
         QVERIFY(window.close());
+    }
+    void returnInSaveChangesSavesEvenWithDiscardFocused()
+    {
+        // Return is the ringed default, Save, even when Discard has focus: it never throws work away.
+        QTemporaryDir dir;
+        const auto path = dir.path() + "/story.txt";
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("before");
+        f.close();
+        EditorWindow window(path);
+        window.show();
+        window.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        auto *text = window.findChild<QTextEdit *>("documentText");
+        text->selectAll();
+        text->insertPlainText("after");
+        bool returnWasDelivered = false, saveWasDefault = false, timedOut = false;
+        QTimer watchdog;
+        watchdog.setSingleShot(true);
+        auto *poll = new QTimer(&window);
+        poll->setInterval(20);
+        connect(poll, &QTimer::timeout, poll, [poll, &returnWasDelivered, &saveWasDefault]
+        {
+            auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            if (!box)
+                return;
+            poll->stop();
+            saveWasDefault = box->defaultButton() == box->button(QMessageBox::Save);
+            auto *discard = box->button(QMessageBox::Discard);
+            if (!saveWasDefault || !discard)
+            {
+                box->reject(); // Report below, after exec() exits; no assertion strands the modal.
+                return;
+            }
+            discard->setFocus(Qt::TabFocusReason);
+            returnWasDelivered = discard->hasFocus();
+            QTest::keyClick(discard, Qt::Key_Return);
+        });
+        connect(&watchdog, &QTimer::timeout, &window, [&]
+        {
+            timedOut = true;
+            poll->stop();
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+                box->reject();
+        });
+        poll->start();
+        watchdog.start(5000);
+        const bool closed = window.close();
+        watchdog.stop();
+        poll->stop();
+        QVERIFY2(!timedOut, "Save Changes test did not finish its modal question within five seconds");
+        QVERIFY(saveWasDefault);
+        QVERIFY(closed);
+        QVERIFY(returnWasDelivered);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        QCOMPARE(f.readAll(), QByteArray("after"));
     }
     void commandShortcutSavesDocument()
     {

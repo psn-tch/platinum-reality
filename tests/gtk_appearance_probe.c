@@ -49,6 +49,14 @@ static void method(GDBusConnection *connection, const gchar *sender, const gchar
             invocation, "org.frankenstein.GtkProbe.Closed", "The disposable window has closed.");
         return;
     }
+    if (g_str_equal(name, "SetModal"))
+    {
+        gboolean modal = FALSE;
+        g_variant_get(parameters, "(b)", &modal);
+        gtk_window_set_modal(GTK_WINDOW(window), modal);
+        g_dbus_method_invocation_return_value(invocation, NULL);
+        return;
+    }
     GVariantBuilder state;
     g_variant_builder_init(&state, G_VARIANT_TYPE("a{sv}"));
     g_variant_builder_add(&state, "{sv}", "clicks", g_variant_new_int32(clicks));
@@ -95,7 +103,8 @@ int main(int argc, char **argv)
 #endif
     char *title = g_strconcat("GTK ", suffix, " Platinum Probe", NULL);
     gtk_window_set_title(GTK_WINDOW(window), title);
-    gtk_window_set_decorated(GTK_WINDOW(window), FALSE);
+    gtk_window_set_decorated(GTK_WINDOW(window),
+                             g_strcmp0(g_getenv("FRANKENSTEIN_GTK_DECORATED"), "1") == 0);
     gtk_window_set_default_size(GTK_WINDOW(window), 420, 310);
     GtkWidget *fixed = gtk_fixed_new();
 #if GTK_MAJOR_VERSION == 3
@@ -125,6 +134,7 @@ int main(int argc, char **argv)
         return 3;
     const char *xml = "<node><interface name='org.frankenstein.GtkProbe'>"
                       "<method name='State'><arg type='a{sv}' direction='out'/></method>"
+                      "<method name='SetModal'><arg type='b' direction='in'/></method>"
                       "<method name='Finish'/></interface></node>";
     GDBusNodeInfo *info = g_dbus_node_info_new_for_xml(xml, &error);
     static const GDBusInterfaceVTable vtable = {.method_call = method};

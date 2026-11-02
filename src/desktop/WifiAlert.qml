@@ -93,7 +93,7 @@ ShellDialog {
                         visible: alert.asksUser
                         width: 220; height: 26; font.pixelSize: 13; selectByMouse: true
                         color: "black"; selectionColor: "#202050"; selectedTextColor: "white"
-                        background: Rectangle {color: "white"; border.color: "#555"}
+                        background: FieldBackground {}
                         maximumLength: 256
                         onAccepted: password.forceActiveFocus()
                     }
@@ -104,7 +104,7 @@ ShellDialog {
                         width: 220; height: 26; font.pixelSize: 13; selectByMouse: true
                         echoMode: show.checked ? TextInput.Normal : TextInput.Password
                         color: "black"; selectionColor: "#202050"; selectedTextColor: "white"
-                        background: Rectangle {color: "white"; border.color: "#555"}
+                        background: FieldBackground {}
                         maximumLength: 256
                         onAccepted: if (alert.acceptable) { alert.respond(true); alert.close() }
                     }

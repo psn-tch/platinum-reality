@@ -1,0 +1,13 @@
+[SddmGreeterTheme]
+Name=Platinum Reality
+Description=The Platinum Log In dialog for SDDM: an original adaptation of Mac OS 9's Log In.
+Author=psn_tch
+License=MIT
+Type=sddm-theme
+Version=0.1
+Website=https://github.com/psn-tch/platinum-reality
+MainScript=Main.qml
+ConfigFile=theme.conf
+Theme-Id=platinum-reality
+Theme-API=2.0
+QtVersion=6

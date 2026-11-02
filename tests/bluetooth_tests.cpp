@@ -421,7 +421,8 @@ class BluetoothTests final : public QObject
         QVERIFY(click("control-strip-bluetooth"));
         QVERIFY(click("desktop-command-bluetooth"));
         QTRY_VERIFY(panel->property("opened").toBool());
-        QVERIFY(manager.shellModal());
+        // A panel of the modeless Control Panels window: no modal input.
+        QVERIFY(!manager.shellModal());
         QCOMPARE(label("bluetooth-power-state"), QString("Bluetooth: On"));
         QCOMPARE(label("bluetooth-status-Test Headphones"), QString("Headphones — Connected, battery 80%"));
         QTRY_COMPARE(label("bluetooth-status-Test Mouse"), QString("Mouse — Connected"));
@@ -458,7 +459,7 @@ class BluetoothTests final : public QObject
         // Add Device: discovery, the found device, Pair, then the confirmation alert.
         QVERIFY(click("bluetooth-add"));
         QTRY_VERIFY(fake.calls.contains("StartDiscovery"));
-        QCOMPARE(panel->property("title").toString(), QString("Add Bluetooth Device"));
+        QCOMPARE(label("control-panels-heading"), QString("Add Bluetooth Device"));
         const auto speaker = fake.addDevice("AA:00:00:00:00:03", "Test Speaker", "audio-card", false, false, false, -1, true);
         fake.addDevice("AA:00:00:00:00:04", "", "", false, false, false, -1, true);
         QVERIFY(!shown("bluetooth-pair")->isEnabled());
@@ -487,6 +488,7 @@ class BluetoothTests final : public QObject
         // An untrusted device asking to connect while the panel is closed: Always Allow trusts it.
         QTest::keyClick(&view, Qt::Key_Escape);
         QTRY_VERIFY(!panel->property("visible").toBool());
+        QVERIFY(!panel->property("opened").toBool());
         QTRY_VERIFY(!manager.shellModal());
         const auto keyboard = fake.addDevice("AA:00:00:00:00:06", "Test Keyboard", "input-keyboard", true, false, false, -1, true);
         auto authorize = fake.ask("AuthorizeService", {QVariant::fromValue(QDBusObjectPath(keyboard)),

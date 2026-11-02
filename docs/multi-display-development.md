@@ -16,6 +16,54 @@ opt-in and experimental. Production Mirror is unfinished.** Owned headless check
 do not certify physical hotplug, mixed-density rendering cost or display rollback.
 No physical monitor configuration is changed by the qualification commands here.
 
+## Monitors settings: On/Off, resolution, rotation and size (2026-10-29)
+
+Every login now runs the display-managed session (`run_with_saved_display_mode` adds
+`--experimental-extended --display-settings`). The old one-screen path remains the fallback
+if that start fails before the desktop is up. The Monitors panel's choices decide which
+connected displays are on:
+
+- `displays.json` version 2: `{"version": 2, "mode": "extend" | "single", "off": [identity],
+  "displays": [{"identity", "mode": {width, height, refresh mHz}, "scale", "transform"}]}`.
+  An identity is the `main-display.json` kind (EDID first), so a monitor keeps its choices on
+  any port. `mode` stays readable by older releases. "single" means only the main display.
+- Control requests to the supervisor: `display NAME on|off`, `display NAME mode WxH@mHz`,
+  `display NAME scale S`, `display NAME rotate normal|90|180|270`, `display keep` and
+  `display revert`. Each change applies at once and is saved only on Keep. The supervisor
+  undoes it after 15 seconds by itself, so a dark or unreadable screen comes back without
+  the desktop's help, and it restores values no saved setting had chosen (Sway's own mode
+  or scale). One display always stays on, a shut lid keeps the built-in panel off, only one
+  change can wait at a time, and only modes the monitor reports are accepted.
+- Saved per-display choices win over KDE's and the known panel defaults. A mode Sway refuses
+  is not retried until the settings change.
+- The published topology (still version 1) adds `labels`, `available` (connected displays
+  that are off), `modes` and `pending`. Older desktops ignore them.
+- Panel: "Show the desktop on:" with one box per connected display; Resolution, Rotation and
+  Size for the display clicked in the arrangement (else the main one); a Keep/Revert alert
+  with Revert as the default button.
+
+- Arrange (2026-10-29): dragging a display in the panel sends `display NAME position X,Y`; it
+  lands flush against the nearest side of another display (edges line up when close) and never
+  overlaps. Every display's place is saved together (`"position"` per monitor) and wins over
+  KDE's positions; Revert puts each display back where it was.
+- Mirror (2026-10-29): `display mirror on|off`, saved as mode `"mirror"`. The supervisor's
+  `mirror_plan` gives every other display the scale (in 1/120 steps, never cropping) at which the
+  main display's whole picture fits, and centres it over the main display. Sway then shows the
+  same desktop, pointer and cursor on every display: no second renderer, pointer domain or cursor
+  copy. The topology publishes only the main display plus a `canvas` (the area the mirrored
+  displays cover) and `mirrors`; the desktop treats the bars as space outside its one screen.
+  Turning Mirror on saves each display's current size, so it returns when mirroring ends. This
+  supersedes the renderer-side Mirror plan below; Rocky's pointer/cursor prototypes remain unused.
+
+Tests: `tests/output_selection_tests.py` (choices, parsing, modes, the Mirror plan),
+`tests/display_topology_feed_tests.cpp` (the new fields), the desktop test
+`monitorsPanelTurnsDisplaysOnAndOffAndAsksToKeepTheChange`, and
+`scripts/qualify-display-switching.py` on an owned nested Sway with two outputs: on, keep,
+the 15-second revert, the main display off, refusals, the off monitor staying off at the
+next login, size keep, rotation revert, a saved size at a later login, Arrange keep and revert,
+and Mirror on/keep/off/revert with a differently shaped display (15 checks). The nested
+backend cannot qualify real mode switching, scanout or hotplug on physical monitors.
+
 ## Architecture experiment, 2026-10-20
 
 The owned Sway venue can now create two outputs:

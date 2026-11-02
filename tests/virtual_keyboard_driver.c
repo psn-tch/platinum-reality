@@ -2,7 +2,7 @@
 // lock screen receives real wl_keyboard input. Never run against a user's live session.
 // One command per line:
 //   type TEXT     lowercase letters, digits, space and . , - typed in order  -> ok
-//   key NAME      return | escape | backspace                                 -> ok
+//   key NAME      return | escape | backspace | ctrl-alt-l                    -> ok
 //   quit
 #define _GNU_SOURCE
 #include "virtual-keyboard-client.h"
@@ -117,6 +117,19 @@ int main(void)
             press(keyboard, KEY_ESC);
         else if (!strcmp(line, "key backspace"))
             press(keyboard, KEY_BACKSPACE);
+        else if (!strcmp(line, "key ctrl-alt-l"))
+        {
+            const xkb_mod_index_t control = xkb_keymap_mod_get_index(keymap, XKB_MOD_NAME_CTRL);
+            const xkb_mod_index_t alt = xkb_keymap_mod_get_index(keymap, XKB_MOD_NAME_ALT);
+            if (control == XKB_MOD_INVALID || alt == XKB_MOD_INVALID || control >= 32 || alt >= 32)
+                ok = 0;
+            else
+            {
+                zwp_virtual_keyboard_v1_modifiers(keyboard, (1u << control) | (1u << alt), 0, 0, 0);
+                press(keyboard, KEY_L);
+                zwp_virtual_keyboard_v1_modifiers(keyboard, 0, 0, 0, 0);
+            }
+        }
         else if (!strcmp(line, "quit"))
             break;
         else

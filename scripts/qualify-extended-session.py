@@ -11,6 +11,9 @@ import subprocess
 import tempfile
 import time
 
+# Never access the host HTTP daemon during installed-production-path checks.
+os.environ["PLATINUM_DISABLE_HOST_HANDHELD"] = "1"
+
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--launcher',type=Path,required=True)
 parser.add_argument('--evidence',type=Path,required=True)
@@ -81,7 +84,7 @@ with tempfile.TemporaryDirectory(prefix='platinum-extended-check-') as temporary
     arguments=['python3','-B',str(project/'scripts/standalone-session.py'),'--nested-check',
                '--experimental-extended','--primary-output','WL-2','--launcher',str(launcher),
                '--evidence',str(evidence/'session'),'--workspace',str(fixture/'Workspace'),
-               '--profile',str(fixture/'Profile'),'--shell-argument=--state-file',
+               '--profile',str(fixture/'FirstProfile'),'--shell-argument=--state-file',
                '--shell-argument='+str(desktop_state)]
     with (evidence/'supervisor.txt').open('wb') as log:
         child=subprocess.Popen(arguments,env=environment,stdout=log,stderr=subprocess.STDOUT)
@@ -101,6 +104,7 @@ with tempfile.TemporaryDirectory(prefix='platinum-extended-check-') as temporary
             assert not send_control('primary WL-999')['ok']
             assert not send_control('primary WL-2; exit')['ok']
             assert read(state_file)['display_generation']==previous
+            assert not (fixture/'FirstProfile'/'main-display.json').exists()
             checks['invalid_primary_request_does_not_change_layout']=True
             assert send_control('primary WL-1')['ok']
             current=wait(lambda:applied_after(previous))
@@ -110,6 +114,10 @@ with tempfile.TemporaryDirectory(prefix='platinum-extended-check-') as temporary
             assert send_control('primary WL-2')['ok']
             current=wait(lambda:applied_after(previous))
             checks['runtime_primary_selection_acknowledged']=True
+            saved_primary=read(fixture/'FirstProfile'/'main-display.json')
+            assert saved_primary['connector']=='WL-2'
+            assert (fixture/'FirstProfile'/'main-display.json').stat().st_mode & 0o777 == 0o600
+            checks['chosen_primary_is_saved_privately']=True
             previous=current['display_generation']
             command('output WL-2 scale 2')
             current=wait(lambda:applied_after(previous))
@@ -157,7 +165,8 @@ with tempfile.TemporaryDirectory(prefix='platinum-extended-check-') as temporary
             {'outputIndex':0,'enabled':True,'position':{'x':2000,'y':100},'priority':1},
             {'outputIndex':1,'enabled':True,'position':{'x':0,'y':0},'priority':2}]}]}]))
     state_file=evidence/'kde-session/session.json'
-    arguments=[a if a!=str(evidence/'session') else str(evidence/'kde-session') for a in arguments]
+    arguments=[str(evidence/'kde-session') if a==str(evidence/'session') else
+               str(fixture/'Profile') if a==str(fixture/'FirstProfile') else a for a in arguments]
     with (evidence/'kde-supervisor.txt').open('wb') as log:
         child=subprocess.Popen(arguments,env=environment,stdout=log,stderr=subprocess.STDOUT)
         try:
@@ -217,6 +226,191 @@ with tempfile.TemporaryDirectory(prefix='platinum-extended-check-') as temporary
             checks['offset_origin_desktop_fills_the_screen']=True
             assert send_control('logout')['ok']
             assert child.wait(timeout=20)==0
+        finally:
+            if child.poll() is None:
+                child.terminate()
+                child.wait(timeout=20)
+            (evidence/'manifest.json').write_text(json.dumps(record,indent=2)+'\n')
+    # Explicit Platinum Use-all overrides KDE's disabled-panel choice. The first
+    # three sessions above retain the experimental/KDE-compatible default.
+    (fixture/'Profile'/'displays.json').write_text(json.dumps({'version':1,'mode':'extend'}))
+    (fixture/'config'/'kwinoutputconfig.json').write_text(json.dumps([
+        {'name':'outputs','data':[{'connectorName':'WL-1','transform':'Normal','scale':1},
+                                  {'connectorName':'WL-2','transform':'Rotated90','scale':2.3}]},
+        {'name':'setups','data':[{'lidClosed':False,'outputs':[
+            {'outputIndex':0,'enabled':True,'position':{'x':696,'y':0},'priority':1},
+            {'outputIndex':1,'enabled':False,'position':{'x':0,'y':0},'priority':2}]}]}]))
+    state_file=evidence/'all-connected-session/session.json'
+    desktop_state=evidence/'all-connected-desktop-state.json'
+    arguments=[str(evidence/'all-connected-session') if a==str(evidence/'origin-session') else
+               '--shell-argument='+str(desktop_state) if a.startswith('--shell-argument='+str(evidence)) else a
+               for a in arguments]
+    with (evidence/'all-connected-supervisor.txt').open('wb') as log:
+        child=subprocess.Popen(arguments,env=environment,stdout=log,stderr=subprocess.STDOUT)
+        try:
+            current=wait(lambda:s if (s:=read(state_file)).get('ready') else None)
+            placed={o['name']:o for o in session.ipc(Path(current['backend_ipc']),3)}
+            assert placed['WL-1']['active'] and placed['WL-2']['active'], 'Use-all left KDE-disabled screen off'
+            assert current['display_arrangement_source']=='platinum-all-connected'
+            assert current['kde_arrangement']['WL-2']['enabled'] is False
+            checks['explicit_use_all_overrides_kde_disabled_panel']=True
+            assert placed['WL-2']['transform']=='270' and abs(placed['WL-2']['scale']-2.3)<0.001
+            save_snapshot('all-connected-rotated-panel',current)
+            description=record['snapshots'][-1]['snapshot']
+            session.describe_displays(list(placed.values()),current['primary_output'])
+            assert len(description['outputs'])==2
+            assert min(o['x'] for o in description['outputs'])==0
+            assert min(o['y'] for o in description['outputs'])==0
+            assert placed['WL-1']['rect']['x']==0
+            assert placed['WL-2']['rect']['x']==placed['WL-1']['rect']['width']
+            checks['newly_enabled_panel_keeps_rotation_scale_and_safe_layout']=True
+            # The connector can stay listed while its active state drops. The
+            # explicit all-displays policy must notice that, not cache names only.
+            command('output WL-2 disable')
+            wait(lambda:any(o.get('name')=='WL-2' and o.get('active') for o in
+                            session.ipc(Path(current['backend_ipc']),3)))
+            current=wait(lambda:s if (s:=read(state_file)).get('display_applied_generation')==s.get('display_generation')
+                         and not s.get('display_error') else None)
+            assert len(read(Path(current['display_topology']))['outputs'])==2
+            checks['use_all_recovers_a_connected_but_inactive_display']=True
+            # A saved per-output scale changes logical sizes without changing
+            # connector names. Repack the newly enabled panel beside the resized screen.
+            preferences=json.loads((fixture/'config'/'kwinoutputconfig.json').read_text())
+            preferences[0]['data'][0]['scale']=0.8
+            (fixture/'config'/'kwinoutputconfig.json').write_text(json.dumps(preferences))
+            previous=current['display_generation']
+            current=wait(lambda:applied_after(previous))
+            placed={o['name']:o for o in session.ipc(Path(current['backend_ipc']),3)}
+            assert abs(placed['WL-1']['scale']-0.8)<0.001
+            assert placed['WL-2']['rect']['x']==placed['WL-1']['rect']['width']
+            save_snapshot('connected-output-resized',current)
+            checks['logical_size_changes_rearrange_without_overlap']=True
+            wait(lambda:read(desktop_state).get('windows'))
+            assert send_control('logout')['ok']
+            assert child.wait(timeout=20)==0
+            assert read(state_file)['runtime_removed']
+            checks['all_connected_session_runs_finder_and_closes_cleanly']=True
+        finally:
+            if child.poll() is None:
+                child.terminate()
+                child.wait(timeout=20)
+            (evidence/'manifest.json').write_text(json.dumps(record,indent=2)+'\n')
+    # An unusable KDE seed must not strand the user on a giant canvas or repeatedly
+    # reapply it. This requests no giant buffers: validation rejects positions first.
+    (fixture/'config'/'kwinoutputconfig.json').write_text(json.dumps([
+        {'name':'outputs','data':[{'connectorName':'WL-1','transform':'Normal','scale':1},
+                                  {'connectorName':'WL-2','transform':'Normal','scale':1}]},
+        {'name':'setups','data':[{'lidClosed':False,'outputs':[
+            {'outputIndex':0,'enabled':True,'position':{'x':0,'y':0},'priority':1},
+            {'outputIndex':1,'enabled':True,'position':{'x':30000,'y':0},'priority':2}]}]}]))
+    state_file=evidence/'bad-layout-session/session.json'
+    desktop_state=evidence/'bad-layout-desktop-state.json'
+    arguments=[str(evidence/'bad-layout-session') if a==str(evidence/'all-connected-session') else
+               '--shell-argument='+str(desktop_state) if a.startswith('--shell-argument='+str(evidence)) else a
+               for a in arguments]
+    with (evidence/'bad-layout-supervisor.txt').open('wb') as log:
+        child=subprocess.Popen(arguments,env=environment,stdout=log,stderr=subprocess.STDOUT)
+        try:
+            current=wait(lambda:s if (s:=read(state_file)).get('ready') else None)
+            assert current.get('display_configuration_error')
+            placed=session.ipc(Path(current['backend_ipc']),3)
+            assert len([o for o in placed if o.get('active')])==2
+            assert max(o['rect']['x']+o['rect']['width'] for o in placed)<16384
+            save_snapshot('unusable-seed-restored',current)
+            checks['unusable_saved_layout_restores_previous_outputs']=True
+            wait(lambda:read(desktop_state).get('windows'))
+            assert send_control('logout')['ok']
+            assert child.wait(timeout=20)==0 and read(state_file)['runtime_removed']
+            checks['rejected_layout_still_runs_finder_and_logs_out']=True
+        finally:
+            if child.poll() is None:
+                child.terminate()
+                child.wait(timeout=20)
+            (evidence/'manifest.json').write_text(json.dumps(record,indent=2)+'\n')
+    # A new login restores the first session's choice even when both the launcher
+    # hint and KDE's main display disagree. Only this fixture's private profile
+    # and nested backend are used, never a physical output or user's settings.
+    (fixture/'config'/'kwinoutputconfig.json').write_text(json.dumps([
+        {'name':'outputs','data':[{'connectorName':'WL-1','transform':'Normal','scale':1},
+                                  {'connectorName':'WL-2','transform':'Normal','scale':1}]},
+        {'name':'setups','data':[{'lidClosed':False,'outputs':[
+            {'outputIndex':0,'enabled':True,'position':{'x':0,'y':0},'priority':1},
+            {'outputIndex':1,'enabled':True,'position':{'x':1120,'y':0},'priority':2}]}]}]))
+    state_file=evidence/'restored-primary-session/session.json'
+    desktop_state=evidence/'restored-primary-desktop-state.json'
+    arguments=[str(evidence/'restored-primary-session') if a==str(evidence/'bad-layout-session') else
+               str(fixture/'FirstProfile') if a==str(fixture/'Profile') else
+               'WL-1' if a=='WL-2' else
+               '--shell-argument='+str(desktop_state) if a.startswith('--shell-argument='+str(evidence)) else a
+               for a in arguments]
+    primary_path=fixture/'FirstProfile'/'main-display.json'
+    with (evidence/'restored-primary-supervisor.txt').open('wb') as log:
+        child=subprocess.Popen(arguments,env=environment,stdout=log,stderr=subprocess.STDOUT)
+        try:
+            current=wait(lambda:s if (s:=read(state_file)).get('ready') else None)
+            assert current['primary_output']=='WL-2' and current['main_display_preference']=='matched'
+            assert current['kde_arrangement']['WL-1']['primary']
+            save_snapshot('primary-restored-after-login',current)
+            checks['saved_primary_wins_over_kde_and_launcher_after_login']=True
+            saved_bytes=primary_path.read_bytes()
+            previous=current['display_generation']
+            command('output WL-2 disable')
+            current=wait(lambda:applied_after(previous))
+            assert current['primary_output']=='WL-1' and current['main_display_preference']=='unavailable'
+            assert primary_path.read_bytes()==saved_bytes
+            previous=current['display_generation']
+            command('output WL-2 enable')
+            current=wait(lambda:applied_after(previous))
+            assert current['primary_output']=='WL-2' and primary_path.read_bytes()==saved_bytes
+            checks['unavailable_saved_primary_survives_and_returns']=True
+            previous=current['display_generation']
+            assert send_control('primary WL-1')['ok']
+            current=wait(lambda:applied_after(previous))
+            assert current['primary_output']=='WL-1' and read(primary_path)['connector']=='WL-1'
+            checks['later_primary_choice_replaces_saved_preference']=True
+            wait(lambda:read(desktop_state).get('windows'))
+            assert send_control('logout')['ok'] and child.wait(timeout=20)==0
+        finally:
+            if child.poll() is None:
+                child.terminate()
+                child.wait(timeout=20)
+            (evidence/'manifest.json').write_text(json.dumps(record,indent=2)+'\n')
+    # A rejected settings write must not silently change the live main display.
+    # A directory occupying only the fixture file makes failure deterministic,
+    # including on privileged test accounts. Later successful requests recover.
+    state_file=evidence/'primary-save-error-session/session.json'
+    desktop_state=evidence/'primary-save-error-desktop-state.json'
+    arguments=[str(evidence/'primary-save-error-session') if a==str(evidence/'restored-primary-session') else
+               'WL-2' if a=='WL-1' else
+               '--shell-argument='+str(desktop_state) if a.startswith('--shell-argument='+str(evidence)) else a
+               for a in arguments]
+    with (evidence/'primary-save-error-supervisor.txt').open('wb') as log:
+        child=subprocess.Popen(arguments,env=environment,stdout=log,stderr=subprocess.STDOUT)
+        try:
+            current=wait(lambda:s if (s:=read(state_file)).get('ready') else None)
+            assert current['primary_output']=='WL-1'
+            saved_bytes=primary_path.read_bytes()
+            primary_path.unlink()
+            primary_path.mkdir()
+            answer=send_control('primary WL-2')
+            assert not answer['ok'] and answer['primary_output']=='WL-1' and answer['main_display_save_error']
+            current=wait(lambda:s if (s:=read(state_file)).get('display_applied_generation')==s.get('display_generation') else None)
+            save_snapshot('failed-primary-save-rolled-back',current)
+            assert primary_path.is_dir()
+            checks['failed_primary_save_reports_failure_and_restores_live_choice']=True
+            primary_path.rmdir()
+            primary_path.write_bytes(saved_bytes)
+            (fixture/'FirstProfile'/'displays.json').write_text('{"version":1,"mode":"extend"}\n')
+            previous=current['display_generation']
+            answer=send_control('primary WL-2')
+            assert answer['ok'] and 'main_display_save_error' not in answer
+            current=wait(lambda:applied_after(previous))
+            assert read(primary_path)['connector']=='WL-2'
+            assert (fixture/'FirstProfile'/'displays.json').read_text()=='{"version":1,"mode":"extend"}\n'
+            wait(lambda:read(desktop_state).get('windows'))
+            assert send_control('logout')['ok'] and child.wait(timeout=20)==0
+            assert read(state_file)['runtime_removed']
+            checks['primary_save_recovers_without_overwriting_use_all_and_logs_out']=True
         finally:
             if child.poll() is None:
                 child.terminate()

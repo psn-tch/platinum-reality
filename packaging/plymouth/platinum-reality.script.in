@@ -2,10 +2,22 @@
 # The built-in panel shows panel.png, the same picture as the firmware's splash. Any other display
 # shows the 512 x 342 screen of the first Macintosh, scaled by a whole number: a 50% checkerboard
 # with the startup icon (the user's own, if imported, else the project's) where that screen had it.
+# An encrypted disk asks for its password in a Macintosh dialog below the icon.
 panel_width = @PANEL_WIDTH@;
 panel_height = @PANEL_HEIGHT@;
+panel_rotation = @PANEL_ROTATION@;
+panel_scale = @PANEL_SCALE@;
 icon_x = @ICON_X@;
 icon_y = @ICON_Y@;
+dialog_x = @DIALOG_X@;
+dialog_y = @DIALOG_Y@;
+dialog_width = @DIALOG_WIDTH@;
+dialog_height = @DIALOG_HEIGHT@;
+bullet_x = @BULLET_X@;
+bullet_y = @BULLET_Y@;
+bullet_size = @BULLET_SIZE@;
+bullet_step = @BULLET_STEP@;
+bullet_max = @BULLET_MAX@;
 
 Window.SetBackgroundTopColor(0.5, 0.5, 0.5);
 Window.SetBackgroundBottomColor(0.5, 0.5, 0.5);
@@ -14,9 +26,24 @@ height = Window.GetHeight();
 left = Window.GetX();
 top = Window.GetY();
 
+# The Mac screen as it is held: turns (quarter turns clockwise, as the panel's picture was turned),
+# its size held upright, the scale and where the 512 x 342 screen starts in it.
+turns = 0;
 if (width == panel_width && height == panel_height) {
     panel = Sprite(Image("panel.png"));
     panel.SetPosition(left, top, 0);
+    turns = panel_rotation;
+    scale = panel_scale;
+    upright_width = width;
+    upright_height = height;
+    if (turns == 1 || turns == 3) {
+        upright_width = height;
+        upright_height = width;
+    }
+    origin_x = Math.Int((upright_width - 512 * scale) / 2);
+    origin_y = Math.Int((upright_height - 342 * scale) / 2);
+    dialog_image = Image("panel-dialog.png");
+    retry_image = Image("panel-retry.png");
 } else {
     scale = Math.Int(Math.Min(width / 512, height / 342));
     if (scale < 1) scale = 1;
@@ -40,4 +67,72 @@ if (width == panel_width && height == panel_height) {
     }
     icon = Sprite(Image("icon-" + scale + ".png"));
     icon.SetPosition(left + origin_x + icon_x * scale, top + origin_y + icon_y * scale, 1);
+    upright_width = width;
+    upright_height = height;
+    dialog_image = Image("dialog-" + scale + ".png");
+    retry_image = Image("retry-" + scale + ".png");
 }
+bullet_image = Image("bullet-" + scale + ".png");
+
+# Where a w x h rectangle at (x, y) on the upright screen lands on the panel, turned clockwise.
+fun turned_x(x, y, w, h) {
+    if (global.turns == 1) return global.upright_height - y - h;
+    if (global.turns == 2) return global.upright_width - x - w;
+    if (global.turns == 3) return y;
+    return x;
+}
+fun turned_y(x, y, w, h) {
+    if (global.turns == 1) return x;
+    if (global.turns == 2) return global.upright_height - y - h;
+    if (global.turns == 3) return global.upright_width - x - w;
+    return y;
+}
+fun place(sprite, x, y, w, h, z) {
+    sprite.SetPosition(global.left + turned_x(x, y, w, h), global.top + turned_y(x, y, w, h), z);
+}
+
+# A password prompt shows the dialog and one bullet per character typed (the last bullet_max
+# when there are more). A second prompt after a password was typed means it was wrong.
+typed = 0;
+wrong = 0;
+fun show_password(prompt, bullets) {
+    if (!global.dialog) {
+        global.dialog = Sprite();
+        place(global.dialog, global.origin_x + global.dialog_x * global.scale,
+              global.origin_y + global.dialog_y * global.scale,
+              global.dialog_width * global.scale, global.dialog_height * global.scale, 10);
+        i = 0;
+        while (i < global.bullet_max) {
+            global.bullet[i] = Sprite(global.bullet_image);
+            place(global.bullet[i],
+                  global.origin_x + (global.dialog_x + global.bullet_x + i * global.bullet_step) * global.scale,
+                  global.origin_y + (global.dialog_y + global.bullet_y) * global.scale,
+                  global.bullet_size * global.scale, global.bullet_size * global.scale, 11);
+            i = i + 1;
+        }
+    }
+    if (global.wrong) global.dialog.SetImage(global.retry_image);
+    else global.dialog.SetImage(global.dialog_image);
+    global.dialog.SetOpacity(1);
+    if (bullets > 0) global.typed = 1;
+    i = 0;
+    while (i < global.bullet_max) {
+        if (i < bullets) global.bullet[i].SetOpacity(1);
+        else global.bullet[i].SetOpacity(0);
+        i = i + 1;
+    }
+}
+fun show_normal() {
+    if (global.typed) global.wrong = 1;
+    global.typed = 0;
+    if (global.dialog) {
+        global.dialog.SetOpacity(0);
+        i = 0;
+        while (i < global.bullet_max) {
+            global.bullet[i].SetOpacity(0);
+            i = i + 1;
+        }
+    }
+}
+Plymouth.SetDisplayPasswordFunction(show_password);
+Plymouth.SetDisplayNormalFunction(show_normal);

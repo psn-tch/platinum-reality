@@ -6,20 +6,31 @@
 #include "lock_controller.hpp"
 #include "session_lock.hpp"
 #include <QCommandLineParser>
+#include <QDebug>
 #include <QGuiApplication>
 #include <QQmlContext>
+#include <QQuickItem>
 #include <QQuickView>
 #include <QScreen>
 #include <cstdlib>
 #include <memory>
 #include <pwd.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 int main(int argc, char **argv)
 {
     // The lock is a Wayland protocol role; there is no lock on any other platform.
     qputenv("QT_QPA_PLATFORM", "wayland");
+    // The supervisor captures stderr in lock.txt. Qt would otherwise send messages
+    // straight to journald when this child has no controlling terminal.
+    qputenv("QT_FORCE_STDERR_LOGGING", "1");
+    // Qt registers every application with the host portal. At Log In that activated
+    // xdg-desktop-portal on the user bus before any display existed, and its GTK backend
+    // failed eleven times per boot ("cannot open display", 2026-10-30). The lock needs no portal.
+    qputenv("QT_NO_XDG_DESKTOP_PORTAL", "1");
+    qSetMessagePattern("%{time yyyy-MM-ddTHH:mm:ss.zzz} pid=%{pid} %{message}");
     QGuiApplication app(argc, argv);
     app.setApplicationName("platinum-lock");
     QCommandLineParser parser;
@@ -104,6 +115,40 @@ int main(int argc, char **argv)
             qCritical("Cannot cover screen %s", qPrintable(screen->name()));
             return;
         }
+        qInfo("Lock screen: covering %s (%dx%d, DPR %.2f)", qPrintable(screen->name()),
+              screen->size().width(), screen->size().height(), screen->devicePixelRatio());
+        // Log the first rendered frame of each surface, not every password/cursor frame.
+        // Ready means the compositor secured the outputs; it is not proof that a UI drew.
+        QObject::connect(view.get(), &QQuickWindow::frameSwapped, view.get(),
+                         [name = screen->name(), first = true]() mutable
+                         {
+                             if (std::exchange(first, false))
+                                 qInfo("Lock screen: first frame on %s", qPrintable(name));
+                         }, Qt::QueuedConnection);
+        // The compositor can send keys to this window while Qt still has another lock window as the
+        // active one (it activates on keyboard enter later): those keys found no focused item and
+        // were dropped, so a password typed as the lock appeared went nowhere (seen 2026-10-29). A
+        // key here with nothing focused goes to this window's password field, which it activates.
+        struct KeysToPassword final : QObject
+        {
+            using QObject::QObject;
+            bool eventFilter(QObject *object, QEvent *event) override
+            {
+                if (event->type() != QEvent::KeyPress && event->type() != QEvent::KeyRelease)
+                    return false;
+                auto *window = qobject_cast<QQuickView *>(object);
+                if (!window || window->activeFocusItem() || !window->rootObject())
+                    return false;
+                auto *field = window->rootObject()->findChild<QQuickItem *>("login-password");
+                if (!field)
+                    return false;
+                window->requestActivate();
+                field->forceActiveFocus();
+                QCoreApplication::sendEvent(field, event);
+                return true;
+            }
+        };
+        view->installEventFilter(new KeysToPassword(view.get()));
         view->show();
         views.push_back(std::move(view));
     };
@@ -118,12 +163,14 @@ int main(int argc, char **argv)
     QObject::connect(&app, &QGuiApplication::screenRemoved, &app,
                      [&views](QScreen *screen)
                      {
+                         qInfo("Lock screen: removed %s", qPrintable(screen->name()));
                          std::erase_if(views, [screen](const auto &view) { return view->screen() == screen; });
                      });
 
     QObject::connect(&lock, &SessionLock::locked, &app,
                      [&]
                      {
+                         qInfo("Lock screen: compositor confirmed locked");
                          if (ready >= 0)
                          {
                              (void)!write(ready, "\n", 1);
@@ -144,6 +191,7 @@ int main(int argc, char **argv)
                      });
     const auto unlock = [&]
     {
+        qInfo("Lock screen: authentication succeeded; unlocking");
         fingerprint.stop();
         if (!lock.unlock())
             return;

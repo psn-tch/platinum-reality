@@ -96,6 +96,14 @@ bool FinderService::OpenDirectory(QString path)
     auto *window = new FinderWindow(m_root, m_profile, key);
     m_windows[key] = window;
     connect(window, &FinderWindow::openFolder, this, &FinderService::OpenDirectory);
+    // A window that shows another folder is found under that folder now.
+    connect(window, &FinderWindow::navigated, this,
+            [this, safe = QPointer(window)](const QString &from, const QString &to)
+            {
+                if (m_windows.value(from) == safe)
+                    m_windows.remove(from);
+                m_windows[to] = safe;
+            });
     connect(window, &FinderWindow::windowMenuRequested, this,
             [this, safe = QPointer(window)](QMenu *menu)
             {

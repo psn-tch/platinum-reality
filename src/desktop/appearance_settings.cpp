@@ -1,4 +1,6 @@
 #include "appearance_settings.hpp"
+#include <QDateTime>
+#include <QTimeZone>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -110,6 +112,10 @@ AppearanceSettings::AppearanceSettings(QString profile, QObject *parent)
         m_doubleClickCollapse = object.value("doubleClickCollapse").toBool();
     if (object.value("keepScreenAwake").isBool())
         m_keepScreenAwake = object.value("keepScreenAwake").toBool();
+    const auto clock = object.value("clock").toObject();
+    for (auto it = m_clock.begin(); it != m_clock.end(); ++it)
+        if (clock.value(it.key()).isBool())
+            it.value() = clock.value(it.key()).toBool();
 }
 bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x, int y,
                               const QString &picture, const QString &layout)
@@ -124,6 +130,9 @@ bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x,
         emit errorOccurred("The appearance settings folder could not be created.");
         return false;
     }
+    QJsonObject clock;
+    for (auto it = m_clock.cbegin(); it != m_clock.cend(); ++it)
+        clock.insert(it.key(), it.value());
     const auto bytes = QJsonDocument(QJsonObject{{"version", 1},
                                                  {"shadeDuration", duration},
                                                  {"stripVisible", visible},
@@ -134,7 +143,8 @@ bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x,
                                                  {"wallpaperLayout", layout},
                                                  {"accent", m_accent},
                                                  {"doubleClickCollapse", m_doubleClickCollapse},
-                                                 {"keepScreenAwake", m_keepScreenAwake}})
+                                                 {"keepScreenAwake", m_keepScreenAwake},
+                                                 {"clock", clock}})
                            .toJson();
     QSaveFile file(m_profile + "/appearance.json");
     if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
@@ -177,6 +187,43 @@ bool AppearanceSettings::applyOptions(QString accent, bool doubleClickCollapse)
         return true;
     m_accent = previousAccent;
     m_doubleClickCollapse = previousCollapse;
+    return false;
+}
+QVariantMap AppearanceSettings::clock() const
+{
+    QVariantMap result;
+    for (auto it = m_clock.cbegin(); it != m_clock.cend(); ++it)
+        result.insert(it.key(), it.value());
+    return result;
+}
+QVariantMap AppearanceSettings::timeZone() const
+{
+    const auto zone = QTimeZone::systemTimeZone();
+    const auto now = QDateTime::currentDateTime();
+    const auto seconds = zone.offsetFromUtc(now);
+    const auto minutes = std::abs(seconds) / 60;
+    auto amount = QString::number(minutes / 60) + (minutes / 60 == 1 ? " hour" : " hours");
+    if (minutes % 60)
+        amount += QString(" %1 minutes").arg(minutes % 60);
+    return {{"id", QString::fromUtf8(zone.id())},
+            {"name", zone.abbreviation(now)},
+            {"offset", seconds == 0 ? QString("Same as UTC")
+                                    : amount + (seconds < 0 ? " behind UTC" : " ahead of UTC")}};
+}
+bool AppearanceSettings::setClockOption(QString key, bool on)
+{
+    if (!m_clock.contains(key))
+    {
+        emit errorOccurred("That clock setting is not available.");
+        return false;
+    }
+    if (m_clock.value(key) == on)
+        return true;
+    const auto previous = std::exchange(m_clock[key], on);
+    if (save(m_duration, m_stripVisible, m_stripCollapsed, m_stripX, m_stripY, m_wallpaperPath,
+             m_wallpaperLayout))
+        return true;
+    m_clock[key] = previous;
     return false;
 }
 bool AppearanceSettings::setKeepScreenAwake(bool keepAwake)

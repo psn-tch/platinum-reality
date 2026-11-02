@@ -1,4 +1,5 @@
 #include "desktop/audio_service.hpp"
+#include "desktop/scroll_bar_art.hpp"
 #include <memory>
 #include <QFile>
 #include <QDir>
@@ -6,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QQmlContext>
 #include <QQuickItem>
 #include <QQuickView>
@@ -90,6 +92,10 @@ class AudioServiceTests final : public QObject
         return item->mapToScene(QPointF(item->width()/2, item->height()/2)).toPoint();
     }
   private slots:
+    void initTestCase()
+    {
+        registerScrollBarArt(); // the panel's scroll bars, as the desktop registers them
+    }
     void init() { QTest::failOnWarning(QRegularExpression(".*Binding loop.*")); }
     void refreshUsesTheHelperAndDoesNotInheritPythonImports()
     {
@@ -231,12 +237,15 @@ class AudioServiceTests final : public QObject
     void stoppingTheHelperAlsoStopsItsSubprocess_data()
     {
         QTest::addColumn<bool>("destroy");
-        QTest::newRow("timeout") << false;
-        QTest::newRow("destructor") << true;
+        QTest::addColumn<bool>("withoutEvents");
+        QTest::newRow("timeout") << false << false;
+        QTest::newRow("destructor") << true << false;
+        QTest::newRow("destructor-before-startup-events") << true << true;
     }
     void stoppingTheHelperAlsoStopsItsSubprocess()
     {
         QFETCH(bool, destroy);
+        QFETCH(bool, withoutEvents);
         Fixture fixture; QVERIFY(fixture.initialize());
         const auto marker = fixture.directory.filePath("descendant.json");
         const auto literal = QJsonDocument(QJsonArray{marker}).toJson(QJsonDocument::Compact) + "[0]";
@@ -244,7 +253,9 @@ class AudioServiceTests final : public QObject
             "marker=" + literal + "\n"
             "child=subprocess.Popen([sys.executable,'-I','-c','import time; time.sleep(60)',marker],"
             "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n"
-            "Path(marker).write_text(json.dumps({'parent':os.getpid(),'child':child.pid}))\n"
+            "Path(marker).write_text(json.dumps({'parent':os.getpid(),'child':child.pid,"
+            "'parentGroup':os.getpgrp(),'parentSession':os.getsid(0),"
+            "'childGroup':os.getpgid(child.pid),'childSession':os.getsid(child.pid)}))\n"
             "time.sleep(60)\n"));
         qint64 child = 0;
         const auto cleanup = qScopeGuard([&] {
@@ -254,20 +265,39 @@ class AudioServiceTests final : public QObject
         });
         auto service = std::make_unique<AudioService>(fixture.helper(), nullptr, destroy ? 25000 : 300);
         service->refresh();
-        QTRY_VERIFY(QFile::exists(marker));
-        QFile metadata(marker); QVERIFY(metadata.open(QIODevice::ReadOnly));
-        child = QJsonDocument::fromJson(metadata.readAll()).object().value("child").toInteger();
+        QByteArray recorded;
+        const auto completeMarker = [&] {
+            QFile metadata(marker);
+            if (!metadata.open(QIODevice::ReadOnly)) return false;
+            recorded = metadata.readAll();
+            child = QJsonDocument::fromJson(recorded).object().value("child").toInteger();
+            return child > 0;
+        };
+        if (withoutEvents) {
+            // Let the helper exec and spawn its child without delivering Qt's
+            // startup notification, within the usual five-second startup bound.
+            for (int attempt = 0; attempt < 500 && !completeMarker(); ++attempt)
+                QThread::msleep(10);
+            QVERIFY(completeMarker());
+        } else {
+            QTRY_VERIFY(completeMarker());
+        }
         QVERIFY(child > 0);
         QVERIFY(::kill(child, 0) == 0);
         if (destroy) service.reset();
         else { QTRY_VERIFY(!service->busy()); QVERIFY(!service->error().isEmpty()); }
+        QByteArray lastStatus;
         const auto stopped = [&] {
             QFile status(QString("/proc/%1/stat").arg(child));
             if (!status.open(QIODevice::ReadOnly)) return true;
-            const auto bytes = status.readAll();
-            return bytes.mid(bytes.lastIndexOf(')') + 2, 1) == "Z";
+            lastStatus = status.readAll();
+            // An empty read is a zombie reaped between open and read (seen in gate 30's sanitized
+            // run): gone, like a failed open. Counting it as running made this check flicker.
+            return lastStatus.isEmpty() || lastStatus.mid(lastStatus.lastIndexOf(')') + 2, 1) == "Z";
         };
-        QTRY_VERIFY_WITH_TIMEOUT(stopped(), 5000); // A loaded machine (a fresh VM's package build) needed just over 1 s.
+        QTRY_VERIFY2_WITH_TIMEOUT(stopped(),
+            qPrintable(QString("helper/child: %1; last child /proc/stat: %2")
+                .arg(QString::fromUtf8(recorded), QString::fromUtf8(lastStatus))), 5000);
     }
     void oversizedRepliesStopBeforeTheHelperFinishes()
     {
@@ -286,7 +316,7 @@ class AudioServiceTests final : public QObject
         QVERIFY2(service.error().isEmpty(), qPrintable(service.error()));
         QCOMPARE(service.state().value("defaultOutput").toString(), QString("speakers"));
     }
-    void soundPanelSelectsDevicesProfilesAndLevelsAndReleasesModalInput()
+    void soundPanelSelectsDevicesProfilesAndLevelsWithoutModalInput()
     {
         Fixture fixture; QVERIFY(fixture.initialize());
         AudioService service(fixture.helper());
@@ -297,7 +327,11 @@ class AudioServiceTests final : public QObject
         view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
         QTRY_VERIFY(!service.busy() && service.state().contains("outputs"));
         auto *session = view.rootObject()->findChild<QObject *>("fixture-session");
-        QVERIFY(session); QCOMPARE(session->property("activeTokens").toInt(), 1);
+        // The Control Panels window is modeless: it never takes the desktop's modal input.
+        QVERIFY(session); QCOMPARE(session->property("activeTokens").toInt(), 0);
+        auto *window = item(view.contentItem(), "control-panels-window");
+        QVERIFY(window); QTRY_VERIFY(window->isVisible());
+        QCOMPARE(item(view.contentItem(), "control-panels-heading")->property("text").toString(), QString("Sound"));
         QTRY_VERIFY(item(view.contentItem(), "sound-device-bluez_output.headset"));
         auto *headset = item(view.contentItem(), "sound-device-bluez_output.headset");
         QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, center(headset));
@@ -338,7 +372,8 @@ class AudioServiceTests final : public QObject
         QTRY_VERIFY(!service.busy());
         QVERIFY(view.grabWindow().save(QString(AUDIO_ARTIFACT_DIRECTORY) + "/sound-input.png"));
         QTest::keyClick(&view, Qt::Key_Escape);
-        QTRY_COMPARE(session->property("activeTokens").toInt(), 0);
+        QTRY_VERIFY(!window->isVisible());
+        QCOMPARE(session->property("activeTokens").toInt(), 0);
     }
     void pendingWheelEditsStayWithTheirDeviceAcrossTabsAndClosing()
     {

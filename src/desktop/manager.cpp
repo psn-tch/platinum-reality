@@ -1,4 +1,5 @@
 #include "manager.hpp"
+#include "scroll_bar_art.hpp"
 #include "applications/desktop_entry.hpp"
 #include <unistd.h>
 #include "appearance_settings.hpp"
@@ -19,6 +20,7 @@
 #include "attention.hpp"
 #include "clipboard.hpp"
 #include "data_control.hpp"
+#include "gtk_shell.hpp"
 #include "primary_selection.hpp"
 #include "command_keys.hpp"
 #include "client_cursors.hpp"
@@ -72,6 +74,10 @@
 #include <wayland-server-core.h>
 
 using namespace frankenstein::policy;
+bool ManagedWindow::modal() const
+{
+    return top && (top->isModal() || (xdg && GtkShell::surfaceModal(xdg->surface())));
+}
 NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString root,
                              QString profile, QString stateFile, QStringList applicationDirectories,
                              QObject *parent)
@@ -82,17 +88,20 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     static const int clientSurfaceType =
         qmlRegisterType<ClientSurfaceItem>("Frankenstein", 1, 0, "NativeClientSurfaceItem");
     Q_UNUSED(clientSurfaceType);
+    registerScrollBarArt();
     m_state.session = {qulonglong(QDateTime::currentMSecsSinceEpoch())};
     QDir().mkpath(m_profile);
     {
         // The Monitors panel's saved choice (see setUseAllDisplays); anything else means one display.
         QFile displays(m_profile + "/displays.json");
         if (!QFileInfo(displays.fileName()).isSymLink() && displays.open(QIODevice::ReadOnly) &&
-            displays.size() <= 4096)
+            displays.size() <= 16384)
             m_useAllDisplays =
                 QJsonDocument::fromJson(displays.readAll()).object().value("mode").toString() == "extend";
     }
     m_appearance = new AppearanceSettings(m_profile, this);
+    m_input = new InputSettings(m_profile, this);
+    m_energy = new EnergySettings(m_profile, this);
     m_screenshots = new ScreenshotService(m_view, this);
     m_systemControls = new SystemControls(QCoreApplication::applicationDirPath()+"/system_controls.py", this);
     m_audio = new AudioService(QCoreApplication::applicationDirPath()+"/audio_controls.py", this);
@@ -106,6 +115,13 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     // Under the same rule: tests never register a password agent with the host's iwd.
     m_wifi = new WifiService(hostBluetooth ? QDBusConnection::systemBus() : QDBusConnection(QString()), this);
     // And it never puts the host to sleep or shuts it down.
+    // Handheld Daemon's own local API for the Control Strip's Handheld module; tests never reach the
+    // host's daemon (no token file), so they can never change its TDP or controller mode.
+    // Native tests may point it at a fake daemon ("URL TOKENFILE"); nothing else can.
+    const auto handheldEndpoint = desktopHandheldEndpoint(c != nullptr, QProcessEnvironment::systemEnvironment());
+    m_handheld = new HandheldDaemon(handheldEndpoint.base, handheldEndpoint.tokenFile, this);
+    connect(m_handheld, &HandheldDaemon::failed, this, &NativeManager::errorOccurred);
+    m_handheld->refresh();
     m_power = new PowerControl(hostBluetooth ? QDBusConnection::systemBus() : QDBusConnection(QString()), this);
     connect(m_power, &PowerControl::finished, this, [this](bool ok, const QString &error)
             {
@@ -135,6 +151,8 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     auto *alerts = new AlertSounds(m_profile, data + "/platinum-reality/assets",
                                    audible ? QString("/usr/bin/pw-play") : QString(), this);
     m_alertSounds = alerts;
+    m_startupSound = new StartupSound(m_profile, data + "/platinum-reality/assets",
+                                      audible ? QString("/usr/bin/pw-play") : QString(), this);
     m_interfaceSounds = new InterfaceSounds(m_profile, data + "/platinum-reality/assets",
                                             audible ? QString("/usr/bin/pw-play") : QString(),
                                             [alerts] { return alerts->volume(); }, this);
@@ -202,9 +220,16 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     connect(m_sessionControl, &SessionControl::busyChanged, this, &NativeManager::displayRequestChanged);
     connect(m_sessionControl, &SessionControl::finished, this, [this](bool ok, const QVariantMap &)
             {
-                if (!ok)
-                    emit errorOccurred("The main display could not be changed.");
+                if (!ok && !m_displayRequestFailure.isEmpty())
+                    emit errorOccurred(m_displayRequestFailure);
+                if (!m_supervisorPending.isEmpty())
+                    QTimer::singleShot(0, this, &NativeManager::sendPendingSupervisorRequest);
             });
+    connect(m_input, &InputSettings::errorOccurred, this, &NativeManager::errorOccurred);
+    connect(m_input, &InputSettings::saved, this, [this] { requestSupervisor("input apply\n"); });
+    connect(m_energy, &EnergySettings::errorOccurred, this, &NativeManager::errorOccurred);
+    connect(m_energy, &EnergySettings::saved, this, [this] { requestSupervisor("energy apply\n"); });
+    connect(m_input, &InputSettings::changed, this, &NativeManager::applyKeyboardRepeat);
     // Flash drives: mounted as they are plugged in only in the whole session (a desktop in a window
     // leaves that to the desktop around it), and, like Bluetooth, never from a test's host bus.
     m_removableMedia = new RemovableMedia(hostBluetooth ? QDBusConnection::systemBus() : QDBusConnection(QString()),
@@ -219,7 +244,15 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
             [this] { QTimer::singleShot(0, this, &NativeManager::hostScaleChanged); });
     if (m_compositor)
     {
+        auto *gtk = new GtkShell(m_compositor, this);
+        connect(gtk, &GtkShell::modalityChanged, this, [this](QWaylandSurface *surface) {
+            if (auto *window = windowForSurface(surface)) updateWindowRelationship(window);
+        });
+        connect(gtk, &GtkShell::bellRung, this, [this] {
+            if (auto *sounds = qobject_cast<AlertSounds *>(m_alertSounds)) sounds->play();
+        });
         new KeyboardBroadcast(m_compositor, this);
+        applyKeyboardRepeat();
         auto *clipboard = new Clipboard(m_compositor, this);
         m_clipboard = clipboard;
         new DataControl(m_compositor, clipboard, this);
@@ -565,6 +598,47 @@ void NativeManager::finishDesktopDrag(int x, int y, bool copy)
                 m_desktopItems->completeWindowDrop(reply.value());
             });
 }
+void NativeManager::beginNativeDrop(QPoint position, bool desktop)
+{
+    m_pendingDesktopDrop = desktop;
+    m_pendingDropPosition = position;
+    m_pendingDropCopy = m_nativeDragCopy;
+    m_pendingDropSourcePid = liveSurfaceClientPid(m_dragOrigin);
+    m_pendingDropSource = m_dragOrigin;
+    const auto generation = ++m_dropGeneration;
+    if (qEnvironmentVariable("FRANKENSTEIN_NATIVE_TEST")=="1")
+        qInfo("Drop release generation=%llu desktop=%d pointer=%d origin=%d", generation,
+              desktop, m_compositor->defaultSeat()->pointer()->isButtonPressed(),
+              int(m_pendingDropSourcePid));
+    QTimer::singleShot(0, this,
+                       [this, generation]
+                       {
+                           if (m_dropGeneration != generation)
+                               return;
+                           m_nativeDragging = false;
+                           m_dragOrigin.clear();
+                           m_desktopItems->clearExternalDrag();
+                           emit nativeDragChanged();
+                       });
+    QTimer::singleShot(5000, this,
+                       [this, generation]
+                       {
+                           if (m_dropGeneration == generation && m_pendingDesktopDrop)
+                           {
+                               m_pendingDesktopDrop = false;
+                               auto *seat = m_compositor->defaultSeat();
+                               seat->drag()->cancelDrag();
+                               seat->drag()->drop();
+                               if (seat->pointer()->isButtonPressed())
+                                   seat->sendMouseReleaseEvent(Qt::LeftButton);
+                               releaseDeferredTouch(seat, m_pendingDropSource);
+                               queueClientFlush();
+                               emit errorOccurred(
+                                   "The desktop did not receive the file drop. The pending "
+                                   "transfer was cancelled.");
+                           }
+                       });
+}
 bool NativeManager::routeNativeDrag(QPointF point, Qt::KeyboardModifiers modifiers)
 {
     auto *drag = m_compositor->defaultSeat()->drag();
@@ -661,6 +735,7 @@ bool NativeManager::receiveDesktopDrop(uint receiverPid, QStringList paths, QStr
     // could retire an older-protocol source before its pipe was read.
     if (m_compositor->defaultSeat()->pointer()->isButtonPressed())
         m_compositor->defaultSeat()->sendMouseReleaseEvent(Qt::LeftButton);
+    releaseDeferredTouch(m_compositor->defaultSeat(), m_pendingDropSource);
     queueClientFlush();
     // Complete only the matching owned source after MIME decoding. Qt's public
     // data-device v1 API has no cross-process finished notification. A stale
@@ -708,6 +783,45 @@ QObject *NativeManager::desktopItems() const
 QObject *NativeManager::applicationCatalog() const
 {
     return m_catalog;
+}
+QObject *NativeManager::input() const
+{
+    return m_input;
+}
+QObject *NativeManager::energy() const
+{
+    return m_energy;
+}
+void NativeManager::requestSupervisor(const QByteArray &command)
+{
+    // Outside the managed session (tests, a desktop in a window) there is no supervisor: the
+    // file is saved for the next login and nothing else happens. The supervisor rereads the
+    // whole file, so one waiting request of each kind is enough.
+    if (!m_sessionControl || !m_sessionControl->available())
+        return;
+    if (!m_supervisorPending.contains(command))
+        m_supervisorPending.append(command);
+    sendPendingSupervisorRequest();
+}
+void NativeManager::sendPendingSupervisorRequest()
+{
+    if (m_supervisorPending.isEmpty() || m_sessionControl->busy())
+        return;
+    const auto command = m_supervisorPending.takeFirst();
+    m_displayRequestFailure = command.startsWith("energy") ? "The Energy Saver setting could not be applied."
+                                                           : "The keyboard or mouse setting could not be applied.";
+    if (!m_sessionControl->request(command))
+        m_supervisorPending.prepend(command);
+}
+void NativeManager::applyKeyboardRepeat()
+{
+    // Wayland applications repeat keys themselves, at the rate and delay the compositor gives.
+    auto *seat = m_compositor ? m_compositor->defaultSeat() : nullptr;
+    auto *keyboard = seat ? seat->keyboard() : nullptr;
+    if (!keyboard || !m_input)
+        return;
+    keyboard->setRepeatDelay(quint32(m_input->repeatDelay()));
+    keyboard->setRepeatRate(quint32(m_input->repeatRate()));
 }
 QObject *NativeManager::appearance() const
 {
@@ -934,6 +1048,16 @@ void NativeManager::attachShell(QWaylandXdgShell *shell)
 {
     connect(shell, &QWaylandXdgShell::toplevelCreated, this, &NativeManager::createWindow);
 }
+void NativeManager::updateWindowRelationship(ManagedWindow *record)
+{
+    if (!record || !record->top || !m_state.windows.contains(record->identity)) return;
+    std::optional<WindowId> parent;
+    for (auto *candidate : m_windows)
+        if (candidate->top == record->top->parentToplevel()) parent = candidate->identity;
+    dispatch(SetWindowRelationship{record->identity, parent, record->modal()});
+    dispatch(SetShadeEligibility{record->identity, record->serverDecorated()});
+    emit record->changed();
+}
 void NativeManager::createWindow(QWaylandXdgToplevel *top, QWaylandXdgSurface *xdg)
 {
     if (!top || !xdg || !liveSurfaceClientPid(xdg->surface()))
@@ -1066,7 +1190,7 @@ void NativeManager::createWindow(QWaylandXdgToplevel *top, QWaylandXdgSurface *x
                 {primary.x()+80 + int((m_nextWindow - 1) % 7) * 30,
                  primary.y()+65 + int((m_nextWindow - 1) % 7) * 28},
                 {uint(size.width()), uint(size.height())}};
-            if (parent && top->isModal())
+            if (parent && record->modal())
             {
                 const auto &owner = m_state.windows.at(*parent).geometry;
                 const auto position=effectiveDisplayLayout().reachablePosition(
@@ -1080,7 +1204,7 @@ void NativeManager::createWindow(QWaylandXdgToplevel *top, QWaylandXdgSurface *x
             m_interfaceSounds->play("wopn");
             const bool canShade = record->serverDecorated();
             dispatch(RegisterWindow{record->identity, application, record->geometry, canShade,
-                                    parent, top->isModal()});
+                                    parent, record->modal()});
             if (!shellModal())
                 dispatch(ActivateWindow{record->identity});
             connect(top, &QWaylandXdgToplevel::titleChanged, record,
@@ -1126,13 +1250,7 @@ void NativeManager::createWindow(QWaylandXdgToplevel *top, QWaylandXdgSurface *x
                     });
             auto relationship = [this, record]
             {
-                if (!record->top)
-                    return;
-                std::optional<WindowId> parent;
-                for (auto *candidate : m_windows)
-                    if (candidate->top == record->top->parentToplevel())
-                        parent = candidate->identity;
-                dispatch(SetWindowRelationship{record->identity, parent, record->top->isModal()});
+                updateWindowRelationship(record);
             };
             connect(top, &QWaylandXdgToplevel::parentToplevelChanged, record, relationship);
             connect(top, &QWaylandXdgToplevel::modalChanged, record, relationship);
@@ -1453,6 +1571,9 @@ QVariantList NativeManager::displayOutputs() const
         const bool internal = std::any_of(internalPrefixes.cbegin(), internalPrefixes.cend(),
                                           [&](const QString &prefix) { return output.name.startsWith(prefix); });
         result.append(QVariantMap{{"name", output.name},
+                                  {"label", m_displayDetails.labels.value(output.name, output.name)},
+                                  {"modes", m_displayDetails.modes.value(output.name).toMap().value("modes")},
+                                  {"mode", m_displayDetails.modes.value(output.name).toMap().value("mode")},
                                   {"x", output.logical.x()},
                                   {"y", output.logical.y()},
                                   {"width", output.logical.width()},
@@ -1470,8 +1591,18 @@ bool NativeManager::displayArrangementAvailable() const
 }
 bool NativeManager::setUseAllDisplays(bool all)
 {
+    // Keep the supervisor's other choices (the monitors switched off) in the same file.
+    QJsonObject settings;
+    {
+        QFile current(m_profile + "/displays.json");
+        if (!QFileInfo(current.fileName()).isSymLink() && current.open(QIODevice::ReadOnly) && current.size() <= 16384)
+            settings = QJsonDocument::fromJson(current.readAll()).object();
+    }
+    if (!settings.contains("version"))
+        settings.insert("version", 1);
+    settings.insert("mode", all ? "extend" : "single");
     QSaveFile file(m_profile + "/displays.json");
-    const auto data = QJsonDocument(QJsonObject{{"version", 1}, {"mode", all ? "extend" : "single"}}).toJson();
+    const auto data = QJsonDocument(settings).toJson();
     if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit())
     {
         emit errorOccurred("The Monitors setting could not be saved.");
@@ -1497,7 +1628,107 @@ bool NativeManager::requestPrimaryDisplay(const QString &name)
         return false;
     if (name == m_displayLayout->primary())
         return true;
+    m_displayRequestFailure = "The main display could not be changed.";
     return m_sessionControl->request("primary " + name.toLatin1() + "\n");
+}
+void NativeManager::setDisplayDetails(const DisplayDetails &details)
+{
+    if (details.managed == m_displayDetails.managed && details.labels == m_displayDetails.labels &&
+        details.available == m_displayDetails.available && details.pending == m_displayDetails.pending &&
+        details.modes == m_displayDetails.modes && details.mirrors == m_displayDetails.mirrors)
+        return;
+    m_displayDetails = details;
+    emit displayLayoutChanged();
+}
+bool NativeManager::displaySwitchingAvailable() const
+{
+    return m_displayDetails.managed && displayArrangementAvailable();
+}
+bool NativeManager::setDisplayOn(const QString &name, bool on)
+{
+    if (!displaySwitchingAvailable() || m_displayDetails.pending)
+        return false;
+    const auto &outputs = m_displayLayout->outputs();
+    const bool isOn = std::any_of(outputs.cbegin(), outputs.cend(), [&](const DisplayOutput &o) { return o.name == name; }) ||
+                      std::any_of(m_displayDetails.mirrors.cbegin(), m_displayDetails.mirrors.cend(),
+                                  [&](const QVariant &o) { return o.toMap().value("name").toString() == name; });
+    const bool isOff = std::any_of(m_displayDetails.available.cbegin(), m_displayDetails.available.cend(),
+                                   [&](const QVariant &o) { return o.toMap().value("name").toString() == name; });
+    if (!isOn && !isOff)
+        return false;
+    if (isOn == on)
+        return true;
+    if (!on && outputs.size() + m_displayDetails.mirrors.size() < 2)
+        return false; // One display always stays on.
+    m_displayRequestFailure = on ? "The display could not be turned on." : "The display could not be turned off.";
+    return m_sessionControl->request("display " + name.toLatin1() + (on ? " on\n" : " off\n"));
+}
+bool NativeManager::requestDisplaySetting(const QString &name, const QByteArray &setting, const QString &failure)
+{
+    if (!displaySwitchingAvailable() || m_displayDetails.pending)
+        return false;
+    const auto &outputs = m_displayLayout->outputs();
+    if (std::none_of(outputs.cbegin(), outputs.cend(), [&](const DisplayOutput &o) { return o.name == name; }))
+        return false;
+    m_displayRequestFailure = failure;
+    return m_sessionControl->request("display " + name.toLatin1() + " " + setting + "\n");
+}
+bool NativeManager::setDisplayMode(const QString &name, int width, int height, int refresh)
+{
+    const auto modes = m_displayDetails.modes.value(name).toMap().value("modes").toList();
+    const QVariantMap wanted{{"width", width}, {"height", height}, {"refresh", refresh}};
+    if (!modes.contains(wanted))
+        return false;
+    return requestDisplaySetting(name, "mode " + QByteArray::number(width) + "x" + QByteArray::number(height) + "@" +
+                                           QByteArray::number(refresh),
+                                 "The resolution could not be changed.");
+}
+bool NativeManager::setDisplayRotation(const QString &name, const QString &transform)
+{
+    static const QStringList rotations{"normal", "90", "180", "270"};
+    if (!rotations.contains(transform))
+        return false;
+    return requestDisplaySetting(name, "rotate " + transform.toLatin1(), "The display could not be rotated.");
+}
+bool NativeManager::setDisplayScale(const QString &name, double scale)
+{
+    if (!(scale >= 0.5 && scale <= 4))
+        return false;
+    return requestDisplaySetting(name, "scale " + QByteArray::number(scale, 'f', 2),
+                                 "The display size could not be changed.");
+}
+bool NativeManager::setDisplayPosition(const QString &name, int x, int y)
+{
+    if (x < -16384 || x > 16384 || y < -16384 || y > 16384 || !m_displayLayout || m_displayLayout->outputs().size() < 2)
+        return false;
+    return requestDisplaySetting(name, "position " + QByteArray::number(x) + "," + QByteArray::number(y),
+                                 "The displays could not be arranged that way.");
+}
+bool NativeManager::setDisplayMirroring(bool on)
+{
+    if (!displaySwitchingAvailable() || m_displayDetails.pending)
+        return false;
+    const bool mirroring = !m_displayDetails.mirrors.isEmpty();
+    if (mirroring == on)
+        return true;
+    if (on && m_displayLayout->outputs().size() < 2)
+        return false;
+    m_displayRequestFailure = on ? "The displays could not be mirrored." : "Mirroring could not be turned off.";
+    return m_sessionControl->request(on ? "display mirror on\n" : "display mirror off\n");
+}
+bool NativeManager::keepDisplayChange()
+{
+    if (!displaySwitchingAvailable() || !m_displayDetails.pending)
+        return false;
+    m_displayRequestFailure = "The display setting could not be saved, so it was undone.";
+    return m_sessionControl->request("display keep\n");
+}
+bool NativeManager::revertDisplayChange()
+{
+    if (!displaySwitchingAvailable() || !m_displayDetails.pending)
+        return false;
+    m_displayRequestFailure.clear(); // The supervisor reverts by itself in time anyway.
+    return m_sessionControl->request("display revert\n");
 }
 DisplayLayout NativeManager::effectiveDisplayLayout() const
 {
@@ -1978,6 +2209,8 @@ void NativeManager::launchFinder(QString path)
         arguments << "--trash" << FinderPlaces::trash;
     for (const auto &volume : FinderPlaces::volumes)
         arguments << "--volume" << volume;
+    if (FinderPlaces::wholeComputer)
+        arguments << "--whole-computer";
     launch(QCoreApplication::applicationDirPath() + "/frankenstein-finder", arguments);
 }
 void NativeManager::showFinder()
@@ -2047,6 +2280,26 @@ bool NativeManager::eventFilter(QObject *object, QEvent *event)
         queueClientFlush();
         // Still forward Escape to the owning client so its QDrag loop exits.
     }
+    // A drag started by a finger (the handheld's touchscreen) follows the finger and drops where
+    // it lifts, as a mouse drag does; Qt's compositor items only carry pointer drags themselves.
+    if (object == m_view && m_nativeDragging && m_compositor &&
+        (event->type() == QEvent::TouchUpdate || event->type() == QEvent::TouchEnd))
+    {
+        auto *touch = static_cast<QTouchEvent *>(event);
+        if (!touch->points().isEmpty())
+        {
+            const auto point = touch->points().first().position();
+            const bool desktop = routeNativeDrag(point, touch->modifiers());
+            if (event->type() == QEvent::TouchUpdate)
+                return true;
+            if (desktop && m_dragOrigin)
+                m_dragOrigin->setProperty("platinumDeferTouchEnd", true);
+            beginNativeDrop(point.toPoint(), desktop);
+            m_compositor->defaultSeat()->drag()->drop();
+            queueClientFlush();
+        }
+        // The client still receives its touch-up, ending its own drag loop.
+    }
     if (object == m_view && m_nativeDragging && m_compositor &&
         (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonRelease))
     {
@@ -2055,44 +2308,7 @@ bool NativeManager::eventFilter(QObject *object, QEvent *event)
         if (event->type() == QEvent::MouseMove)
             return true;
         if (mouse->button() == Qt::LeftButton)
-        {
-            m_pendingDesktopDrop = desktop;
-            m_pendingDropPosition = mouse->position().toPoint();
-            m_pendingDropCopy = m_nativeDragCopy;
-            m_pendingDropSourcePid = liveSurfaceClientPid(m_dragOrigin);
-            const auto generation = ++m_dropGeneration;
-            if (qEnvironmentVariable("FRANKENSTEIN_NATIVE_TEST")=="1")
-                qInfo("Drop release generation=%llu desktop=%d pointer=%d origin=%d", generation,
-                      desktop, m_compositor->defaultSeat()->pointer()->isButtonPressed(),
-                      int(m_pendingDropSourcePid));
-            QTimer::singleShot(0, this,
-                               [this, generation]
-                               {
-                                   if (m_dropGeneration != generation)
-                                       return;
-                                   m_nativeDragging = false;
-                                   m_dragOrigin.clear();
-                                   m_desktopItems->clearExternalDrag();
-                                   emit nativeDragChanged();
-                               });
-            QTimer::singleShot(5000, this,
-                               [this, generation]
-                               {
-                                   if (m_dropGeneration == generation && m_pendingDesktopDrop)
-                                   {
-                                       m_pendingDesktopDrop = false;
-                                       auto *seat = m_compositor->defaultSeat();
-                                       seat->drag()->cancelDrag();
-                                       seat->drag()->drop();
-                                       if (seat->pointer()->isButtonPressed())
-                                           seat->sendMouseReleaseEvent(Qt::LeftButton);
-                                       queueClientFlush();
-                                       emit errorOccurred(
-                                           "The desktop did not receive the file drop. The pending "
-                                           "transfer was cancelled.");
-                                   }
-                               });
-        }
+            beginNativeDrop(mouse->position().toPoint(), desktop);
         // Let the source surface item end its grab and dispatch wl_data_device.drop.
     }
     if (object == m_view &&
@@ -2250,6 +2466,16 @@ QVariantList NativeManager::windowMenu() const
                                      {"collapsed", window->collapsed()}});
     return result;
 }
+bool NativeManager::takeWelcome()
+{
+    // The installer writes $XDG_CONFIG_HOME/platinum-reality/welcome-pending for the account it
+    // creates. Removing it is what makes the welcome happen only once.
+    auto config = qEnvironmentVariable("XDG_CONFIG_HOME");
+    if (!QDir::isAbsolutePath(config))
+        config = QDir::home().filePath(".config");
+    return QFile::remove(config + "/platinum-reality/welcome-pending");
+}
+
 QString NativeManager::aboutThisComputer() const
 {
     QString memory = "Unknown";

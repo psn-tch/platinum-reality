@@ -9,6 +9,9 @@ import subprocess
 import tempfile
 import time
 
+# Never access the host HTTP daemon during installed-production-path checks.
+os.environ["PLATINUM_DISABLE_HOST_HANDHELD"] = "1"
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("prefix", type=Path, help="Staged prefix containing bin/platinum-reality")
 parser.add_argument("--evidence", type=Path, required=True)

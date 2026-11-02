@@ -22,10 +22,23 @@ an emulator: no Apple software runs, and none is included.
   originals; one click to activate, then click through; dialogs stay with their windows.
 - **Finder**: spatial folder windows, icon and list views, Trash and Put Away, drag and drop
   (Option to copy), Cut, Copy and Paste of files, Get Info, Find, and **View ▸ Show Hidden Files**.
+  Right-click and long-press menus, Back/Forward, a path you can type, and Places, like Dolphin.
 - **Control Strip**: sound, brightness, monitors, battery, **Wi-Fi networks** (through iwd) and
   **Bluetooth** (through BlueZ), each a pop-up menu like the 9.2.2 modules.
+- **One clipboard**: what you copy in an application, on the desktop or with a command-line tool
+  (`wl-copy`) pastes everywhere, and still pastes after the application that copied it quits.
+  **Edit ▸ Show Clipboard** shows it.
+- **Platinum dialogs**: the button Return presses has Mac OS 9's thick ring, and the text field
+  you are typing in has its focus ring, in applications and on the desktop alike.
+- **Help Center** (Help ▸ Help Center, or Command-?), which also opens once on a new account.
+- **Screenshots**: Command-Shift-3 puts a picture of the whole screen on the clipboard,
+  Command-Shift-4 lets you drag across an area for a picture of just that, and Command-Shift-S
+  saves one to a file.
 - **The Platinum lock screen**, with fingerprint unlock where your system allows it.
-- **Appearance**: desktop pictures, accent colour, sounds, WindowShade speed.
+- **Control Panels** (Apple menu ▸ Control Panels): every panel in one window — Appearance,
+  Bluetooth, Date & Time (menu bar clock, calendar), Desktop Picture, Energy Saver (display off
+  and sleep), Keyboard (key repeat), Monitors (on/off, resolution, rotation, size, arrangement,
+  mirroring), Mouse & Trackpad, Network (Wi-Fi and addresses) and Sound. Changes apply at once.
 - **X11 applications and games** through a bundled, patched xwayland-satellite.
 - **An optional startup screen**: a gray 1-bit screen with a smiling computer instead of boot text.
 
@@ -62,6 +75,8 @@ from source and runs the automatic tests (add `--nocheck` to skip them).
 - **From your login screen** (SDDM, GDM, LightDM): log out, choose **Platinum Reality**
   from the session list, and log in. A minimal Arch install has no login screen yet: install and
   enable one first, for example `sudo pacman -S sddm` and `sudo systemctl enable sddm`.
+  For SDDM, the package includes a Platinum **Log In** theme: set `Current=platinum-reality` under
+  `[Theme]` in a file in `/etc/sddm.conf.d/` (see docs/sddm-theme.md).
   (greetd has no session list of its own; it needs a greeter such as tuigreet set up to read
   `/usr/share/wayland-sessions`.) Everything you need for a whole session (sway as the display
   backend, swayidle, swaylock for the lock screen's password check, Xwayland) is a dependency.
@@ -86,6 +101,7 @@ python3 scripts/import-macos9-assets.py ~/path/to/macos9.qcow2
 Imported files stay on your machine and are never copied into the project. You can also add:
 
 - `startup-chime.wav` (or `.aiff`, `.flac`): played once per boot when the Log In appears.
+  Sound ▸ Startup turns it on or off and sets its volume.
 - `happy-mac.png`: your own black-and-white startup icon for the startup screen.
 
 ## The startup screen (optional)
@@ -100,6 +116,8 @@ smiling computer (yours, if you imported one). It currently supports systems tha
 kernel image built by mkinitcpio (`/etc/kernel/cmdline`). Everything it changes is backed up;
 `sudo python3 scripts/boot-splash.py uninstall` puts it all back. For a display mounted sideways,
 the picture follows the `fbcon=rotate:N` kernel option, or pass `--rotate`.
+If the disk is encrypted, the startup screen asks for its password in a Macintosh dialog
+(see docs/boot-splash.md).
 
 ## Build from source (development)
 

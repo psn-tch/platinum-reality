@@ -4,12 +4,28 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QTimer>
+#include <QVariantList>
+#include <QVariantMap>
+
+// What the Monitors panel shows beside the layout, from a supervisor that manages the displays
+// (Monitors choices decide which are on): monitor names, connected displays that are off, and
+// whether a change is waiting for "Keep". An unmanaged session has none of these.
+struct DisplayDetails
+{
+    bool managed = false;
+    QVariantMap labels;      // connector -> monitor name
+    QVariantList available;  // {name, label, lidClosed} for connected displays that are off
+    QVariantMap modes;       // connector -> {modes: [{width, height, refresh}], mode: {...}} (refresh in mHz)
+    bool pending = false;
+    QVariantList mirrors;    // {name, label}: displays that are on, showing the main display
+};
 
 struct DisplaySnapshot
 {
     QString session;
     quint64 generation;
     DisplayLayout layout;
+    DisplayDetails details;
 };
 
 std::optional<DisplaySnapshot> parseDisplaySnapshot(const QByteArray &bytes, QString *error = nullptr);

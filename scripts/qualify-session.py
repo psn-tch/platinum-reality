@@ -18,6 +18,9 @@ import time
 
 from session_support import write_bus_config
 
+# Never access the host HTTP daemon during installed-production-path checks.
+os.environ["PLATINUM_DISABLE_HOST_HANDHELD"] = "1"
+
 
 def wait_for(predicate, timeout=15):
     deadline = time.monotonic() + timeout
@@ -35,7 +38,7 @@ def state(path):
 
 def control(path, command):
     with socket.socket(socket.AF_UNIX) as peer:
-        peer.settimeout(8)
+        peer.settimeout(13 if command == "resume" else 8)
         peer.connect(path)
         peer.sendall(command.encode() + b"\n")
         return json.loads(peer.recv(8192))
@@ -95,7 +98,7 @@ def run(options):
                           XDG_CACHE_HOME=str(home / "cache"), XDG_STATE_HOME=str(home / "state"),
                           DBUS_SYSTEM_BUS_ADDRESS=private_system_bus)
         kde_outputs = home / "config" / "kwinoutputconfig.json"
-        for scenario in ("lock-and-logout", "locker-startup-recovery", "platinum-lock", "all-displays",
+        for scenario in ("lock-and-logout", "locker-startup-recovery", "platinum-lock", "all-displays", "one-display",
                          "bluetooth", "backend-crash", "desktop-crash", "startup-failure"):
             run_dir = evidence / scenario
             if scenario == "all-displays":
@@ -126,7 +129,12 @@ def run(options):
                     "--evidence", str(run_dir), "--workspace", str(fixture / scenario / "Workspace"),
                     "--profile", str(fixture / scenario / "Profile"),
                     "--primary-output", "DP-2" if scenario == "backend-crash" else "WL-1",
-                    "--output-scale", "1.5", "--single-output"]
+                    "--output-scale", "1.5"]
+            # one-display is the startup-recovery path a failed all-displays start falls back to:
+            # one screen, named by --primary-output, without the extended session. Nothing else
+            # reached it, and it crashed on a setting read before it was assigned (Rocky, 2026-10-30).
+            if scenario != "one-display":
+                args.append("--single-output")
             # These scenarios release the lock with swaylock's own SIGUSR1; the Platinum lock has
             # no such signal, so its scenario uses the production default and crashes it instead.
             if scenario != "platinum-lock":
@@ -273,6 +281,20 @@ def run(options):
                             assert locked["locked"] and not absent(locked["lock_pid"])
                             assert not control(ready["control"], "logout")["ok"]
                             record["checks"]["locker_readiness_recovers_after_failed_start"] = True
+                            # A replacement that exits 0 BEFORE ready is not an unlock,
+                            # including after deliberately retiring a valid held lock.
+                            failed_start.touch()
+                            pending = control(ready["control"], "resume")
+                            assert not pending["ok"] and pending["locked"] and not pending["lock_ready"]
+                            assert not control(ready["control"], "logout")["ok"]
+                            time.sleep(2.2)
+                            pending = control(ready["control"], "status")
+                            assert pending["locked"] and not pending["lock_ready"]
+                            record["checks"]["unready_refresh_cannot_unlock"] = True
+                            failed_start.unlink()
+                            locked = wait_for(lambda: s if (s := control(ready["control"], "status")).get("lock_ready") else None)
+                            assert locked["locked"] and not control(ready["control"], "logout")["ok"]
+                            record["checks"]["failed_refresh_reacquires_the_held_lock"] = True
                             os.kill(locked["lock_pid"], signal.SIGUSR1)
                             wait_for(lambda: not control(ready["control"], "status")["locked"])
                             assert control(ready["control"], "logout")["ok"]
@@ -290,6 +312,44 @@ def run(options):
                             record["checks"]["disposable_locker_cannot_reach_host_system_bus"] = True
                             assert not control(ready["control"], "logout")["ok"]
                             record["checks"]["platinum_lock_is_the_default_locker"] = True
+                            # Simulate the exact missing recovery class: a ready locker whose
+                            # event/render loop no longer runs. Only this backend's verified
+                            # child is stopped, through a pidfd so a reused PID cannot be hit.
+                            old_lock = locked["lock_pid"]
+                            with os.fdopen(os.pidfd_open(old_lock), 'rb') as handle:
+                                signal.pidfd_send_signal(handle.fileno(), signal.SIGSTOP)
+                                try:
+                                    locked = control(ready["control"], "resume")
+                                finally:
+                                    try:
+                                        signal.pidfd_send_signal(handle.fileno(), signal.SIGCONT)
+                                    except ProcessLookupError:
+                                        pass
+                            assert locked["ok"] and locked["locked"] and locked["lock_ready"]
+                            assert locked["lock_pid"] != old_lock and locked["locker"] == "platinum"
+                            assert absent(old_lock) and not absent(locked["lock_pid"])
+                            assert locked["lock_refreshes"] == 1
+                            assert not locked.get("platinum_lock_failures")
+                            assert not control(ready["control"], "logout")["ok"]
+                            record["checks"]["resume_replaces_a_stopped_locker_without_unlocking"] = True
+                            assert "lock: after-resume refresh request" in (run_dir / "supervisor.txt").read_text()
+                            wait_for(lambda: any(f"pid={locked['lock_pid']} Lock screen: first frame on" in line
+                                                 for line in (run_dir / "lock.txt").read_text().splitlines()))
+                            record["checks"]["replacement_lock_draws_a_frame"] = True
+                            keyboard = Path(os.environ.get("FRANKENSTEIN_BUILD_DIR", fake_bluez.parent.parent / "build")) / "virtual-keyboard-driver"
+                            old_lock = locked["lock_pid"]
+                            injected = subprocess.run([str(keyboard)], input="key ctrl-alt-l\nquit\n",
+                                env=dict(os.environ, WAYLAND_DISPLAY=ready["backend_display"]),
+                                capture_output=True, text=True, timeout=10, check=True)
+                            assert injected.stdout.splitlines() == ["driver-ready", "ok"], injected.stdout
+                            locked = wait_for(lambda: s if (s := control(ready["control"], "status")).get("lock_ready")
+                                              and s.get("lock_pid") != old_lock else None)
+                            assert locked["locked"] and locked["lock_refreshes"] == 2
+                            assert not locked.get("platinum_lock_failures")
+                            assert not control(ready["control"], "logout")["ok"]
+                            wait_for(lambda: any(f"pid={locked['lock_pid']} Lock screen: first frame on" in line
+                                                 for line in (run_dir / "lock.txt").read_text().splitlines()))
+                            record["checks"]["lock_recovery_shortcut_works_while_locked"] = True
                             # A crashed Platinum lock is never an unlock. It is replaced once; after a
                             # second failure in the same lock the supervisor falls back to swaylock.
                             for attempt, expected in ((1, "platinum"), (2, "swaylock")):
@@ -303,6 +363,11 @@ def run(options):
                             os.kill(locked["lock_pid"], signal.SIGUSR1)
                             wait_for(lambda: not control(ready["control"], "status")["locked"])
                             assert "platinum_lock_failures" not in control(ready["control"], "status")
+                            assert control(ready["control"], "logout")["ok"]
+                            assert child.wait(timeout=15) == 0
+                        elif scenario == "one-display":
+                            assert not ready.get("display_mode") or ready["display_mode"] != "extend"
+                            record["checks"]["one_display_recovery_start_reaches_the_desktop"] = True
                             assert control(ready["control"], "logout")["ok"]
                             assert child.wait(timeout=15) == 0
                         elif scenario == "all-displays":

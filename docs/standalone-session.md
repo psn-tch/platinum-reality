@@ -189,3 +189,21 @@ Primary references: [Sway 1.12 commands and configuration](https://github.com/sw
 [swaylock 1.8.6 readiness and signals](https://github.com/swaywm/swaylock/blob/v1.8.6/swaylock.1.scd),
 and installed swayidle 1.9.0 `swayidle(1)` for lock/sleep events. These references
 describe interfaces; they are not evidence of this machine's DRM/seat behavior.
+
+## Extended-display login routing
+
+A saved Extend choice changes the login supervisor's initial display mode. Its
+single-display retry is only startup recovery, not another session-selection
+prompt. An authenticated KDE choice returns exit10 before Platinum creates a
+desktop. `run_with_saved_display_mode` must preserve that code even though the
+desktop never became ready, allowing `login-session.py` to launch the existing
+protected KDE fallback after cleanup. Previously the wrapper retried single-output
+Log In, consuming the choice as a failed startup.
+
+The output-selection unit regression checks one call and exit10. The private
+installed login qualifier additionally chooses KDE through a stand-in Log In
+with an Extend profile, checks no desktop was launched and no second login was
+created, and verifies runtime cleanup. It does not perform host PAM, a physical
+KDE login or modify the protected KDE/fingerprint scripts. Failed authentication
+still cannot create a desktop; ordinary failed extended starts retain their
+single-display retry.

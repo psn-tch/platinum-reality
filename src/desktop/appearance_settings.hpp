@@ -26,6 +26,8 @@ class AppearanceSettings final : public QObject
     // Appearance → Options: double-click a title bar to collapse the window (on by default).
     Q_PROPERTY(bool doubleClickCollapse READ doubleClickCollapse NOTIFY changed)
     Q_PROPERTY(bool keepScreenAwake READ keepScreenAwake NOTIFY changed)
+    // Date & Time → the menu bar clock: {visible, hours24, seconds, weekday, date, flash}.
+    Q_PROPERTY(QVariantMap clock READ clock NOTIFY changed)
   public:
     explicit AppearanceSettings(QString profile, QObject *parent = nullptr);
     int shadeDuration() const
@@ -78,11 +80,17 @@ class AppearanceSettings final : public QObject
         return m_doubleClickCollapse;
     }
     bool keepScreenAwake() const { return m_keepScreenAwake; }
+    QVariantMap clock() const;
     QString defaultWallpaperPath() const;
     QString picturesFolder() const;
     Q_INVOKABLE bool apply(int duration, bool stripVisible);
     Q_INVOKABLE bool applyOptions(QString accent, bool doubleClickCollapse);
     Q_INVOKABLE bool setKeepScreenAwake(bool keepAwake);
+    // One of clock()'s keys; any other is refused.
+    Q_INVOKABLE bool setClockOption(QString key, bool on);
+    // The computer's time zone, as the system sets it: {id ("America/Denver"), name ("MST"),
+    // offset ("7 hours behind UTC")}.
+    Q_INVOKABLE QVariantMap timeZone() const;
     Q_INVOKABLE bool setControlStripCollapsed(bool collapsed);
     Q_INVOKABLE bool setControlStripPosition(int x, int y);
     Q_INVOKABLE bool applyDesktopPicture(QString path, QString layout);
@@ -106,4 +114,7 @@ class AppearanceSettings final : public QObject
     QString m_accent = "blue";
     bool m_doubleClickCollapse = true;
     bool m_keepScreenAwake = false;
+    // Shown, 12-hour, no seconds, no weekday or date, steady separators: as before this setting.
+    QMap<QString, bool> m_clock{{"visible", true}, {"hours24", false}, {"seconds", false},
+                                {"weekday", false}, {"date", false}, {"flash", false}};
 };

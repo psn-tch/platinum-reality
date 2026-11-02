@@ -18,9 +18,13 @@ namespace
 {
 constexpr auto editorId = "org.frankenstein.Editor.desktop";
 constexpr auto bluetoothId = "org.frankenstein.Bluetooth.desktop";
+constexpr auto controlPanelsId = "org.frankenstein.ControlPanels.desktop";
 QString panelAction(const DesktopEntry &entry)
 {
-    return entry.filename.isEmpty() && entry.id == bluetoothId ? QString("bluetooth") : QString();
+    if (!entry.filename.isEmpty())
+        return {};
+    return entry.id == bluetoothId ? QString("bluetooth")
+           : entry.id == controlPanelsId ? QString("control-panels-window") : QString();
 }
 QVector<DesktopEntry> builtins(const QString &workspace, const QString &profile,
                                const QString &binaryDirectory)
@@ -44,7 +48,14 @@ QVector<DesktopEntry> builtins(const QString &workspace, const QString &profile,
     bluetooth.name = "Bluetooth";
     bluetooth.comment = "Connect, pair and manage Bluetooth devices.";
     bluetooth.keywords = {"Control Panel", "wireless", "headphones", "keyboard", "mouse"};
-    return {editor, finder, bluetooth};
+    // The Control Panels window; each panel is chosen inside it.
+    DesktopEntry panels;
+    panels.id = controlPanelsId;
+    panels.name = "Control Panels";
+    panels.comment = "Appearance, network, sound, monitors and the other settings.";
+    panels.keywords = {"Settings", "Preferences", "System", "Network", "Wi-Fi", "WiFi", "Internet", "Sound",
+                       "Monitors", "Display", "Appearance", "Desktop Picture", "Wallpaper"};
+    return {editor, finder, bluetooth, panels};
 }
 struct Scan
 {

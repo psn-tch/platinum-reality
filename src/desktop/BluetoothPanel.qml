@@ -3,15 +3,23 @@ import QtQuick.Controls
 
 // The Bluetooth control panel (docs/bluetooth.md). Pairings live in BlueZ, so devices paired
 // under KDE are listed here as they are. Add Device looks for devices in pairing mode; pairing
-// questions appear as alerts (BluetoothAlert.qml) whether or not this panel is open.
-ShellDialog {
+// questions appear as alerts (BluetoothAlert.qml) whether or not this panel is open. It is a
+// panel of the Control Panels window.
+Item {
     id: panel
     required property var service
     signal forgetRequested(string path, string name)
     objectName: "bluetooth-panel"
-    title: adding ? "Add Bluetooth Device" : "Bluetooth"
-    width: 500
-    standardButtons: Dialog.Close
+    readonly property string panelId: "bluetooth"
+    readonly property string title: "Bluetooth"
+    readonly property string heading: adding ? "Add Bluetooth Device" : ""
+    readonly property string glyph: "bluetooth"
+    // Set by the Control Panels window: it, and whether this panel is the one on screen.
+    property var host: null
+    property bool shown: false
+    readonly property bool opened: shown
+    width: parent ? parent.width : 500
+    implicitHeight: body.implicitHeight
     property bool adding: false
     // Rows are chosen by object path: the lists re-sort as devices are renamed or added.
     property string selected: ""
@@ -28,15 +36,11 @@ ShellDialog {
     readonly property var currentNearby: find(nearby, candidate)
     readonly property var pairing: nearby.find(function(d) {return d.busy === "pairing"}) || null
     function edit() {
-        if (visible || sessionManager.shellModal) return
-        adding = false
-        open()
+        if (adding) back()
+        if (host) host.show(panelId)
     }
     function addDevice() {
-        if (!visible) {
-            if (sessionManager.shellModal) return
-            open()
-        }
+        if (host) host.show(panelId)
         candidate = ""
         adding = true
         if (powered) service.startDiscovery()
@@ -62,7 +66,7 @@ ShellDialog {
         return device.type + " — " + (device.connected ? "Connected" + (device.battery >= 0 ? ", battery " + device.battery + "%" : "")
                                                        : "Not connected")
     }
-    onAboutToHide: if (adding) back()
+    onShownChanged: if (!shown && adding) back()
     Connections {
         target: panel.service
         // A device paired from Add Device is trusted and connecting: show it in the list.
@@ -71,7 +75,9 @@ ShellDialog {
             panel.selected = path
         }
     }
-    contentItem: Column {
+    Column {
+        id: body
+        width: parent.width
         spacing: 10
         Row {
             spacing: 10
@@ -105,7 +111,7 @@ ShellDialog {
                 objectName: panel.adding ? "bluetooth-nearby" : "bluetooth-devices"
                 anchors.fill: parent; anchors.margins: 1; clip: true
                 model: panel.adding ? panel.nearby : panel.devices
-                ScrollBar.vertical: ScrollBar {}
+                ScrollBar.vertical: PlatinumScrollBar {}
                 delegate: Rectangle {
                     id: row
                     required property var modelData

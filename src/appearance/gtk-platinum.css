@@ -75,16 +75,53 @@ menu, popover > contents {
     border-radius: 0;
     box-shadow: 2px 2px rgba(0, 0, 0, 0.35);
 }
-scrollbar { background-color: #cccccc; border-radius: 0; }
-scrollbar trough { background-color: #cccccc; border-radius: 0; }
-scrollbar slider {
-    min-width: 12px;
-    min-height: 12px;
-    background-color: #bbbbbb;
+/* Scroll bars as Mac OS 9.2.2 draws them with Smart Scrolling: black edges, a recessed #aaaaaa
+   track, a #9999ff scroll box with four grip lines, flat when there is nothing to scroll and an
+   empty strip in an inactive window. They are always shown (no overlay; see the launch
+   environment). GTK 3 adds the arrow pair at the end (gtk3-platinum.css); GTK 4 has no arrows. */
+scrollbar, scrollbar.overlay-indicator {
+    background-color: #eeeeee;
     background-image: none;
-    border: 1px solid #555555;
-    box-shadow: inset 1px 1px #ffffff, inset -1px -1px #888888;
+    border: 1px solid #000000;
+    border-radius: 0;
+    opacity: 1;
 }
+scrollbar trough {
+    min-width: 14px;
+    min-height: 14px;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background-color: #aaaaaa;
+    box-shadow: inset 1px 1px #777777, inset 2px 2px #888888, inset -1px -1px #cccccc, inset -2px -2px #bbbbbb;
+}
+scrollbar slider {
+    min-width: 14px;
+    min-height: 14px;
+    margin: 0;
+    border-radius: 0;
+    border: 0 solid #000000;
+    background-color: #9999ff;
+    background-repeat: no-repeat;
+    background-position: center;
+    box-shadow: inset 1px 1px #ccccff, inset -1px -1px #6666cc;
+}
+scrollbar.vertical slider {
+    min-height: 16px;
+    border-width: 1px 0;
+    background-image: repeating-linear-gradient(to bottom, #ccccff 0, #ccccff 1px, #333399 1px, #333399 2px);
+    background-size: 7px 8px;
+}
+scrollbar.horizontal slider {
+    min-width: 16px;
+    border-width: 0 1px;
+    background-image: repeating-linear-gradient(to right, #ccccff 0, #ccccff 1px, #333399 1px, #333399 2px);
+    background-size: 8px 7px;
+}
+scrollbar:disabled trough { background-color: #eeeeee; box-shadow: none; }
+scrollbar:backdrop { border-color: #555555; }
+scrollbar:backdrop trough { background-color: #eeeeee; box-shadow: none; }
+scrollbar:backdrop slider { background-color: transparent; background-image: none; box-shadow: none; border-color: transparent; }
 scale trough { min-height: 4px; min-width: 4px; background-color: #bbbbbb; border: 1px solid #777777; }
 scale slider { background: #dddddd; border: 1px solid #222222; box-shadow: inset 1px 1px #ffffff; }
 checkbutton check, checkbutton radio, radiobutton radio {

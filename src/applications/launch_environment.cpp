@@ -164,6 +164,17 @@ QProcessEnvironment nativeApplicationEnvironment(QProcessEnvironment environment
     environment.insert("XDG_CURRENT_DESKTOP", "Frankenstein");
     environment.insert("XDG_SESSION_DESKTOP", "frankenstein");
     environment.insert("XDG_SESSION_TYPE", "wayland");
+    // Scroll bars are always shown, as in Mac OS 9: GTK 3 reads this switch; GTK 4 reads the
+    // profile's private settings.ini (application_appearance), found first among the config dirs.
+    environment.insert("GTK_OVERLAY_SCROLLING", "0");
+    {
+        auto dirs = environment.value("XDG_CONFIG_DIRS");
+        if (dirs.isEmpty())
+            dirs = "/etc/xdg";
+        const auto own = absoluteProfile + "/xdg";
+        if (!dirs.split(':').contains(own))
+            environment.insert("XDG_CONFIG_DIRS", own + ":" + dirs);
+    }
     // The desktop's own asset folder (the user's imported Mac OS 9 icons, for the Finder), named
     // before any private data root below replaces XDG_DATA_HOME.
     {

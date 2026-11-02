@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Install Platinum Reality
+Comment=Install Platinum Reality on this computer's disk
+Exec=platinum-reality-installer
+Icon=platinum-reality
+Categories=System;

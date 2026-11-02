@@ -104,7 +104,8 @@ manual instructions above for a physical installation.
 
 - Your own Mac OS 9 sounds, icons, desktop pictures and cursors: `scripts/import-macos9-assets.py`
   (see the README). They are copied only into `~/.local/share/platinum-reality/assets`.
-- A startup chime: put `startup-chime.wav` in that folder.
+- A startup chime: put `startup-chime.wav` in that folder. Sound ▸ Startup turns it on or off and sets
+  its volume.
 - The gray startup screen: `scripts/boot-splash.py` (needs root once; fully reversible).
 - Wi-Fi networks in the Control Strip need iwd, and something must give the connection its address:
   either iwd itself (`EnableNetworkConfiguration=true` under `[General]` in `/etc/iwd/main.conf`) or

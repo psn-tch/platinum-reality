@@ -81,10 +81,24 @@ QByteArray asset(const char *name)
     QFile file(QString(":/application-appearance/src/appearance/") + name);
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray{};
 }
+// GTK 3's scroll arrows: the solid 9.2.2 triangles, beside the stylesheet that names them.
+bool scrollArrows(const QString &root, const QString &directory, QString &error)
+{
+    for (const auto *direction : {"up", "down", "left", "right"})
+        for (const auto *state : {"", "-idle"})
+        {
+            const auto name = QString("platinum-scroll-%1%2.svg").arg(direction, state);
+            if (!regularPath(root, directory + "/" + name, error) ||
+                !save(root + "/" + directory + "/" + name, asset(name.toLatin1().constData()), error))
+                return false;
+        }
+    return true;
+}
 bool gtkImport(const QString &root, const QString &version, const QByteArray &css, QString &error)
 {
     const auto directory = "config/gtk-" + version;
-    if (!managedFile(root, directory + "/platinum-dreams.css", css, error) ||
+    if ((version == "3.0" && !scrollArrows(root, directory, error)) ||
+        !managedFile(root, directory + "/platinum-dreams.css", css, error) ||
         !regularPath(root, directory + "/gtk.css", error))
         return false;
     const auto path = root + '/' + directory + "/gtk.css";
@@ -104,6 +118,17 @@ bool gtkImport(const QString &root, const QString &version, const QByteArray &cs
         return true;
     // User rules follow the import and retain their ability to override it.
     return save(path, include + '\n' + before, error);
+}
+// GTK 4 keeps overlay (disappearing) scroll bars unless its settings say otherwise, and ignores
+// GTK_OVERLAY_SCROLLING. A private settings.ini, found through XDG_CONFIG_DIRS (see the launch
+// environment), turns them off without touching the user's own GTK settings.
+bool gtkSettings(const QString &root, QString &error)
+{
+    if (!regularPath(root, "xdg/gtk-4.0/settings.ini", error))
+        return false;
+    return save(root + "/xdg/gtk-4.0/settings.ini",
+                "# Platinum Reality: scroll bars always shown, as in Mac OS 9.2.2.\n"
+                "[Settings]\ngtk-overlay-scrolling=false\n", error);
 }
 bool firefoxProgram(const QString &program)
 {
@@ -128,7 +153,8 @@ bool prepareApplicationAppearance(const QString &profile, QString &error)
         return false;
     }
     const auto root = QDir(profile).absolutePath();
-    return gtkImport(root, "3.0", css, error) && gtkImport(root, "4.0", css, error);
+    return gtkImport(root, "3.0", css + '\n' + asset("gtk3-platinum.css"), error) && gtkImport(root, "4.0", css, error) &&
+           gtkSettings(root, error);
 }
 
 QString preparePrivateGtkTheme(const QString &profile, QString &error)
@@ -149,7 +175,9 @@ QString preparePrivateGtkTheme(const QString &profile, QString &error)
         const QByteArray theme = marker + " Private theme for normal application settings. */\n"
                                           "@import url(\"" + QByteArray(base) + "\");\n"
                                           "@import url(\"platinum-dreams.css\");\n";
-        if (!managedFile(root, directory + "/platinum-dreams.css", css, error) ||
+        const auto styles = QString(version) == "3.0" ? css + '\n' + asset("gtk3-platinum.css") : css;
+        if ((QString(version) == "3.0" && !scrollArrows(root, directory, error)) ||
+            !managedFile(root, directory + "/platinum-dreams.css", styles, error) ||
             !managedFile(root, directory + "/gtk.css", theme, error))
             return {};
     }

@@ -1,14 +1,21 @@
 import QtQuick
 import QtQuick.Controls
 
-ShellDialog {
+// Desktop Picture, a panel of the Control Panels window. Choosing a picture previews it here;
+// Set Desktop (or Return in the file field) puts it on the desktop.
+Item {
     id: panel
     required property var settings
     objectName: "desktop-picture-dialog"
-    title: "Desktop Picture"
-    width: Math.min(660, parent.width - 32)
-    height: Math.min(610, parent.height - 54)
-    standardButtons: Dialog.Ok | Dialog.Cancel
+    readonly property string panelId: "desktop-picture"
+    readonly property string title: "Desktop Picture"
+    readonly property string glyph: "picture"
+    // Set by the Control Panels window: it, and whether this panel is the one on screen.
+    property var host: null
+    property bool shown: false
+    readonly property bool opened: shown
+    width: parent ? parent.width : 560
+    implicitHeight: body.implicitHeight
     property string draftPath: ""
     property string draftLayout: "fill"
     property var pictureRows: []
@@ -19,9 +26,9 @@ ShellDialog {
                                                ? manager.personalAssets + "/desktop-pictures" : ""
     function showFolder(path) { folder.text = path; readFolder() }
     property string notice: ""
-    property var pendingPicture: null
     readonly property url preview: settings.previewDesktopPicture(draftPath)
-    acceptEnabled: draftPath === "" || preview.toString() !== ""
+    readonly property bool canSet: draftPath === "" || preview.toString() !== ""
+    readonly property bool changed: draftPath !== settings.wallpaperPath || draftLayout !== settings.wallpaperLayout
 
     function readFolder() {
         let result = settings.listDesktopPictures(folder.text)
@@ -36,28 +43,20 @@ ShellDialog {
         draftPath = pictureRows[index].path
         pictures.positionViewAtIndex(index, ListView.Contain)
     }
-    function edit() {
-        if (visible || sessionManager.shellModal) return
-        pendingPicture = null
+    function edit() { if (host) host.show(panelId) }
+    function setDesktop() { if (canSet) settings.applyDesktopPicture(draftPath, draftLayout) }
+    // Each time the panel comes on screen it starts from the desktop as it is.
+    onShownChanged: if (shown) {
         draftPath = settings.wallpaperPath
         draftLayout = settings.wallpaperLayout
         folder.text = settings.picturesFolder
         collections = settings.pictureCollections(personalPictures)
         readFolder()
-        open()
+        pathField.forceActiveFocus()
     }
-    onOpened: pathField.forceActiveFocus()
-    onAccepted: pendingPicture = {path: draftPath, layout: draftLayout}
-    Connections {
-        target: panel
-        function onClosed() {
-            let choice = panel.pendingPicture
-            panel.pendingPicture = null
-            panel.releaseInput()
-            if (choice) panel.settings.applyDesktopPicture(choice.path, choice.layout)
-        }
-    }
-    contentItem: Column {
+    Column {
+        id: body
+        width: parent.width
         spacing: 10
         Row {
             width: parent.width; spacing: 8
@@ -66,9 +65,8 @@ ShellDialog {
                 width: parent.width - readButton.width - 8; height: 28
                 font.pixelSize: 12; selectByMouse: true; placeholderText: "Picture folder"
                 color: "black"; selectionColor: "#202050"; selectedTextColor: "white"
-                background: Rectangle {color: "white"; border.color: "#555"}
-                // Return here shows the folder rather than pressing OK.
-                property bool ownsReturn: true
+                background: FieldBackground {}
+                // Return here shows the folder.
                 onAccepted: panel.readFolder()
                 Keys.onPressed: function(event) {if(event.key===Qt.Key_A && (event.modifiers & Qt.MetaModifier)){selectAll();event.accepted=true}}
             }
@@ -91,7 +89,7 @@ ShellDialog {
             }
         }
         Row {
-            width: parent.width; height: Math.max(120, panel.height - 280); spacing: 12
+            width: parent.width; height: 250; spacing: 12
             Rectangle {
                 width: Math.round((parent.width - 12) * 0.43); height: parent.height
                 color: "white"; border.color: "#555"
@@ -99,7 +97,7 @@ ShellDialog {
                     id: pictures; objectName: "picture-list"
                     anchors.fill: parent; anchors.margins: 1; clip: true
                     model: panel.pictureRows; currentIndex: -1; keyNavigationEnabled: false
-                    ScrollBar.vertical: ScrollBar {}
+                    ScrollBar.vertical: PlatinumScrollBar {}
                     Keys.onDownPressed: panel.selectPicture(Math.min(panel.pictureRows.length-1, currentIndex+1))
                     Keys.onUpPressed: panel.selectPicture(Math.max(0, currentIndex-1))
                     delegate: Rectangle {
@@ -146,8 +144,8 @@ ShellDialog {
             text: panel.draftPath; onTextEdited: panel.draftPath = text
             font.pixelSize: 12; selectByMouse: true; placeholderText: "Picture file (full path)"
             color: "black"; selectionColor: "#202050"; selectedTextColor: "white"
-            background: Rectangle {color: "white"; border.color: "#555"}
-            onAccepted: {if(panel.acceptEnabled)panel.accept()}
+            background: FieldBackground {}
+            onAccepted: panel.setDesktop()
             Keys.onPressed: function(event) {if(event.key===Qt.Key_A && (event.modifiers & Qt.MetaModifier)){selectAll();event.accepted=true}}
         }
         Row {
@@ -164,6 +162,11 @@ ShellDialog {
             }
             PlatinumButton {objectName:"picture-solid";text:"Solid Color";implicitWidth:90;onClicked:panel.draftPath=""}
             PlatinumButton {objectName:"picture-default";text:"Default";implicitWidth:74;onClicked:panel.draftPath=panel.settings.defaultWallpaperPath}
+        }
+        PlatinumButton {
+            objectName: "picture-set"; text: "Set Desktop"; implicitWidth: 110
+            defaultAction: panel.changed; enabled: panel.canSet && panel.changed
+            onClicked: panel.setDesktop()
         }
         Text {
             width: parent.width; height: 32

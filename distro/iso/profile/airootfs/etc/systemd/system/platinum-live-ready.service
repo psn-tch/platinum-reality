@@ -1,0 +1,16 @@
+[Unit]
+Description=Platinum live desktop serial boot receipt
+After=systemd-user-sessions.service
+ConditionPathExists=/dev/ttyS0
+
+[Service]
+Type=oneshot
+User=liveuser
+ExecStart=/usr/bin/python3 -I /usr/local/lib/platinum-live-ready.py
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/ttyS0
+TimeoutStartSec=190
+
+[Install]
+WantedBy=graphical.target

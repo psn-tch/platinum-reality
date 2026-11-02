@@ -71,13 +71,14 @@ earlier test's shell copy is offered first, and a test can read the wrong clipbo
 desktop session starts with an empty one. Native tests run under a private
 compositor/bus and do not inspect the user's clipboard.
 
-The limits above bound writer admission, not Qt's underlying retention cache.
-Qt still eagerly reads every offered MIME format without a transfer byte,
-time or format-count budget. Preview limits do not bound that cache. MIME
-snapshot bookkeeping and image encoding occur in the compositor thread.
+The original limits above bounded writer count, not Qt's underlying retention
+cache. The pending [retention-bounds candidate](clipboard-retention-bounds.md)
+adds writer byte admission, bounded weak-offer history and replaces Qt's eager
+reader. That candidate still needs normal and sanitizer qualification; do not
+infer a pass from the earlier transfer-only evidence. MIME snapshot bookkeeping
+and image encoding occur in the compositor thread.
 Nonblocking mode does not guarantee a deadline on arbitrary device or regular
 file descriptors, or against a peer changing a shared open-file description's
 flags. This is not a security isolation boundary for hostile applications.
-Replacing the retained reader with a bounded asynchronous service is separate
-work. Leak detection is disabled in ASan runs; external system libraries and
+Leak detection is disabled in ASan runs; external system libraries and
 browsers are not instrumented.

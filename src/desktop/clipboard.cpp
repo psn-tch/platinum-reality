@@ -1,4 +1,5 @@
 #include "clipboard.hpp"
+#include "clipboard_reader.hpp"
 #include "clipboard_transfers.hpp"
 #include <new>
 #include <QBuffer>
@@ -14,12 +15,15 @@
 #include <QWaylandCompositor>
 #include <QWaylandSeat>
 #include <QWaylandSurface>
+#include <QtWaylandCompositor/private/qwaylandcompositor_p.h>
 #include <QtWaylandCompositor/private/qwaylandseat_p.h>
 #include <QtWaylandCompositor/private/qwayland-server-wayland.h>
 #include <QtWaylandCompositor/private/qwldatadevice_p.h>
+#include <QtWaylandCompositor/private/qwldatadevicemanager_p.h>
 #include <wayland-server-core.h>
 #include <wayland-server-protocol.h>
 #include <functional>
+#include <deque>
 #include <unordered_map>
 
 namespace
@@ -63,6 +67,46 @@ struct QtOfferRequests
 };
 template struct Expose<QtOfferRequests, &QtWaylandServer::wl_data_offer::m_wl_data_offer_interface>;
 
+// Audited against qtwayland v6.12.0, wayland_wrapper/{qwldatadevice,
+// qwldatadevicemanager}.cpp. overrideSelection(empty) is a no-op, and a NULL
+// application selection leaves the old retained bytes in Qt. Clear the actual
+// selection through its normal handler (which ignores its Resource argument),
+// and clear its retained data too. The constructor's exact-version guard also
+// covers these private member pointers.
+// Through the generated base class: its virtual call still reaches Qt's DataDevice handler,
+// and its typeinfo is exported, which UBSan's vptr check needs (DataDevice's is not).
+struct QtClearSelection
+{
+    using type = void (QtWaylandServer::wl_data_device::*)(
+        QtWaylandServer::wl_data_device::Resource *, wl_resource *, uint32_t);
+    friend type exposed(QtClearSelection);
+};
+struct QtRetainedData
+{
+    using type = QMimeData QtWayland::DataDeviceManager::*;
+    friend type exposed(QtRetainedData);
+};
+struct QtRetainedBuffer
+{
+    using type = QByteArray QtWayland::DataDeviceManager::*;
+    friend type exposed(QtRetainedBuffer);
+};
+struct QtOwnsSelection
+{
+    using type = bool QtWayland::DataDeviceManager::*;
+    friend type exposed(QtOwnsSelection);
+};
+struct QtSeats
+{
+    using type = QList<QWaylandSeat *> QWaylandCompositorPrivate::*;
+    friend type exposed(QtSeats);
+};
+template struct Expose<QtClearSelection, &QtWaylandServer::wl_data_device::data_device_set_selection>;
+template struct Expose<QtRetainedData, &QtWayland::DataDeviceManager::m_retainedData>;
+template struct Expose<QtRetainedBuffer, &QtWayland::DataDeviceManager::m_retainedReadBuf>;
+template struct Expose<QtOwnsSelection, &QtWayland::DataDeviceManager::m_compositorOwnsSelection>;
+template struct Expose<QtSeats, &QWaylandCompositorPrivate::seats>;
+
 // X11 selection-protocol targets that X toolkits on Wayland (GTK) still offer.
 // They are requests to a clipboard manager, not data: GTK never answers a read
 // of SAVE_TARGETS, which stalled the compositor's copy of every GTK clipboard.
@@ -87,10 +131,22 @@ struct Clipboard::State
     Watch watch;
     bool cleared = true; // nothing copied yet, or an application cleared it
     bool overriding = false; // the shell is replacing the clipboard
+    std::unique_ptr<ClipboardReader> reader;
+    quint64 retentionEpoch = 0;
+    quint64 captureStarted = 0;
+    bool captureWanted = false;
     std::shared_ptr<ClipboardTransfers> transfers = std::make_shared<ClipboardTransfers>();
     // What Qt retained, served to compositor-owned offers. Replaced, never changed, so offers
     // advertised while it was current can share it.
     std::shared_ptr<const QMimeData> retainedCopy;
+    struct Snapshot
+    {
+        std::shared_ptr<const QMimeData> data;
+        qsizetype bytes;
+    };
+    std::deque<Snapshot> history;
+    qsizetype historyBytes = 0;
+    static constexpr qsizetype retainedLimit = 64 * 1024 * 1024;
     // The types each live application source offered (for clipboard tools), until it goes.
     struct TypesWatch : wl_listener
     {
@@ -100,7 +156,25 @@ struct Clipboard::State
     };
     std::unordered_map<wl_resource *, std::unique_ptr<TypesWatch>> sourceTypes;
     quint64 generation = 0;
+    quint64 intent = 0;
     std::function<void()> selectionChanged; // queued notification of a new selection
+    std::function<void(quint64)> copyIntentChanged; // immediate invalidation of pending tool reads
+
+    quint64 beginCopy(bool keepCapture = false)
+    {
+        if (++intent == 0)
+            ++intent; // Zero is reserved for an inactive compatibility adapter.
+        pending.reset(); // A superseded deferred shell copy must not return after a newer copy fails.
+        if (!keepCapture)
+        {
+            ++retentionEpoch;
+            captureWanted = false;
+            reader->cancel();
+        }
+        if (copyIntentChanged)
+            copyIntentChanged(intent);
+        return intent;
+    }
 
     void recordType(wl_resource *source, const char *mimeType)
     {
@@ -119,7 +193,7 @@ struct Clipboard::State
             wl_resource_add_destroy_listener(source, watch.get());
             found = sourceTypes.emplace(source, std::move(watch)).first;
         }
-        if (found->second->types.size() < 256)
+        if (found->second->types.size() < 256 && QByteArrayView(mimeType).size() <= 4096)
             found->second->types.push_back(QString::fromUtf8(mimeType));
     }
     void changed()
@@ -143,8 +217,100 @@ struct Clipboard::State
         return bytes;
     }
     bool echo = false;       // the desktop is copying an application's clipboard
-    std::unique_ptr<QMimeData> pending; // the shell's copy, until it can be offered
+    std::unique_ptr<QMimeData> pending; // the shell's or a tool's copy, until it can be offered
+    bool pendingFromShell = false;      // the shell has it already; a tool's copy must reach it
+    QPointer<const QMimeData> lastShellCopy; // the shell copy already taken (Qt announces it again)
     std::function<void()> forgotten;    // an application cleared the clipboard
+    std::function<void(const QMimeData *)> captured;
+
+    void forgetRetained()
+    {
+        retainedCopy.reset();
+        if (cleared)
+        {
+            history.clear();
+            historyBytes = 0;
+        }
+        auto *manager = QWaylandCompositorPrivate::get(compositor)->dataDeviceManager();
+        (manager->*exposed(QtRetainedData{})).clear();
+        (manager->*exposed(QtRetainedBuffer{})).clear();
+        if (forgotten)
+            forgotten();
+    }
+
+    void snapshot(std::unique_ptr<QMimeData> data)
+    {
+        qsizetype bytes = 0;
+        for (const auto &type : data->formats())
+            bytes += data->data(type).size();
+        retainedCopy = std::move(data);
+        history.push_back({retainedCopy, bytes});
+        historyBytes += bytes;
+        while (history.size() > 32 || historyBytes > retainedLimit)
+        {
+            historyBytes -= history.front().bytes;
+            history.pop_front();
+        }
+    }
+
+    void startRetention()
+    {
+        if (!captureWanted || !current || cleared || !reader->idle() ||
+            captureStarted == retentionEpoch)
+            return;
+        const auto found = sourceTypes.find(current);
+        if (found == sourceTypes.end())
+            return;
+        QStringList types;
+        for (const auto &type : found->second->types)
+            if (!selectionProtocolTarget(type.toUtf8()))
+                types.push_back(type);
+        const auto epoch = retentionEpoch;
+        captureStarted = epoch;
+        reader->begin(std::move(types), [this](const QString &type, int fd) {
+            if (current)
+                wl_data_source_send_send(current, type.toUtf8().constData(), fd);
+        }, [this, epoch](std::unique_ptr<QMimeData> data) {
+            if (epoch != retentionEpoch || cleared || !data || data->formats().isEmpty())
+                return;
+            auto *manager = QWaylandCompositorPrivate::get(compositor)->dataDeviceManager();
+            auto &retained = manager->*exposed(QtRetainedData{});
+            retained.clear();
+            for (const auto &type : data->formats())
+                retained.setData(type, data->data(type));
+            // Populate retention without overrideSelection(): a live application's
+            // source must keep serving its own full, possibly larger clipboard.
+            // Qt also gates its retainedSelectionReceived notification on the
+            // eager-reader flag. Notify our snapshot/preview path directly.
+            if (captured)
+                captured(&retained);
+            if (auto *seat = compositor->defaultSeat())
+                offerRetained(seat->keyboardFocus());
+        });
+    }
+
+    void clearFromTool()
+    {
+        beginCopy(); // Invalidates deferred shell copies and unfinished tool readers first.
+        track(nullptr);
+        auto *priv = QWaylandCompositorPrivate::get(compositor);
+        bool hadDevice = false;
+        for (auto *seat : priv->*exposed(QtSeats{}))
+        {
+            if (auto *device = QWaylandSeatPrivate::get(seat)->dataDevice())
+            {
+                // Virtual dispatch through the actual Qt handler needs no
+                // non-exported DataDeviceManager/DataSource method symbol.
+                (static_cast<QtWaylandServer::wl_data_device *>(device)->*exposed(QtClearSelection{}))(nullptr, nullptr, 0);
+                hadDevice = true;
+            }
+        }
+        if (!hadDevice)
+            // No ordinary source can have been installed before a Qt data
+            // device exists, but a shell override with no focus can own data.
+            (priv->dataDeviceManager()->*exposed(QtOwnsSelection{})) = false;
+        forgetRetained();
+    }
 
     static QHash<wl_display *, State *> &states()
     {
@@ -201,20 +367,20 @@ struct Clipboard::State
 
     struct Offer {
         std::shared_ptr<ClipboardTransfers> transfers;
-        std::shared_ptr<const QMimeData> data;
+        std::weak_ptr<const QMimeData> data;
     };
     static void offerAccept(wl_client *, wl_resource *, uint32_t, const char *) {}
     static void offerReceive(wl_client *, wl_resource *resource, const char *mimeType, int32_t fd)
     {
         auto *offer = static_cast<Offer *>(wl_resource_get_user_data(resource));
         QByteArray bytes;
-        if (offer->data) {
+        if (const auto data = offer->data.lock()) {
             const auto type = QString::fromUtf8(mimeType);
-            bytes = offer->data->data(type);
-            if (bytes.isEmpty() && type.startsWith("image/") && offer->data->hasImage()) {
+            bytes = data->data(type);
+            if (bytes.isEmpty() && type.startsWith("image/") && data->hasImage()) {
                 QBuffer buffer(&bytes);
                 buffer.open(QIODevice::WriteOnly);
-                qvariant_cast<QImage>(offer->data->imageData())
+                qvariant_cast<QImage>(data->imageData())
                     .save(&buffer, type.mid(6).toUpper().toLatin1().constData());
             }
         }
@@ -286,7 +452,7 @@ struct Clipboard::State
         // An application copy (including an explicit clear or repeat) is newer
         // than any shell copy deferred while the focus had no data device.
         // Never re-install that older copy when a clipboard-capable client gets focus.
-        pending.reset();
+        beginCopy(source && source == current);
         if (source && source == current)
         {
             wl_resource_set_implementation(message->resource, &ignoreRepeat,
@@ -295,8 +461,8 @@ struct Clipboard::State
             return;
         }
         track(source); // Qt installs it (or clears the clipboard) next.
-        if (!source && forgotten)
-            forgotten();
+        if (!source)
+            forgetRetained();
     }
 
     // Qt dereferences the focused client's data device without checking for one.
@@ -316,7 +482,23 @@ struct Clipboard::State
         if (!pending || !seat || !canOffer(seat->keyboardFocus()))
             return;
         const auto data = std::move(pending);
-        overriding = true;
+        if (data->formats().isEmpty())
+        {
+            clearFromTool(); // An unsupported shell copy must not resurrect old bytes.
+            return;
+        }
+        if (current)
+        {
+            wl_list_remove(&watch.link);
+            current = nullptr;
+        }
+        captureWanted = false;
+        cleared = false;
+        // Only the shell's own copy skips the mirror into the shell clipboard (retained); a
+        // command-line tool's copy must reach the shell's text fields like an application's.
+        overriding = pendingFromShell;
+        if (captured)
+            captured(data.get()); // Snapshot before Qt advertises its manual offer.
         compositor->overrideSelection(data.get());
         overriding = false;
         cleared = false; // The compositor owns the clipboard; offer it on focus.
@@ -331,12 +513,17 @@ struct Clipboard::State
         changed();
         if (!source)
             return;
+        forgetRetained(); // Never resurrect the previous copy if this capture fails.
+        captureWanted = true;
+        QMetaObject::invokeMethod(context, [this] { startRetention(); }, Qt::QueuedConnection);
         watch.owner = this;
         watch.notify = [](wl_listener *listener, void *)
         {
             auto *state = static_cast<Watch *>(listener)->owner;
             wl_list_remove(&state->watch.link);
             state->current = nullptr;
+            state->captureWanted = false;
+            state->reader->sourceGone();
             state->changed();
             // The copying application quit or withdrew its source while it was
             // still the clipboard. Keep its contents for whoever has focus.
@@ -361,6 +548,7 @@ struct Clipboard::State
 
     ~State()
     {
+        reader.reset();
         transfers->cancel();
         if (logger)
             wl_protocol_logger_destroy(logger);
@@ -385,8 +573,12 @@ Clipboard::Clipboard(QWaylandCompositor *compositor, QObject *parent) : QObject(
     m_state = std::make_unique<State>();
     m_state->compositor = compositor;
     m_state->context = this;
+    m_state->reader = std::make_unique<ClipboardReader>(this);
+    m_state->reader->available = [state = m_state.get()] { state->startRetention(); };
     State::states().insert(compositor->display(), m_state.get());
-    compositor->setRetainedSelectionEnabled(true);
+    // Qt's eager reader has no byte, format, time or obsolete-pipe budget.
+    // Only our single bounded reader populates its retained MIME cache.
+    compositor->setRetainedSelectionEnabled(false);
     m_state->logger = wl_display_add_protocol_logger(
         compositor->display(),
         [](void *data, wl_protocol_logger_type direction, const wl_protocol_logger_message *message)
@@ -400,6 +592,8 @@ Clipboard::Clipboard(QWaylandCompositor *compositor, QObject *parent) : QObject(
                     state->offerRetained(focus);
                 });
     m_state->selectionChanged = [this] { emit selectionChanged(); };
+    m_state->copyIntentChanged = [this](quint64 intent) { emit copyIntentChanged(intent); };
+    m_state->captured = [this](const QMimeData *data) { retained(data); };
     m_state->forgotten = [this]
     {
         remember(nullptr);
@@ -426,8 +620,19 @@ const QString fromApplications = "application/x-platinum-dreams-from-application
 std::unique_ptr<QMimeData> copied(const QMimeData &data)
 {
     auto copy = std::make_unique<QMimeData>();
+    qsizetype total = 0;
     for (const auto &format : data.formats())
-        copy->setData(format, data.data(format));
+    {
+        if (copy->formats().size() >= 64)
+            break;
+        if (format.isEmpty() || format.contains(QChar(0)) || format.toUtf8().size() > 4096)
+            continue;
+        const auto bytes = data.data(format);
+        if (bytes.size() > 64 * 1024 * 1024 - total)
+            continue;
+        copy->setData(format, bytes);
+        total += bytes.size();
+    }
     return copy;
 }
 } // namespace
@@ -438,7 +643,7 @@ void Clipboard::retained(const QMimeData *data)
     // Snapshot input for newly advertised compositor-owned offers.
     if (m_state && data)
     {
-        m_state->retainedCopy = copied(*data);
+        m_state->snapshot(copied(*data));
         if (!m_state->current)
             m_state->changed(); // The compositor now owns a new clipboard.
     }
@@ -478,12 +683,25 @@ void Clipboard::sendSelection(const QString &mimeType, int fd)
         ::close(fd);
 }
 
-void Clipboard::setSelectionFromTool(std::unique_ptr<QMimeData> data)
+quint64 Clipboard::beginToolCopy()
 {
-    if (!m_state || !data || data->formats().isEmpty())
-        return;
-    m_state->pending = std::move(data);
+    return m_state ? m_state->beginCopy() : 0;
+}
+
+void Clipboard::clearSelectionFromTool()
+{
+    if (m_state)
+        m_state->clearFromTool();
+}
+
+bool Clipboard::setSelectionFromTool(quint64 intent, std::unique_ptr<QMimeData> data)
+{
+    if (!m_state || !intent || intent != m_state->intent || !data || data->formats().isEmpty())
+        return false;
+    m_state->pending = copied(*data);
+    m_state->pendingFromShell = false;
     m_state->offerPending();
+    return true;
 }
 
 quint64 Clipboard::selectionGeneration() const
@@ -500,12 +718,17 @@ void Clipboard::shellClipboardChanged()
 {
     auto *shell = QGuiApplication::clipboard();
     // Only what the shell itself copied: never another program's clipboard, nor
-    // the applications' clipboard the desktop gave it (announced again whenever
-    // the desktop's window regains focus).
+    // the applications' clipboard the desktop gave it. Qt announces the shell's clipboard
+    // again whenever the desktop's window regains focus: the same copy is not a new one, and
+    // taking it again would put an old shell copy above newer tool and application copies.
     if (!m_state || m_state->echo || !shell->ownsClipboard() || !shell->mimeData() ||
-        shell->mimeData()->hasFormat(fromApplications) || shell->mimeData()->formats().isEmpty())
+        shell->mimeData()->hasFormat(fromApplications) || shell->mimeData()->formats().isEmpty() ||
+        shell->mimeData() == m_state->lastShellCopy)
         return;
+    m_state->lastShellCopy = shell->mimeData();
+    m_state->beginCopy();
     m_state->pending = copied(*shell->mimeData());
+    m_state->pendingFromShell = true;
     m_state->offerPending();
 }
 

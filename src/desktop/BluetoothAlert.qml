@@ -106,7 +106,7 @@ ShellDialog {
                     focus: alert.typed
                     width: 180; height: 28; font.pixelSize: 14; selectByMouse: true
                     color: "black"; selectionColor: "#202050"; selectedTextColor: "white"
-                    background: Rectangle {color: "white"; border.color: "#555"}
+                    background: FieldBackground {}
                     maximumLength: alert.kind === "passkey" ? 6 : 16
                     validator: RegularExpressionValidator {
                         regularExpression: alert.kind === "passkey" ? /[0-9]{1,6}/ : /[!-~]{1,16}/

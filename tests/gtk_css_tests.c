@@ -18,6 +18,12 @@ static void parses(void)
     GError *error = NULL;
     g_assert_true(gtk_css_provider_load_from_path(provider, PLATINUM_CSS_FILE, &error));
     g_assert_no_error(error);
+    /* GTK 3's own additions (the scroll arrows), applied after the shared file. */
+    GtkCssProvider *gtk3 = gtk_css_provider_new();
+    g_signal_connect(gtk3, "parsing-error", G_CALLBACK(parse_error), NULL);
+    g_assert_true(gtk_css_provider_load_from_path(gtk3, PLATINUM_GTK3_CSS_FILE, &error));
+    g_assert_no_error(error);
+    g_object_unref(gtk3);
 #else
     gtk_css_provider_load_from_path(provider, PLATINUM_CSS_FILE);
 #endif

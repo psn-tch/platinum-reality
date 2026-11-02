@@ -38,6 +38,31 @@ Canvas {
         } else if(kind==="monitors") {
             c.beginPath();c.arc(8,8,3,0,Math.PI*2);c.fill()
             for(let i=0;i<8;++i){const a=i*Math.PI/4;line(8+Math.cos(a)*4.5,8+Math.sin(a)*4.5,8+Math.cos(a)*6.5,8+Math.sin(a)*6.5)}
+        } else if(kind==="display") {
+            // A monitor on its stand.
+            c.fillStyle="#eee";c.fillRect(1.5,2.5,13,9);c.strokeRect(1.5,2.5,13,9)
+            c.fillStyle="#6b8fa8";c.fillRect(3,4,10,6)
+            c.fillStyle="#222";c.fillRect(7,11.5,2,2);c.fillRect(4,13.5,8,1)
+        } else if(kind==="picture") {
+            // A framed landscape: sky, a hill and the sun.
+            c.fillStyle="#eee";c.fillRect(1.5,2.5,13,11);c.strokeRect(1.5,2.5,13,11)
+            c.fillStyle="#9cc0d8";c.fillRect(3,4,10,8)
+            c.fillStyle="#4d7a3a";c.beginPath();c.moveTo(3,12);c.lineTo(7,7);c.lineTo(10,10);c.lineTo(11.5,8.5);c.lineTo(13,10);c.lineTo(13,12);c.closePath();c.fill()
+            c.fillStyle="#e8c030";c.beginPath();c.arc(11,6,1.3,0,Math.PI*2);c.fill()
+        } else if(kind==="clock") {
+            c.fillStyle="#eee";c.beginPath();c.arc(8,8,6.5,0,Math.PI*2);c.fill();c.stroke()
+            for(let i=0;i<12;i+=3){const a=i*Math.PI/6;line(8+Math.cos(a)*5,8+Math.sin(a)*5,8+Math.cos(a)*6,8+Math.sin(a)*6)}
+            c.lineWidth=1.3;line(8,8,8,4);line(8,8,11,9.5)
+        } else if(kind==="energy") {
+            // A plug: two prongs, the body and its cord.
+            c.fillRect(5,1.5,1.5,3.5);c.fillRect(9.5,1.5,1.5,3.5)
+            c.fillStyle="#eee";c.fillRect(3.5,5,9,5);c.strokeRect(3.5,5,9,5)
+            c.fillStyle="#222";c.fillRect(6.5,10,3,2)
+            c.beginPath();c.moveTo(8,12);c.bezierCurveTo(8,15,4,13,3,15.5);c.stroke()
+        } else if(kind==="trackpad") {
+            c.fillStyle="#ddd";c.fillRect(1.5,3.5,13,9);c.strokeRect(1.5,3.5,13,9)
+            line(1.5,10.5,14.5,10.5);line(8,10.5,8,12.5)
+            c.fillStyle="#222";c.beginPath();c.arc(6,6.5,1,0,Math.PI*2);c.fill()
         } else if(kind==="battery") {
             // A battery on its side, filled to the charge; a bolt while plugged in.
             c.fillStyle="#eee";c.fillRect(1.5,4.5,12,7);c.strokeRect(1.5,4.5,12,7)
@@ -71,7 +96,7 @@ Canvas {
             c.fillStyle="#ddd";c.fillRect(1.5,4.5,13,8);c.strokeRect(1.5,4.5,13,8);c.fillStyle="#222"
             for(let y of [6,8])for(let x=3;x<=12;x+=2)c.fillRect(x,y,1,1)
             c.fillRect(5,10,6,1)
-        } else if(kind==="gamepad") {
+        } else if(kind==="gamepad" || kind==="handheld") {
             c.fillStyle="#ddd";c.fillRect(1.5,5.5,13,6);c.strokeRect(1.5,5.5,13,6)
             c.fillStyle="#222";c.fillRect(2,11,3,2.5);c.fillRect(11,11,3,2.5)
             c.fillRect(3,8,3,1);c.fillRect(4,7,1,3);c.fillRect(11,7,1,1);c.fillRect(12,9,1,1)

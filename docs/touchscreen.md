@@ -69,3 +69,18 @@ After a qualified update and a user-chosen login, the physical check is tapping
 Firefox links/fields and swiping a long page on the built-in panel. Rotation,
 fractional scaling, multiple fingers, general X11 touch support and broad hardware
 behavior remain qualification limits. Production Mirror remains disabled.
+
+## Files by finger (2026-10-29)
+
+psn_tch: "cant copy paste cant drag files from one to another" — on the handheld's touchscreen
+there was no way to reach file commands and no file drag. Now:
+
+- **Long press = right click** in Finder folders (icon and list views): a finger held still for
+  0.6 s opens the item's or the folder's menu (Cut, Copy, Paste, …). Moving more than a few
+  pixels cancels it; the finger that opened the menu does not also click (`LongPressMenu`).
+- **Finger drags of files** travel like mouse drags. The compositor routes `TouchUpdate` to the
+  drag target and drops on `TouchEnd` (`NativeManager::beginNativeDrop`, shared with the mouse).
+  For a drop on the desktop, the source's touch-up is held back, as the mouse button is, until
+  the desktop's receiver has read the files (`platinumDeferTouchEnd`/`releaseDeferredTouch`).
+- Native test `finderCopiesPastesAndDragsBetweenIconWindowsWithHostInput` covers host pointer,
+  Command-C/V, long press, finger drag into another window and onto the desktop.

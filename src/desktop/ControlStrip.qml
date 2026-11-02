@@ -24,9 +24,12 @@ Item {
         {command:"wifi",name:"Wi-Fi"},
         {command:"bluetooth",name:"Bluetooth"}]
         .concat(battery && battery.present ? [{command:"battery",name:"Battery"}] : [])
+        .concat(handheld && handheld.available ? [{command:"handheld",name:"Handheld"}] : [])
         .concat(extraModules)
     // The laptop's own battery (BatteryStatus); the module appears only when there is one.
     readonly property var battery: sessionManager.battery
+    // Handheld Daemon (HandheldDaemon): shown while hhd runs on this computer.
+    readonly property var handheld: sessionManager.handheld
     readonly property int moduleWidth: 36
     readonly property int endWidth: 16
     readonly property int arrowWidth: 13

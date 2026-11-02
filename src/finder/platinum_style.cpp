@@ -1,19 +1,26 @@
 #include "platinum_style.hpp"
 #include "appearance/interface_font.hpp"
 #include <QAction>
+#include <QAbstractScrollArea>
 #include <QApplication>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileIconProvider>
 #include <QFileSystemModel>
 #include <QPainter>
+#include <QScrollBar>
 #include <QSet>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QMimeDatabase>
 #include <QImageReader>
+#include <QLineEdit>
 #include <QStyleFactory>
 #include <QStyleOption>
 namespace
 {
+constexpr int focusRing = 2;
+const QColor focusRingColor("#666699");
 void classicBevel(QPainter *painter, QRect rect, QColor fill, bool sunken = false)
 {
     painter->fillRect(rect, fill);
@@ -141,6 +148,148 @@ class PlatinumIcons final : public QObject, public QFileIconProvider
     }
     QIcon m_folder, m_document;
 };
+
+// Mac OS 9.2.2 scroll bars with Smart Scrolling (both arrows at the end, a scroll box sized to the
+// view), measured pixel by pixel in a 9.2.2 Finder window: 16 px across with black edges, 14 px
+// arrow boxes, a recessed gray track and a lavender scroll box with four grip lines. Worked out
+// for a vertical bar; a horizontal one is the same picture, transposed.
+struct ScrollGeometry
+{
+    QRect groove, slider, subLine, addLine;
+};
+ScrollGeometry scrollGeometry(int length, int thickness, const QStyleOptionSlider *s)
+{
+    ScrollGeometry g;
+    const int last = length - 1;
+    g.addLine = QRect(0, last - 14, thickness, 14);
+    g.subLine = QRect(0, last - 29, thickness, 14);
+    // The scroll box's black ends lie on the track's black edges (the bar's end and the line above
+    // the arrows), so the box travels from row 0 to the line above the arrows.
+    const int grooveStart = 0, grooveEnd = last - 30;
+    if (grooveEnd - grooveStart + 1 < 18)
+        return g; // Too short for a track: arrows only, as on a Mac.
+    g.groove = QRect(0, grooveStart, thickness, grooveEnd - grooveStart + 1);
+    if (s->maximum > s->minimum)
+    {
+        const int grooveLength = g.groove.height();
+        const qint64 range = qint64(s->maximum) - s->minimum;
+        int size = int(qint64(grooveLength) * std::max(1, s->pageStep) / (range + std::max(1, s->pageStep)));
+        size = std::clamp(size, std::min(16, grooveLength), grooveLength);
+        const int position = QStyle::sliderPositionFromValue(s->minimum, s->maximum, s->sliderPosition,
+                                                             grooveLength - size, s->upsideDown);
+        g.slider = QRect(0, grooveStart + position, thickness, size);
+    }
+    return g;
+}
+QRect alongBar(QRect r, const QStyleOptionSlider *s)
+{
+    if (s->orientation == Qt::Horizontal)
+        r = QRect(r.y(), r.x(), r.height(), r.width());
+    return r.translated(s->rect.topLeft());
+}
+void span(QPainter *p, int x0, int x1, int y, const char *color)
+{
+    if (x1 >= x0)
+        p->fillRect(QRect(x0, y, x1 - x0 + 1, 1), QColor(color));
+}
+void column(QPainter *p, int x, int y0, int y1, const char *color)
+{
+    if (y1 >= y0)
+        p->fillRect(QRect(x, y0, 1, y1 - y0 + 1), QColor(color));
+}
+// A 14 x 14 arrow box (inner columns 1..t-2) whose top row is y0; up points to the bar's start.
+void arrowBox(QPainter *p, int t, int y0, bool up, bool pressed, bool live)
+{
+    const int right = t - 2, bottom = y0 + 13;
+    if (!live)
+        p->fillRect(QRect(1, y0, t - 2, 14), QColor("#eeeeee"));
+    else
+    {
+        p->fillRect(QRect(1, y0, t - 2, 14), QColor(pressed ? "#bbbbbb" : "#dddddd"));
+        span(p, 1, right - 1, y0, pressed ? "#888888" : "#ffffff");
+        column(p, 1, y0, bottom - 1, pressed ? "#888888" : "#ffffff");
+        column(p, right, y0 + 1, bottom, pressed ? "#eeeeee" : "#bbbbbb");
+        span(p, 2, right, bottom, pressed ? "#eeeeee" : "#bbbbbb");
+    }
+    for (int row = 0; row < 4; ++row)
+    {
+        const int width = 2 * (up ? row + 1 : 4 - row);
+        const int x0 = 1 + (t - 2 - width) / 2;
+        span(p, x0, x0 + width - 1, y0 + 5 + row, live ? "#000000" : "#888888");
+    }
+}
+void scrollBar(QPainter *p, const QStyleOptionSlider *s)
+{
+    const bool horizontal = s->orientation == Qt::Horizontal;
+    const int length = horizontal ? s->rect.width() : s->rect.height();
+    const int t = horizontal ? s->rect.height() : s->rect.width();
+    const auto g = scrollGeometry(length, t, s);
+    p->save();
+    p->translate(s->rect.topLeft());
+    if (horizontal)
+        p->setWorldTransform(QTransform(0, 1, 1, 0, 0, 0), true);
+    const int last = length - 1;
+    // An inactive window's scroll bar is an empty strip.
+    if (!(s->state & QStyle::State_Active))
+    {
+        p->fillRect(QRect(0, 0, t, length), QColor("#eeeeee"));
+        p->setPen(QColor("#555555"));
+        p->drawRect(QRect(0, 0, t - 1, length - 1));
+        p->restore();
+        return;
+    }
+    const bool live = (s->state & QStyle::State_Enabled) && s->maximum > s->minimum;
+    p->fillRect(QRect(0, 0, t, length), QColor("#eeeeee"));
+    p->setPen(Qt::black);
+    p->drawRect(QRect(0, 0, t - 1, length - 1));
+    const auto pressed = [&](QStyle::SubControl part)
+    { return (s->activeSubControls & part) && (s->state & QStyle::State_Sunken); };
+    arrowBox(p, t, g.subLine.top(), true, pressed(QStyle::SC_ScrollBarSubLine), live);
+    arrowBox(p, t, g.addLine.top(), false, pressed(QStyle::SC_ScrollBarAddLine), live);
+    span(p, 1, t - 2, last - 15, live ? "#000000" : "#888888");
+    span(p, 1, t - 2, last - 30, live ? "#000000" : "#555555");
+    if (!g.groove.isNull() && live)
+    {
+        const int top = g.groove.top() + 1, bottom = g.groove.bottom() - 1; // inside the black edges
+        p->fillRect(QRect(1, top, t - 2, bottom - top + 1), QColor("#aaaaaa"));
+        column(p, 1, top, bottom, "#777777");
+        column(p, 2, top, bottom, "#888888");
+        column(p, t - 3, top, bottom, "#bbbbbb");
+        column(p, t - 2, top, bottom, "#cccccc");
+        // Shadow rows stop at the track's light right edge, which runs unbroken.
+        span(p, 1, t - 3, top, "#777777");
+        span(p, 2, t - 4, top + 1, "#888888");
+        if (!g.slider.isNull())
+        {
+            const int a = g.slider.top(), b = g.slider.bottom();
+            // The scroll box casts the track's shadow below it.
+            if (b + 1 <= bottom)
+                span(p, 1, t - 3, b + 1, "#777777");
+            if (b + 2 <= bottom)
+                span(p, 2, t - 4, b + 2, "#888888");
+            const bool dragging = pressed(QStyle::SC_ScrollBarSlider);
+            span(p, 1, t - 2, a, "#000000");
+            span(p, 1, t - 2, b, "#000000");
+            p->fillRect(QRect(1, a + 1, t - 2, std::max(0, b - a - 1)), QColor(dragging ? "#7777dd" : "#9999ff"));
+            column(p, 1, a + 1, b - 2, "#ccccff"); // the light edge stops above the bottom row
+            span(p, 1, 1, a + 1, "#eeeeee");
+            span(p, 2, t - 3, a + 1, "#ccccff");
+            column(p, t - 2, a + 2, b - 1, "#6666cc");
+            span(p, 2, t - 2, b - 1, "#6666cc");
+            if (b - a >= 20)
+            {
+                const int start = (a + b + 1) / 2 - 4;
+                for (int i = 0; i < 4; ++i)
+                {
+                    span(p, 4, 4, start + 2 * i, "#eeeeee");
+                    span(p, 5, 10, start + 2 * i, "#ccccff");
+                    span(p, 5, 11, start + 2 * i + 1, "#333399");
+                }
+            }
+        }
+    }
+    p->restore();
+}
 } // namespace
 void setClassicShortcuts(QAction *action, QKeySequence sequence)
 {
@@ -159,6 +308,16 @@ void setClassicShortcuts(QAction *action, QKeySequence sequence)
         keys.push_back(sequence);
     }
     action->setShortcuts(keys);
+}
+void keepReturnOnTheDefault(QMessageBox &box)
+{
+    // Keep these button/default settings on the dialog that receives input.
+    box.setOption(QMessageBox::Option::DontUseNativeDialog);
+    for (auto *button : box.buttons())
+        if (auto *push = qobject_cast<QPushButton *>(button))
+            push->setAutoDefault(false);
+    if (auto *preferred = box.defaultButton())
+        preferred->setFocus(Qt::OtherFocusReason);
 }
 void installPlatinumIcons(QFileSystemModel *model)
 {
@@ -195,8 +354,11 @@ int PlatinumStyle::pixelMetric(PixelMetric metric, const QStyleOption *option,
         return 16;
     case PM_ButtonMargin:
         return 5;
+    case PM_ButtonDefaultIndicator:
+        return 4; // Room for Mac OS 9's ring: 3 dark pixels and a 1-pixel gap.
     case PM_DefaultFrameWidth:
-        return 1;
+        // A text field keeps room for its focus ring, so it doesn't shift when focus moves.
+        return qobject_cast<const QLineEdit *>(widget) ? 1 + focusRing : 1;
     case PM_MenuPanelWidth:
         return 1;
     case PM_IndicatorWidth:
@@ -207,6 +369,25 @@ int PlatinumStyle::pixelMetric(PixelMetric metric, const QStyleOption *option,
     default:
         return QProxyStyle::pixelMetric(metric, option, widget);
     }
+}
+// Qt makes room for the default ring only on auto-default (dialog) buttons. A window's own
+// default button (the installer's Continue) gets the same room here, around its bevel.
+static bool ringedOutsideDialog(const QStyleOption *option)
+{
+    const auto *button = qstyleoption_cast<const QStyleOptionButton *>(option);
+    return button && (button->features & QStyleOptionButton::DefaultButton) &&
+           !(button->features & QStyleOptionButton::AutoDefaultButton);
+}
+QSize PlatinumStyle::sizeFromContents(ContentsType type, const QStyleOption *option, const QSize &size,
+                                      const QWidget *widget) const
+{
+    auto result = QProxyStyle::sizeFromContents(type, option, size, widget);
+    if (type == CT_PushButton && ringedOutsideDialog(option))
+    {
+        const auto ring = 2 * pixelMetric(PM_ButtonDefaultIndicator, option, widget);
+        result += QSize(ring, ring);
+    }
+    return result;
 }
 int PlatinumStyle::styleHint(StyleHint hint, const QStyleOption *option, const QWidget *widget,
                              QStyleHintReturn *returnData) const
@@ -279,7 +460,15 @@ void PlatinumStyle::drawPrimitive(PrimitiveElement element, const QStyleOption *
     if (element == PE_PanelLineEdit)
     {
         p->save();
-        classicBevel(p, o->rect, o->palette.color(QPalette::Base), true);
+        auto field = o->rect;
+        if (qobject_cast<const QLineEdit *>(w))
+        {
+            // Mac OS 9's focus ring: two pixels around the text field that has the keyboard.
+            const bool focused = (o->state & State_HasFocus) && (o->state & State_Enabled);
+            p->fillRect(o->rect, focused ? focusRingColor : o->palette.color(QPalette::Window));
+            field.adjust(focusRing, focusRing, -focusRing, -focusRing);
+        }
+        classicBevel(p, field, o->palette.color(QPalette::Base), true);
         p->restore();
         return;
     }
@@ -290,10 +479,26 @@ void PlatinumStyle::drawPrimitive(PrimitiveElement element, const QStyleOption *
         p->restore();
         return;
     }
+    if (element == PE_FrameDefaultButton)
+    {
+        // The default button's thick rounded ring (Return presses it). Qt asks only while it is enabled.
+        p->save();
+        p->setRenderHint(QPainter::Antialiasing);
+        p->setPen(QPen(QColor("#222222"), 3));
+        p->setBrush(Qt::NoBrush);
+        p->drawRoundedRect(QRectF(o->rect).adjusted(1.5, 1.5, -1.5, -1.5), 4, 4);
+        p->restore();
+        return;
+    }
     if (element == PE_PanelButtonCommand)
     {
         p->save();
         QRect r = o->rect.adjusted(0, 0, -1, -1);
+        if (ringedOutsideDialog(o))
+        {
+            const auto ring = pixelMetric(PM_ButtonDefaultIndicator, o, w);
+            r.adjust(ring, ring, -ring, -ring);
+        }
         bool pressed = o->state & State_Sunken;
         p->fillRect(r, pressed ? QColor("#bbbbbb") : QColor("#dddddd"));
         p->setPen(QColor("#222222"));
@@ -310,6 +515,10 @@ void PlatinumStyle::drawPrimitive(PrimitiveElement element, const QStyleOption *
     QProxyStyle::drawPrimitive(element, o, p, w);
 }
 
+void paintPlatinumScrollBar(QPainter *painter, const QStyleOptionSlider &option)
+{
+    scrollBar(painter, &option);
+}
 void PlatinumStyle::drawComplexControl(ComplexControl control, const QStyleOptionComplex *option,
                                        QPainter *painter, const QWidget *widget) const
 {
@@ -319,45 +528,63 @@ void PlatinumStyle::drawComplexControl(ComplexControl control, const QStyleOptio
         QProxyStyle::drawComplexControl(control, option, painter, widget);
         return;
     }
-    painter->save();
-    painter->fillRect(option->rect, QColor("#cccccc"));
-    const bool horizontal = scroll->orientation == Qt::Horizontal;
-    for (auto part : {SC_ScrollBarSubLine, SC_ScrollBarAddLine, SC_ScrollBarSlider})
+    scrollBar(painter, scroll);
+}
+QRect PlatinumStyle::subControlRect(ComplexControl control, const QStyleOptionComplex *option,
+                                    SubControl part, const QWidget *widget) const
+{
+    const auto *s = qstyleoption_cast<const QStyleOptionSlider *>(option);
+    if (control != CC_ScrollBar || !s)
+        return QProxyStyle::subControlRect(control, option, part, widget);
+    const bool horizontal = s->orientation == Qt::Horizontal;
+    const int length = horizontal ? s->rect.width() : s->rect.height();
+    const int thickness = horizontal ? s->rect.height() : s->rect.width();
+    const auto g = scrollGeometry(length, thickness, s);
+    QRect r;
+    switch (part)
     {
-        if (!(option->subControls & part))
-            continue;
-        const auto rect = subControlRect(control, option, part, widget);
-        if (rect.isEmpty())
-            continue;
-        const bool pressed = (option->activeSubControls & part) && (option->state & State_Sunken);
-        classicBevel(painter, rect, QColor(pressed ? "#bbbbbb" : "#dddddd"), pressed);
-        painter->setPen((option->state & State_Enabled) ? QColor("#222222") : QColor("#888888"));
-        if (part == SC_ScrollBarSlider)
-        {
-            if ((horizontal ? rect.width() : rect.height()) > 18)
-                for (int offset : {-3, 0, 3})
-                    if (horizontal)
-                        painter->drawLine(rect.center() + QPoint(offset, -3),
-                                          rect.center() + QPoint(offset, 3));
-                    else
-                        painter->drawLine(rect.center() + QPoint(-3, offset),
-                                          rect.center() + QPoint(3, offset));
-        }
-        else
-        {
-            const bool reverse = part == SC_ScrollBarSubLine;
-            const auto center = rect.center();
-            const int direction = reverse ? -1 : 1;
-            QPolygon arrow;
-            if (horizontal)
-                arrow << center + QPoint(direction * 3, 0) << center + QPoint(-direction * 2, -3)
-                      << center + QPoint(-direction * 2, 3);
-            else
-                arrow << center + QPoint(0, direction * 3) << center + QPoint(-3, -direction * 2)
-                      << center + QPoint(3, -direction * 2);
-            painter->setBrush(painter->pen().color());
-            painter->drawPolygon(arrow);
-        }
+    case SC_ScrollBarSubLine: r = g.subLine; break;
+    case SC_ScrollBarAddLine: r = g.addLine; break;
+    case SC_ScrollBarGroove: r = g.groove; break;
+    case SC_ScrollBarSlider: r = g.slider; break;
+    case SC_ScrollBarSubPage:
+        if (!g.slider.isNull())
+            r = QRect(0, g.groove.top(), thickness, g.slider.top() - g.groove.top());
+        break;
+    case SC_ScrollBarAddPage:
+        if (!g.slider.isNull())
+            r = QRect(0, g.slider.bottom() + 1, thickness, g.groove.bottom() - g.slider.bottom());
+        break;
+    default: break;
     }
-    painter->restore();
+    return r.isEmpty() ? QRect() : alongBar(r, s);
+}
+void PlatinumStyle::polish(QWidget *widget)
+{
+    QProxyStyle::polish(widget);
+    // A scroll bar is drawn empty in an inactive window, so it repaints when its window changes.
+    if (qobject_cast<QScrollBar *>(widget))
+        widget->installEventFilter(this);
+    // Mac OS 9 scroll bars never come and go: a scrolling view always shows its vertical one.
+    // Pop-up lists, menus and tooltips keep theirs as needed.
+    if (auto *area = qobject_cast<QAbstractScrollArea *>(widget);
+        area && area->verticalScrollBarPolicy() == Qt::ScrollBarAsNeeded && !area->inherits("QComboBoxListView"))
+    {
+        const auto type = area->window()->windowType();
+        if (type != Qt::Popup && type != Qt::ToolTip)
+            area->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+    }
+}
+void PlatinumStyle::unpolish(QWidget *widget)
+{
+    if (qobject_cast<QScrollBar *>(widget))
+        widget->removeEventFilter(this);
+    QProxyStyle::unpolish(widget);
+}
+bool PlatinumStyle::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::WindowActivate || event->type() == QEvent::WindowDeactivate)
+        if (auto *bar = qobject_cast<QScrollBar *>(watched))
+            bar->update();
+    return QProxyStyle::eventFilter(watched, event);
 }

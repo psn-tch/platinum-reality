@@ -7,10 +7,15 @@
 #include "desktop/audio_service.hpp"
 #include "desktop/desktop_items.hpp"
 #include "desktop/display_layout.hpp"
+#include "desktop/display_topology_feed.hpp"
 #include "desktop/drop_receiver_window.hpp"
+#include "desktop/energy_settings.hpp"
+#include "desktop/input_settings.hpp"
 #include "desktop/manager.hpp"
 #include "desktop/surface_client.hpp"
 #include "desktop/screenshot_service.hpp"
+#include <QMimeData>
+#include <QClipboard>
 #include "desktop/system_controls.hpp"
 #include "finder/file_drag.hpp"
 #include "native_keys.hpp"
@@ -23,6 +28,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QQmlComponent>
+#include <QRegularExpression>
 #include <QQmlContext>
 #include <QQuickItem>
 #include <QTemporaryDir>
@@ -198,7 +204,7 @@ class DesktopTests : public QObject
         QCOMPARE(controls.state().value("brightness").toMap().value("value").toInt(), 5);
         QTRY_VERIFY_WITH_TIMEOUT(!indicator->isVisible(), 4000);
     }
-    void quickControlsUseAnAsynchronousFakeAndReleaseModalInput()
+    void quickControlsUseAnAsynchronousFakeAndCloseWithEscape()
     {
         QTemporaryDir root;
         const auto helper=root.filePath("controls.py");
@@ -268,7 +274,7 @@ class DesktopTests : public QObject
         QVERIFY(choose("desktop-command-quick-controls"));
         QTRY_VERIFY(panel->property("opened").toBool());
         QVERIFY(!visualItem(view.contentItem(),"control-strip-menu")->isVisible());
-        QVERIFY(manager.shellModal());
+        QVERIFY(!manager.shellModal()); // A panel of the modeless Control Panels window.
         QTRY_VERIFY(!controls.busy());
         QCOMPARE(controls.state().value("volume").toMap().value("value").toInt(),70);
         QVERIFY(!visualItem(view.contentItem(),"quick-bluetooth")->isEnabled());
@@ -297,7 +303,7 @@ class DesktopTests : public QObject
         QCOMPARE(volume->property("value").toInt(),75);
         QVERIFY(volume->hasActiveFocus());
         QTest::keyClick(&view,Qt::Key_Escape);
-        QTRY_VERIFY(!manager.shellModal());
+        QTRY_VERIFY(!panel->property("opened").toBool());
         // The Sound module refreshes on opening and checks the nearest volume step.
         QVERIFY(click("control-strip-sound"));
         QTRY_COMPARE(lastCall(),QByteArray("status"));
@@ -507,6 +513,13 @@ class DesktopTests : public QObject
         QImage saved(path);
         QCOMPARE(saved.size(), QSize(100,100));
         QCOMPARE(saved.pixelColor(30,30), QColor(Qt::blue));
+        // The same selection as a PNG picture on the clipboard.
+        QVERIFY(tool.copy());
+        const auto *copied = QGuiApplication::clipboard()->mimeData();
+        QVERIFY(copied && copied->hasFormat("image/png"));
+        const auto picture = QImage::fromData(copied->data("image/png"), "PNG");
+        QCOMPARE(picture.size(), QSize(100,100));
+        QCOMPARE(picture.pixelColor(30,30), QColor(Qt::blue));
         QCOMPARE(QFileInfo(path).permissions() & (QFileDevice::ReadGroup | QFileDevice::ReadOther |
                   QFileDevice::WriteGroup | QFileDevice::WriteOther), QFileDevice::Permissions{});
         tool.discard();
@@ -746,7 +759,7 @@ class DesktopTests : public QObject
         QCOMPARE(rows.at(0).toMap().value("name").toString(), QString("Photos One.jpg"));
     }
 
-    void desktopPictureDialogPreviewsCancelsAppliesAndRestores()
+    void desktopPicturePanelPreviewsSetsAndRestores()
     {
         QTemporaryDir root;
         const auto picture = root.path() + "/Chosen picture.png";
@@ -792,7 +805,7 @@ class DesktopTests : public QObject
         auto *panel = view.rootObject()->findChild<QObject *>("desktop-picture-dialog");
         QVERIFY(panel);
         QTRY_VERIFY(panel->property("opened").toBool());
-        QVERIFY(manager.shellModal());
+        QVERIFY(!manager.shellModal()); // A panel of the modeless Control Panels window.
         auto *folder = visualItem(view.contentItem(), "picture-folder");
         QVERIFY(folder);
         folder->setProperty("text", root.path());
@@ -816,15 +829,20 @@ class DesktopTests : public QObject
         };
         QTRY_COMPARE(previewPixel(), QColor("#cf3148"));
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/desktop-picture.png"));
+        // Closing without Set Desktop leaves the desktop as it was; reopening starts from it.
         QTest::keyClick(&view, Qt::Key_Escape);
-        QTRY_VERIFY(!manager.shellModal());
+        QTRY_VERIFY(!panel->property("opened").toBool());
         QVERIFY(settings->wallpaperPath().isEmpty());
         QVERIFY(open());
         QTRY_VERIFY(panel->property("opened").toBool());
+        QCOMPARE(panel->property("draftPath").toString(), QString());
         panel->setProperty("draftPath", picture);
         QVERIFY(click("picture-layout-fit"));
-        QVERIFY(click("desktop-picture-dialog-accept"));
-        QTRY_VERIFY(!manager.shellModal());
+        QVERIFY(click("picture-set"));
+        QTRY_COMPARE(settings->wallpaperPath(), picture);
+        QVERIFY(!visualItem(view.contentItem(), "picture-set")->isEnabled()); // Nothing left to set.
+        QTest::keyClick(&view, Qt::Key_Escape);
+        QTRY_VERIFY(!panel->property("opened").toBool());
         QCOMPARE(settings->wallpaperPath(), picture);
         QCOMPARE(settings->wallpaperLayout(), QString("fit"));
         auto *desktopImage = visualItem(view.contentItem(), "desktop-wallpaper");
@@ -839,9 +857,8 @@ class DesktopTests : public QObject
         QTRY_VERIFY(panel->property("opened").toBool());
         QCOMPARE(panel->property("draftPath").toString(), picture);
         QVERIFY(click("picture-solid"));
-        QVERIFY(click("desktop-picture-dialog-accept"));
-        QTRY_VERIFY(!manager.shellModal());
-        QVERIFY(settings->wallpaper().isEmpty());
+        QVERIFY(click("picture-set"));
+        QTRY_VERIFY(settings->wallpaper().isEmpty());
     }
     void windowRollHasIntermediateFramesReversesAndDoesNotResizeTheContent()
     {
@@ -899,7 +916,7 @@ class DesktopTests : public QObject
         QCOMPARE(roll->height(), 330);
         QVERIFY(!roll->clip());
     }
-    void monitorsPanelSavesUseAllDisplaysForTheNextLogin()
+    void monitorsPanelSavesUseAllDisplaysForTheNextLoginAtOnce()
     {
         // psn_tch (2026-10-21): two monitors, opt-in. The choice is saved in the desktop profile for
         // the session supervisor to read at the next login; Cancel keeps the saved choice.
@@ -942,30 +959,19 @@ class DesktopTests : public QObject
         click(useAll);
         QTRY_VERIFY(useAll->property("checked").toBool());
         QVERIFY(note->property("text").toString().startsWith("“Use all displays” changes the next time you log in."));
-        QVERIFY(saved().isEmpty()); // Nothing is saved before OK.
-        click(item("monitors-panel-accept"));
-        QTRY_VERIFY(!panel->property("visible").toBool());
-        QCOMPARE(saved(), QString("extend"));
+        // A panel of the Control Panels window: the box saves as soon as it is clicked.
+        QTRY_COMPARE(saved(), QString("extend"));
         QVERIFY(manager.useAllDisplays());
         // A later session reads the choice back.
         QQuickView other;
         NativeManager reloaded(nullptr, &other, root.path(), profile, {});
         QVERIFY(reloaded.useAllDisplays());
-        // Cancel keeps it; OK with the box cleared saves one display again.
-        QMetaObject::invokeMethod(panel, "edit");
-        QTRY_VERIFY(panel->property("opened").toBool());
-        QTRY_VERIFY(item("monitors-use-all")->property("checked").toBool());
+        // Clearing the box saves one display again; the note goes, as that is how this session started.
         click(item("monitors-use-all"));
-        click(item("monitors-panel-cancel"));
-        QTRY_VERIFY(!panel->property("visible").toBool());
-        QCOMPARE(saved(), QString("extend"));
-        QMetaObject::invokeMethod(panel, "edit");
-        QTRY_VERIFY(panel->property("opened").toBool());
-        click(item("monitors-use-all"));
-        click(item("monitors-panel-accept"));
-        QTRY_VERIFY(!panel->property("visible").toBool());
-        QCOMPARE(saved(), QString("single"));
+        QTRY_COMPARE(saved(), QString("single"));
         QVERIFY(!manager.useAllDisplays());
+        QVERIFY(!item("monitors-use-all")->property("checked").toBool());
+        QVERIFY(!note->property("text").toString().contains("next time you log in"));
     }
     void dialogKeysFollowMacOS9()
     {
@@ -984,8 +990,21 @@ class DesktopTests : public QObject
         const auto clearView = qScopeGuard([&] { view.setSource({}); });
         view.show();
         QVERIFY(QTest::qWaitForWindowExposed(&view));
-        auto *panel = view.rootObject()->findChild<QObject *>("monitors-panel");
-        QVERIFY(panel);
+        // An OK/Cancel dialog with a draft, as the panels were before they moved into the
+        // modeless Control Panels window.
+        QQmlComponent component(view.engine());
+        component.setData("import QtQuick\nimport QtQuick.Controls\n"
+                          "ShellDialog {objectName: \"draft-dialog\"; sessionManager: manager; width: 400; title: \"Draft\"\n"
+                          "    standardButtons: Dialog.Ok | Dialog.Cancel; property bool draftUseAll: false\n"
+                          "    function edit() { open() }\n"
+                          "    onAccepted: manager.setUseAllDisplays(draftUseAll)\n"
+                          "    contentItem: Text {text: \"Use all displays?\"}}\n",
+                          QUrl("qrc:/desktop/src/desktop/DraftDialogTest.qml"));
+        auto *panel = component.beginCreate(view.rootContext());
+        QVERIFY2(panel, qPrintable(component.errorString()));
+        const auto destroyPanel = qScopeGuard([&] { delete panel; });
+        panel->setProperty("parent", QVariant::fromValue(view.rootObject()));
+        component.completeCreate();
         QSignalSpy accepted(panel, SIGNAL(accepted())), rejected(panel, SIGNAL(rejected()));
         const auto edit = [&](bool useAll)
         {
@@ -1043,11 +1062,13 @@ class DesktopTests : public QObject
         QVERIFY(closed(forget));
         QCOMPARE(forgetAccepted.size(), 0);
         QCOMPARE(forgetRejected.size(), 1);
-        // Desktop Picture's folder field shows the folder on Return instead of pressing OK; the
-        // picture field beside it presses OK.
+        // Desktop Picture's folder field shows the folder on Return; nothing is set, and the
+        // Control Panels window stays open.
         auto *pictures = view.rootObject()->findChild<QObject *>("desktop-picture-dialog");
         QVERIFY(pictures);
-        QSignalSpy picturesAccepted(pictures, SIGNAL(accepted()));
+        auto *settings = qobject_cast<AppearanceSettings *>(manager.appearance());
+        QVERIFY(settings);
+        const auto wallpaper = settings->wallpaperPath();
         QMetaObject::invokeMethod(pictures, "edit");
         QTRY_VERIFY(pictures->property("opened").toBool());
         view.grabWindow();
@@ -1057,11 +1078,11 @@ class DesktopTests : public QObject
         QTRY_VERIFY(folder->hasActiveFocus());
         QTest::keyClick(&view, Qt::Key_Return);
         QTest::qWait(300);
-        QVERIFY(pictures->property("visible").toBool());
-        QCOMPARE(picturesAccepted.size(), 0);
-        QTest::keyClick(&view, Qt::Key_Period, Qt::MetaModifier);
-        QVERIFY(closed(pictures));
-        QCOMPARE(picturesAccepted.size(), 0);
+        QVERIFY(pictures->property("opened").toBool());
+        QCOMPARE(settings->wallpaperPath(), wallpaper);
+        QTest::keyClick(&view, Qt::Key_Escape);
+        QTRY_VERIFY(!pictures->property("opened").toBool());
+        QCOMPARE(settings->wallpaperPath(), wallpaper);
     }
     void getInfoOpensModelessWindowsBoundToTheirItems()
     {
@@ -1284,7 +1305,7 @@ class DesktopTests : public QObject
         QVERIFY(appearance);
         QVERIFY(QMetaObject::invokeMethod(appearance, "edit", Q_ARG(QVariant, QString("Sound"))));
         QTRY_VERIFY(appearance->property("opened").toBool());
-        QVERIFY(appearance->property("draftSoundTrack").toBool());
+        QVERIFY(appearance->property("soundTrackOn").toBool());
         QTRY_VERIFY(item("appearance-sound-track") && item("appearance-sound-track")->isVisible());
         // Controls make their theme sounds: a checkbox presses and releases.
         QVERIFY(appearance->setProperty("tab", 4));
@@ -1301,9 +1322,10 @@ class DesktopTests : public QObject
         QCOMPARE(played.at(4).first().toString(), QString("tabp"));
         QCOMPARE(played.at(5).first().toString(), QString("tabr"));
         QCOMPARE(appearance->property("tab").toInt(), 1);
-        QVERIFY(appearance->setProperty("draftSoundTrack", false));
-        QVERIFY(QMetaObject::invokeMethod(appearance, "accept"));
+        // Choosing None applies at once.
+        QVERIFY(QMetaObject::invokeMethod(appearance, "setSoundTrack", Q_ARG(QVariant, false)));
         QTRY_VERIFY(!sounds->enabled());
+        QVERIFY(!appearance->property("soundTrackOn").toBool());
         QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "showMenu", Q_ARG(QVariant, 0)));
         QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "closeMenu", Q_ARG(QVariant, true), Q_ARG(QVariant, QString("mnuc"))));
         QTest::qWait(100);
@@ -1564,6 +1586,144 @@ class DesktopTests : public QObject
         QTest::keyClick(&view, Qt::Key_Escape);
         QTRY_VERIFY(!panel->property("visible").toBool());
     }
+    void startupSoundCanBeTurnedOffAndSetLouderOrQuieter()
+    {
+        // psn_tch, 2026-10-29: "an option to enable / disable the beep on boot up and a volume slider".
+        // Sound ▸ Startup saves both for the supervisor (scripts/standalone-session.py reads
+        // startup-sound.json at the next Log In); Play previews through a fake player that records.
+        QTemporaryDir root;
+        const auto profile = root.filePath("profile"), assets = root.filePath("assets");
+        QVERIFY(QDir().mkpath(assets));
+        const auto calls = root.filePath("player.calls");
+        const auto player = root.filePath("player");
+        {
+            QFile script(player);
+            QVERIFY(script.open(QIODevice::WriteOnly));
+            script.write(("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + calls + "'\n").toUtf8());
+        }
+        QVERIFY(QFile::setPermissions(player, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        const auto recorded = [&]
+        {
+            QFile file(calls);
+            return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()).trimmed().split('\n', Qt::SkipEmptyParts) : QStringList();
+        };
+        const auto saved = [&]
+        {
+            QFile file(profile + "/startup-sound.json");
+            return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
+        };
+        StartupSound sound(profile, assets, player);
+        // Defaults: on, at half volume (what the supervisor did before this setting).
+        QVERIFY(!sound.available());
+        QVERIFY(sound.enabled());
+        QCOMPARE(sound.volume(), 50);
+        sound.play();
+        QTest::qWait(200);
+        QVERIFY(recorded().isEmpty());
+        // A linked or empty file is not a startup sound; WAV is preferred, as the supervisor does.
+        QVERIFY(QFile::link(root.filePath("elsewhere.wav"), assets + "/startup-chime.wav"));
+        {
+            QFile empty(assets + "/startup-chime.flac");
+            QVERIFY(empty.open(QIODevice::WriteOnly));
+        }
+        sound.refresh();
+        QVERIFY(!sound.available());
+        {
+            QFile aiff(assets + "/startup-chime.aiff");
+            QVERIFY(aiff.open(QIODevice::WriteOnly) && aiff.write("FORM") == 4);
+        }
+        QSignalSpy changed(&sound, &StartupSound::changed);
+        sound.refresh();
+        QVERIFY(sound.available());
+        QCOMPARE(sound.fileName(), QString("startup-chime.aiff"));
+        QCOMPARE(changed.size(), 1);
+        sound.play();
+        QTRY_COMPARE(recorded(), QStringList({"--volume 0.50 " + assets + "/startup-chime.aiff"}));
+        sound.setVolume(80);
+        sound.setEnabled(false);
+        QCOMPARE(saved().value("volume").toInt(), 80);
+        QCOMPARE(saved().value("enabled").toBool(true), false);
+        {
+            StartupSound reopened(profile, assets, player);
+            QVERIFY(!reopened.enabled());
+            QCOMPARE(reopened.volume(), 80);
+        }
+        sound.setEnabled(true);
+        sound.setVolume(0);
+        sound.play(); // Silent at volume 0.
+        QTest::qWait(200);
+        QCOMPARE(recorded().size(), 1);
+        sound.setVolume(40);
+
+        // The Sound panel's Startup tab.
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.filePath("desktop-profile"), {});
+        QVERIFY(manager.startupSound());
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto item = [&](const QString &name) { view.grabWindow(); return visualItem(view.contentItem(), name); };
+        const auto click = [&](QQuickItem *target, qreal x = -1)
+        {
+            QTest::mouseClick(&view, Qt::LeftButton, {},
+                              target->mapToScene(QPointF(x < 0 ? target->width() / 2 : x, target->height() / 2)).toPoint());
+        };
+        AudioService absent(root.filePath("absent-audio.py"));
+        auto *panel = view.rootObject()->findChild<QObject *>("sound-panel");
+        QVERIFY(panel);
+        QVERIFY(panel->setProperty("startupSound", QVariant::fromValue(static_cast<QObject *>(&sound))));
+        QVERIFY(panel->setProperty("service", QVariant::fromValue(static_cast<QObject *>(&absent))));
+        QVERIFY(QMetaObject::invokeMethod(panel, "edit"));
+        QTRY_VERIFY(panel->property("opened").toBool());
+        QVERIFY(!item("sound-startup-enabled")->isVisible());
+        click(item("sound-tab-startup"));
+        QTRY_VERIFY(panel->property("startup").toBool());
+        QQuickItem *box = nullptr;
+        QTRY_VERIFY((box = item("sound-startup-enabled")) && box->isVisible());
+        QVERIFY(!item("sound-devices")->isVisible());
+        QVERIFY(box->property("checked").toBool());
+        QVERIFY(item("sound-startup-message")->property("text").toString().contains("startup-chime.aiff"));
+        // Play previews at the chosen volume.
+        click(item("sound-startup-play"));
+        QTRY_COMPARE(recorded().size(), 2);
+        QCOMPARE(recorded().last(), "--volume 0.40 " + assets + "/startup-chime.aiff");
+        // Dragging the slider to its right end and letting go saves 100% and plays a sample.
+        auto *slider = item("sound-startup-volume");
+        QVERIFY(slider && slider->isEnabled());
+        const auto handle = qvariant_cast<QQuickItem *>(slider->property("handle"));
+        QVERIFY(handle);
+        const auto start = handle->mapToScene(QPointF(handle->width() / 2, handle->height() / 2)).toPoint();
+        const auto end = slider->mapToScene(QPointF(slider->width() + 20, slider->height() / 2)).toPoint();
+        QTest::mousePress(&view, Qt::LeftButton, {}, start);
+        for (int step = 1; step <= 10; ++step)
+            QTest::mouseMove(&view, start + (end - start) * step / 10);
+        QTest::mouseRelease(&view, Qt::LeftButton, {}, end);
+        QTRY_COMPARE(sound.volume(), 100);
+        QTRY_COMPARE(recorded().size(), 3);
+        QCOMPARE(recorded().last(), "--volume 1.00 " + assets + "/startup-chime.aiff");
+        QCOMPARE(saved().value("volume").toInt(), 100);
+        // Turning it off saves that, and the volume slider is dimmed.
+        click(box, 8);
+        QTRY_VERIFY(!sound.enabled());
+        QCOMPARE(saved().value("enabled").toBool(true), false);
+        QTRY_VERIFY(!slider->isEnabled());
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/sound-startup.png"));
+        click(box, 8);
+        QTRY_VERIFY(sound.enabled());
+        // Without a sound file, the panel says where to put one, and Play is unavailable.
+        QVERIFY(QFile::remove(assets + "/startup-chime.aiff"));
+        QVERIFY(QMetaObject::invokeMethod(panel, "edit")); // Already open: refresh happens on reopen.
+        sound.refresh();
+        QTRY_VERIFY(item("sound-startup-message")->property("text").toString().contains("No startup sound is installed"));
+        QVERIFY(item("sound-startup-message")->property("text").toString().contains(assets));
+        QVERIFY(!item("sound-startup-play")->isEnabled());
+        QTest::keyClick(&view, Qt::Key_Escape);
+        QTRY_VERIFY(!panel->property("visible").toBool());
+    }
     void monitorsPanelArrangesDisplaysAndAsksTheSupervisorForTheMainOne()
     {
         // Mac OS 9 Monitors → Arrange: drag the menu bar to choose the main display. The request
@@ -1640,10 +1800,7 @@ class DesktopTests : public QObject
         QTest::mouseRelease(&view, Qt::LeftButton, {}, to, 10);
         QTRY_COMPARE(panel->property("draftPrimary").toString(), QString("eDP-1"));
         QTRY_COMPARE(qRound(menuBar->x()), qRound(builtIn->x()) + 1);
-        QVERIFY(manager.primaryDisplayRect().x() == 0); // Nothing changes until OK and publication.
-        auto *ok = item("monitors-panel-accept");
-        QVERIFY(ok);
-        QTest::mouseClick(&view, Qt::LeftButton, {}, centre(ok));
+        // Dropping the menu bar asks the supervisor at once; the desktop moves only when it publishes.
         QTRY_COMPARE(commands.size(), 1);
         QCOMPARE(commands.first(), QByteArray("primary eDP-1\n"));
         QTRY_VERIFY(!manager.displayRequestBusy());
@@ -1660,13 +1817,13 @@ class DesktopTests : public QObject
         QTest::mouseClick(&view, Qt::LeftButton, {}, centre(external));
         QTRY_COMPARE(panel->property("selected").toString(), QString("DP-3"));
         QTest::mouseClick(&view, Qt::LeftButton, {}, centre(item("monitors-make-main")));
-        QCOMPARE(panel->property("draftPrimary").toString(), QString("DP-3"));
-        QTest::mouseClick(&view, Qt::LeftButton, {}, centre(item("monitors-panel-accept")));
         QTRY_COMPARE(commands.size(), 2);
         QCOMPARE(commands.last(), QByteArray("primary DP-3\n"));
         QTRY_COMPARE(errors.size(), 1);
         QCOMPARE(errors.first().first().toString(), QString("The main display could not be changed."));
         QCOMPARE(manager.primaryDisplayRect().x(), 1120);
+        // The panel shows the main display as it is again.
+        QTRY_COMPARE(panel->property("draftPrimary").toString(), QString("eDP-1"));
         // The refusal is shown in the desktop's modal alert; dismiss it first.
         QTRY_VERIFY(manager.shellModal());
         QTest::keyClick(&view, Qt::Key_Escape);
@@ -1676,9 +1833,211 @@ class DesktopTests : public QObject
         QTRY_VERIFY(panel->property("opened").toBool());
         auto *mirror = item("monitors-mode-mirror");
         QVERIFY(mirror && !mirror->isEnabled());
+        QTRY_VERIFY(visualItem(view.contentItem(), "control-panels-window")->hasActiveFocus());
         QTest::keyClick(&view, Qt::Key_Escape);
-        QTRY_VERIFY(!manager.shellModal());
+        QTRY_VERIFY(!panel->property("opened").toBool());
         QCOMPARE(commands.size(), 2);
+    }
+    void monitorsPanelTurnsDisplaysOnAndOffAndAsksToKeepTheChange()
+    {
+        // A managed session (every real login): each connected display has an On box that takes
+        // effect at once through the supervisor, which then waits for Keep (Revert is the default
+        // button and the supervisor's own 15-second timeout). One display always stays on.
+        QTemporaryDir root;
+        const auto control = root.filePath("control");
+        QLocalServer supervisor;
+        QVERIFY(supervisor.listen(control));
+        QByteArrayList commands;
+        connect(&supervisor, &QLocalServer::newConnection, &supervisor, [&] {
+            auto *client = supervisor.nextPendingConnection();
+            connect(client, &QLocalSocket::readyRead, client, [&, client] {
+                if (!client->canReadLine())
+                    return;
+                commands.append(client->readLine());
+                client->write(QJsonDocument(QJsonObject{{"ok", true}}).toJson(QJsonDocument::Compact));
+                client->flush();
+                client->disconnectFromServer();
+            });
+            connect(client, &QLocalSocket::disconnected, client, &QObject::deleteLater);
+        });
+        qputenv("PLATINUM_SESSION_CONTROL", control.toLocal8Bit());
+        const auto unset = qScopeGuard([] { qunsetenv("PLATINUM_SESSION_CONTROL"); });
+        QQuickView view;
+        view.setResizeMode(QQuickView::SizeRootObjectToView);
+        view.resize(1920, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.path() + "/profile", {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto one = *DisplayLayout::create({{"DP-3", QRect(0, 0, 1920, 760), 1, "normal"}}, "DP-3",
+                                                DisplayLayout::Mode::Extend);
+        const auto two = *DisplayLayout::create({{"DP-3", QRect(0, 0, 1120, 760), 1.5, "normal"},
+                                                 {"eDP-1", QRect(1120, 0, 800, 500), 2, "normal"}},
+                                                "DP-3", DisplayLayout::Mode::Extend);
+        const auto details = [](bool builtInOn, bool pending) {
+            DisplayDetails d;
+            d.managed = true;
+            d.labels = builtInOn ? QVariantMap{{"DP-3", "PM1561P"}, {"eDP-1", "eDP-1"}} : QVariantMap{{"DP-3", "PM1561P"}};
+            if (!builtInOn)
+                d.available = {QVariantMap{{"name", "eDP-1"}, {"label", "eDP-1"}, {"lidClosed", false}}};
+            d.available.append(QVariantMap{{"name", "HDMI-A-1"}, {"label", "Samsung"}, {"lidClosed", true}});
+            d.pending = pending;
+            const auto mode = [](int w, int h, int r) { return QVariantMap{{"width", w}, {"height", h}, {"refresh", r}}; };
+            d.modes.insert("DP-3", QVariantMap{{"modes", QVariantList{mode(1920, 1080, 60000), mode(1680, 1050, 59954),
+                                                                     mode(1280, 720, 60000)}},
+                                               {"mode", mode(1920, 1080, 60000)}});
+            return d;
+        };
+        manager.setDisplayLayout(one);
+        manager.setDisplayDetails(details(false, false));
+        QVERIFY(manager.displaySwitchingAvailable());
+        auto *panel = view.rootObject()->findChild<QObject *>("monitors-panel");
+        auto *keep = view.rootObject()->findChild<QObject *>("monitors-keep-dialog");
+        QVERIFY(panel && keep);
+        const auto item = [&](const QString &name) {
+            view.grabWindow();
+            return visualItem(view.contentItem(), name);
+        };
+        const auto click = [&](QQuickItem *target) {
+            QTest::mouseClick(&view, Qt::LeftButton, {},
+                              target->mapToScene(QPointF(target->width() / 2, target->height() / 2)).toPoint());
+        };
+        QMetaObject::invokeMethod(panel, "edit");
+        QTRY_VERIFY(panel->property("opened").toBool());
+        QQuickItem *external = nullptr, *builtIn = nullptr, *shut = nullptr;
+        QTRY_VERIFY((external = item("monitors-on-DP-3")) && (builtIn = item("monitors-on-eDP-1")) &&
+                    (shut = item("monitors-on-HDMI-A-1")));
+        QCOMPARE(external->property("text").toString(), QString("PM1561P"));
+        QCOMPARE(builtIn->property("text").toString(), QString("Built-in"));
+        QVERIFY(external->property("checked").toBool() && !builtIn->property("checked").toBool());
+        QVERIFY(!external->isEnabled()); // The only display that is on stays on.
+        QVERIFY(!shut->isEnabled() && shut->property("text").toString().endsWith("(the lid is closed)"));
+        QVERIFY(!item("monitors-use-all")->isVisible()); // The On boxes replace the next-login choice.
+        QCOMPARE(item("monitors-unavailable")->property("text").toString(),
+                 QString("Only one display is on. To use another one, turn it on below."));
+        // Turning the built-in display on: a request at once, the box follows only the published layout.
+        click(builtIn);
+        QTRY_COMPARE(commands.size(), 1);
+        QCOMPARE(commands.last(), QByteArray("display eDP-1 on\n"));
+        QVERIFY(!builtIn->property("checked").toBool());
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        manager.setDisplayLayout(two);
+        manager.setDisplayDetails(details(true, true));
+        QTRY_VERIFY(keep->property("opened").toBool());
+        QTRY_VERIFY(item("monitors-keep-text")->property("text").toString().contains("15 seconds"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/monitors-keep.png"));
+        QTRY_VERIFY(item("monitors-keep-text")->property("text").toString().contains("14 seconds"));
+        click(item("monitors-keep-dialog-accept"));
+        QTRY_COMPARE(commands.size(), 2);
+        QCOMPARE(commands.last(), QByteArray("display keep\n"));
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        manager.setDisplayDetails(details(true, false));
+        QTRY_VERIFY(!keep->property("visible").toBool());
+        QTRY_VERIFY(panel->property("opened").toBool()); // Still there to change more.
+        QTRY_VERIFY((external = item("monitors-on-DP-3")) && (builtIn = item("monitors-on-eDP-1")));
+        QVERIFY(builtIn->property("checked").toBool() && external->isEnabled());
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/monitors-on.png"));
+        // The main display's resolution, rotation and size, each one request at once.
+        QCOMPARE(item("monitors-settings-title")->property("text").toString(), QString("Resolution of PM1561P:"));
+        QQuickItem *slower = nullptr;
+        QTRY_VERIFY((slower = item("monitors-resolution-1")));
+        QCOMPARE(slower->childItems().first()->property("text").toString(), QString("1680 × 1050, 59.95 Hz"));
+        click(slower);
+        QTRY_COMPARE(commands.size(), 3);
+        QCOMPARE(commands.last(), QByteArray("display DP-3 mode 1680x1050@59954\n"));
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        click(item("monitors-rotate-90"));
+        QTRY_COMPARE(commands.size(), 4);
+        QCOMPARE(commands.last(), QByteArray("display DP-3 rotate 90\n"));
+        QVERIFY(item("monitors-rotate-normal")->property("checked").toBool()); // Until the supervisor publishes it.
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        click(item("monitors-scale-200"));
+        QTRY_COMPARE(commands.size(), 5);
+        QCOMPARE(commands.last(), QByteArray("display DP-3 scale 2.00\n"));
+        QVERIFY(item("monitors-scale-150")->property("checked").toBool());
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        // The built-in display's settings after clicking it in the arrangement.
+        click(item("monitors-display-eDP-1"));
+        QTRY_COMPARE(item("monitors-settings-title")->property("text").toString(), QString("Resolution of Built-in:"));
+        QVERIFY(item("monitors-scale-200")->property("checked").toBool());
+        QVERIFY(!manager.setDisplayMode("DP-3", 640, 480, 60000)); // Not one the monitor offers.
+        QVERIFY(!manager.setDisplayRotation("DP-3", "flipped"));
+        QVERIFY(!manager.setDisplayScale("DP-3", 9));
+        QCOMPARE(commands.size(), 5);
+        // Arrange: drag the built-in display to the left of the external one. It lands flush against
+        // its left side with the tops lined up, and only the supervisor's layout moves it.
+        QQuickItem *external3 = nullptr, *builtIn3 = nullptr;
+        QTRY_VERIFY((external3 = item("monitors-display-DP-3")) && (builtIn3 = item("monitors-display-eDP-1")));
+        const auto from = builtIn3->mapToScene(QPointF(builtIn3->width() / 2, builtIn3->height() / 2)).toPoint();
+        const auto to = external3->mapToScene(QPointF(-builtIn3->width() / 2 - 6, builtIn3->height() / 2 + 3)).toPoint();
+        QTest::mousePress(&view, Qt::LeftButton, {}, from);
+        for (int step = 1; step <= 10; ++step)
+            QTest::mouseMove(&view, from + (to - from) * step / 10, 10);
+        QTest::mouseRelease(&view, Qt::LeftButton, {}, to, 10);
+        QTRY_COMPARE(commands.size(), 6);
+        QCOMPARE(commands.last(), QByteArray("display eDP-1 position -800,0\n"));
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        QTRY_VERIFY(qAbs(item("monitors-display-eDP-1")->x() - external3->x() - external3->width()) < 2); // Back until published.
+        QVERIFY(!manager.setDisplayPosition("DP-3", 99999, 0));
+        QCOMPARE(commands.size(), 6);
+        // Mirror displays: one request, then the supervisor's mirrored layout (the main display inside
+        // the bigger canvas the built-in display covers) checks the box and keeps the built-in on.
+        click(item("monitors-mode-mirror"));
+        QTRY_COMPARE(commands.size(), 7);
+        QCOMPARE(commands.last(), QByteArray("display mirror on\n"));
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        auto mirrored = details(true, false);
+        mirrored.labels = QVariantMap{{"DP-3", "PM1561P"}};
+        mirrored.mirrors = {QVariantMap{{"name", "eDP-1"}, {"label", "eDP-1"}}};
+        manager.setDisplayLayout(*DisplayLayout::create({{"DP-3", QRect(320, 30, 1280, 700), 1.5, "normal"}}, "DP-3",
+                                                        DisplayLayout::Mode::Extend, nullptr, QSize(1920, 760)));
+        manager.setDisplayDetails(mirrored);
+        QTRY_VERIFY(item("monitors-mode-mirror")->property("checked").toBool());
+        QTRY_VERIFY(item("monitors-on-eDP-1") && item("monitors-on-eDP-1")->property("checked").toBool());
+        QVERIFY(item("monitors-on-DP-3")->isEnabled()); // Two displays are on, so either can go off.
+        QCOMPARE(manager.primaryDisplayRect(), QRect(320, 30, 1280, 700));
+        QVERIFY(item("monitors-use-all-note")->property("text").toString().startsWith("Every display shows the main display."));
+        click(item("monitors-mode-mirror"));
+        QTRY_COMPARE(commands.size(), 8);
+        QCOMPARE(commands.last(), QByteArray("display mirror off\n"));
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        manager.setDisplayLayout(two);
+        manager.setDisplayDetails(details(true, false));
+        QTRY_VERIFY(!item("monitors-mode-mirror")->property("checked").toBool());
+        commands.clear();
+        // Turning the main display off, then Return: Revert is the default.
+        QTRY_VERIFY((external = item("monitors-on-DP-3")) && external->isEnabled());
+        click(external);
+        QTRY_COMPARE(commands.size(), 1);
+        QCOMPARE(commands.last(), QByteArray("display DP-3 off\n"));
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        manager.setDisplayDetails(details(true, true));
+        QTRY_VERIFY(keep->property("opened").toBool());
+        QTRY_VERIFY(keep->property("holdsFocus").toBool());
+        QVERIFY(!item("monitors-on-eDP-1")->isEnabled()); // One change at a time.
+        QTest::keyClick(&view, Qt::Key_Return);
+        QTRY_COMPARE(commands.size(), 2);
+        QCOMPARE(commands.last(), QByteArray("display revert\n"));
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        manager.setDisplayDetails(details(true, false)); // The supervisor publishes the reverted layout.
+        // The supervisor's own timeout also closes the question when the change is undone.
+        QVERIFY(manager.setDisplayOn("DP-3", false));
+        QTRY_COMPARE(commands.size(), 3);
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        manager.setDisplayDetails(details(true, true));
+        QTRY_VERIFY(keep->property("opened").toBool());
+        manager.setDisplayDetails(details(true, false));
+        QTRY_VERIFY(!keep->property("visible").toBool());
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        const auto sent = commands.size();
+        QVERIFY(!manager.setDisplayOn("VGA-1", true)); // Not connected.
+        QVERIFY(!manager.keepDisplayChange());        // Nothing waiting.
+        QCOMPARE(commands.size(), sent);
+        QTest::keyClick(&view, Qt::Key_Escape);
+        QTRY_VERIFY(!panel->property("visible").toBool());
     }
     void appearancePanelIsTabbedWithVariationsAndOptions()
     {
@@ -1735,8 +2094,10 @@ class DesktopTests : public QObject
             QVERIFY2(shown(QString("appearance-tab-") + tab), tab);
         QVERIFY(!shown("appearance-tab-themes")); // One theme only: no Themes tab.
         QVERIFY(shown("appearance-accent-sample"));
+        // Each choice applies at once, as in Mac OS 9; there is no OK.
         QVERIFY(choose("appearance-accent-graphite"));
-        QCOMPARE(panel->property("draftAccent").toString(), QString("graphite"));
+        QTRY_COMPARE(settings->accent(), QString("graphite"));
+        QCOMPARE(view.rootObject()->property("menuAccent").value<QColor>(), QColor("#656565"));
         QTest::qWait(300); // Evidence only: the tab canvases and wallpaper paint on later frames.
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/appearance-tabs.png"));
         QVERIFY(choose("appearance-tab-fonts"));
@@ -1746,40 +2107,29 @@ class DesktopTests : public QObject
         QVERIFY(choose("appearance-tab-options"));
         QTRY_VERIFY(shown("option-double-click-collapse"));
         QVERIFY(choose("keep-screen-awake"));
-        QVERIFY(panel->property("draftKeepAwake").toBool());
+        QTRY_VERIFY(settings->keepScreenAwake());
         QVERIFY(choose("option-double-click-collapse"));
-        QVERIFY(!panel->property("draftDoubleClick").toBool());
-        QVERIFY(choose("appearance-dialog-accept"));
-        QTRY_VERIFY(!manager.shellModal());
-        QCOMPARE(settings->accent(), QString("graphite"));
-        QVERIFY(!settings->doubleClickCollapse());
-        QCOMPARE(view.rootObject()->property("menuAccent").value<QColor>(), QColor("#656565"));
+        QTRY_VERIFY(!settings->doubleClickCollapse());
+        QCOMPARE(settings->accent(), QString("graphite")); // Unchanged by the other options.
         AppearanceSettings reloaded(root.path() + "/profile");
         QCOMPARE(reloaded.accent(), QString("graphite"));
         QVERIFY(!reloaded.doubleClickCollapse());
-        QVERIFY(settings->keepScreenAwake());
         QVERIFY(reloaded.keepScreenAwake());
 
-        // Cancel keeps the saved choices.
-        QVERIFY(open("Appearance"));
-        QVERIFY(choose("appearance-accent-blue"));
+        // Closing the window keeps every choice; reopening shows them.
         QTest::keyClick(&view, Qt::Key_Escape);
-        QTRY_VERIFY(!manager.shellModal());
+        QTRY_VERIFY(!panel->property("opened").toBool());
         QCOMPARE(settings->accent(), QString("graphite"));
-
         QVERIFY(open("Options"));
+        QTRY_VERIFY(shown("keep-screen-awake"));
+        QVERIFY(visualItem(view.contentItem(), "keep-screen-awake")->property("checked").toBool());
         QVERIFY(choose("keep-screen-awake"));
-        QVERIFY(!panel->property("draftKeepAwake").toBool());
-        QTest::keyClick(&view, Qt::Key_Escape);
-        QTRY_VERIFY(!manager.shellModal());
-        QVERIFY(settings->keepScreenAwake()); // Cancel must not change the saved choice.
-        QVERIFY(open("Options"));
-        QVERIFY(choose("keep-screen-awake"));
-        QVERIFY(choose("appearance-dialog-accept"));
-        QTRY_VERIFY(!manager.shellModal());
-        QVERIFY(!settings->keepScreenAwake());
+        QTRY_VERIFY(!settings->keepScreenAwake());
         AppearanceSettings awakeOff(root.path() + "/profile");
         QVERIFY(!awakeOff.keepScreenAwake());
+        QVERIFY(open("Appearance"));
+        QVERIFY(choose("appearance-accent-blue"));
+        QTRY_COMPARE(settings->accent(), QString("blue"));
 
         // Desktop: Remove Picture applies at once; Place Picture… hands over to the chooser.
         // (A new profile has no picture; give it one to remove.)
@@ -1797,8 +2147,257 @@ class DesktopTests : public QObject
         QVERIFY(chooser);
         QTRY_VERIFY(chooser->property("opened").toBool());
         QVERIFY(!panel->property("opened").toBool());
+        QCOMPARE(visualItem(view.contentItem(), "control-panels-heading")->property("text").toString(), QString("Desktop Picture"));
         QTest::keyClick(&view, Qt::Key_Escape);
-        QTRY_VERIFY(!manager.shellModal());
+        QTRY_VERIFY(!chooser->property("opened").toBool());
+    }
+    void dateTimePanelSetsTheMenuBarClockAndShowsTheCalendar()
+    {
+        QTemporaryDir root;
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.path() + "/profile", {});
+        auto *settings = qobject_cast<AppearanceSettings *>(manager.appearance());
+        QVERIFY(settings);
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto item = [&](const QString &name) {
+            view.grabWindow();
+            return visualItem(view.contentItem(), name);
+        };
+        const auto text = [&](const QString &name) { return item(name)->property("text").toString(); };
+        const auto click = [&](const QString &name) {
+            auto *target = item(name);
+            if (!target || !target->isVisible() || !target->isEnabled())
+                return false;
+            QTest::mouseClick(&view, Qt::LeftButton, {}, target->mapToScene(QPointF(target->width() / 2, target->height() / 2)).toPoint());
+            return true;
+        };
+        const auto matches = [](const QString &value, const char *pattern) {
+            return QRegularExpression(QString("^") + pattern + "$").match(value).hasMatch();
+        };
+        // The clock as before: 12-hour, minutes, nothing else.
+        QVERIFY2(matches(text("menu-bar-clock"), "\\d{1,2}:\\d{2} (AM|PM)"), qPrintable(text("menu-bar-clock")));
+        // Only the known options (on a separate copy: the desktop would show the error).
+        AppearanceSettings separate(root.path() + "/separate");
+        QVERIFY(!separate.setClockOption("blink", true));
+
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QVariant(QString("date-time"))), Q_ARG(QVariant, QVariant(0))));
+        auto *panel = view.rootObject()->findChild<QObject *>("date-time-panel");
+        QVERIFY(panel);
+        QTRY_VERIFY(panel->property("opened").toBool());
+        QCOMPARE(text("control-panels-heading"), QString("Date & Time"));
+        QVERIFY(text("date-time-today").contains(QString::number(QDate::currentDate().year())));
+        QVERIFY(text("date-time-zone").startsWith("Time zone: "));
+        // The calendar pages by month.
+        const auto month = text("date-time-month");
+        QCOMPARE(month, QLocale().toString(QDate::currentDate(), "MMMM yyyy"));
+        QVERIFY(click("date-time-next"));
+        QTRY_COMPARE(text("date-time-month"), QLocale().toString(QDate::currentDate().addMonths(1), "MMMM yyyy"));
+        QVERIFY(click("date-time-previous"));
+        QTRY_COMPARE(text("date-time-month"), month);
+
+        // Each option applies at once to the menu bar and is saved.
+        QVERIFY(click("clock-hours24"));
+        QTRY_VERIFY(settings->clock().value("hours24").toBool());
+        QTRY_VERIFY2(matches(text("menu-bar-clock"), "\\d{2}:\\d{2}"), qPrintable(text("menu-bar-clock")));
+        QVERIFY(click("clock-seconds"));
+        QTRY_VERIFY2(matches(text("menu-bar-clock"), "\\d{2}:\\d{2}:\\d{2}"), qPrintable(text("menu-bar-clock")));
+        QVERIFY(click("clock-weekday"));
+        QTRY_VERIFY(text("menu-bar-clock").startsWith(QLocale().toString(QDate::currentDate(), "ddd")));
+        // The panel's sample is the menu bar's own text.
+        QTRY_COMPARE(text("date-time-sample"), text("menu-bar-clock"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/date-time-panel.png"));
+        AppearanceSettings reloaded(root.path() + "/profile");
+        QVERIFY(reloaded.clock().value("hours24").toBool());
+        QVERIFY(reloaded.clock().value("seconds").toBool());
+        QVERIFY(reloaded.clock().value("weekday").toBool());
+        QVERIFY(!reloaded.clock().value("date").toBool());
+        // Hiding the clock greys the other options.
+        QVERIFY(click("clock-visible"));
+        QTRY_VERIFY(!item("menu-bar-clock")->isVisible());
+        QVERIFY(!item("clock-seconds")->isEnabled());
+        QVERIFY(click("clock-visible"));
+        QTRY_VERIFY(item("menu-bar-clock")->isVisible());
+        QTest::keyClick(&view, Qt::Key_Escape);
+        QTRY_VERIFY(!panel->property("opened").toBool());
+
+        // Clicking the clock shows today's date, then the time again.
+        QVERIFY(click("menu-bar-clock"));
+        QTRY_COMPARE(text("menu-bar-clock"), QLocale().toString(QDate::currentDate(), "dddd, MMMM d, yyyy"));
+        QVERIFY(click("menu-bar-clock"));
+        QTRY_VERIFY(text("menu-bar-clock").startsWith(QLocale().toString(QDate::currentDate(), "ddd") + " "));
+    }
+    void keyboardMouseAndEnergyPanelsSaveSettingsAndAskTheSupervisorToApplyThem()
+    {
+        // A stand-in session supervisor: records each request and answers ok.
+        QTemporaryDir root;
+        const auto control = root.filePath("control");
+        QLocalServer supervisor;
+        QVERIFY(supervisor.listen(control));
+        QByteArrayList commands;
+        connect(&supervisor, &QLocalServer::newConnection, &supervisor, [&] {
+            auto *client = supervisor.nextPendingConnection();
+            connect(client, &QLocalSocket::readyRead, client, [&, client] {
+                if (!client->canReadLine())
+                    return;
+                commands.append(client->readLine());
+                client->write(QJsonDocument(QJsonObject{{"ok", true}}).toJson(QJsonDocument::Compact));
+                client->flush();
+                client->disconnectFromServer();
+            });
+            connect(client, &QLocalSocket::disconnected, client, &QObject::deleteLater);
+        });
+        qputenv("PLATINUM_SESSION_CONTROL", control.toLocal8Bit());
+        const auto unset = qScopeGuard([] { qunsetenv("PLATINUM_SESSION_CONTROL"); });
+        QQuickView view;
+        view.resize(1120, 760);
+        const auto profile = root.path() + "/profile";
+        NativeManager manager(nullptr, &view, root.path(), profile, {});
+        auto *input = qobject_cast<InputSettings *>(manager.input());
+        QVERIFY(input);
+        // Nothing chosen: the defaults, and no file.
+        QCOMPARE(input->keyboard().value("repeatRate").toInt(), 25);
+        QCOMPARE(input->keyboard().value("repeatDelay").toInt(), 600);
+        QVERIFY(input->touchpad().value("tap").toBool());
+        QVERIFY(!QFile::exists(profile + "/input.json"));
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto item = [&](const QString &name) {
+            view.grabWindow();
+            return visualItem(view.contentItem(), name);
+        };
+        const auto click = [&](const QString &name) {
+            auto *target = item(name);
+            if (!target || !target->isVisible() || !target->isEnabled())
+                return false;
+            QTest::mouseClick(&view, Qt::LeftButton, {}, target->mapToScene(QPointF(10, target->height() / 2)).toPoint());
+            return true;
+        };
+        const auto saved = [&] {
+            QFile file(profile + "/input.json");
+            return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
+        };
+        // Each finished change asks once; the supervisor rereads the file, so the last one wins.
+        // (QTRY_VERIFY evaluates its condition once more at the end: keep it free of side effects.)
+        int applied = 0;
+        const auto applies = [&] { return int(commands.count("input apply\n")); };
+        const auto dispatch = [&](const QString &action) {
+            return QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                             Q_ARG(QVariant, QVariant(action)), Q_ARG(QVariant, QVariant(0)));
+        };
+
+        // Keyboard: the arrow keys move the slider; the value is saved once, then applied.
+        QVERIFY(dispatch("keyboard"));
+        auto *keyboard = view.rootObject()->findChild<QObject *>("keyboard-panel");
+        QTRY_VERIFY(keyboard && keyboard->property("opened").toBool());
+        auto *rate = item("keyboard-repeat-rate");
+        QVERIFY(rate);
+        rate->forceActiveFocus();
+        for (int step = 0; step < 5; ++step)
+            QTest::keyClick(&view, Qt::Key_Right);
+        QTRY_COMPARE(input->keyboard().value("repeatRate").toInt(), 30);
+        QCOMPARE(saved().value("keyboard").toObject().value("repeatRate").toInt(), 30);
+        QVERIFY(!saved().value("keyboard").toObject().contains("repeatDelay")); // Only what was chosen.
+        QTRY_VERIFY(applies() > applied);
+        applied = applies();
+        auto *delay = item("keyboard-repeat-delay");
+        delay->forceActiveFocus();
+        QTest::keyClick(&view, Qt::Key_Right); // Shorter: 600 ms to 550 ms.
+        QTRY_COMPARE(input->keyboard().value("repeatDelay").toInt(), 550);
+        QTRY_VERIFY(applies() > applied);
+        applied = applies();
+        QCOMPARE(item("keyboard-repeat-summary")->property("text").toString(),
+                 QString("Repeats 30 times a second, after 0.55 seconds."));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/keyboard-panel.png"));
+        QVERIFY(click("keyboard-defaults"));
+        QTRY_COMPARE(input->keyboard().value("repeatRate").toInt(), 25);
+        QVERIFY(!saved().contains("keyboard"));
+        QTRY_VERIFY(applies() > applied);
+        applied = applies();
+
+        // Mouse & Trackpad: each box applies at once.
+        QVERIFY(dispatch("mouse"));
+        auto *mouse = view.rootObject()->findChild<QObject *>("mouse-panel");
+        QTRY_VERIFY(mouse && mouse->property("opened").toBool());
+        QCOMPARE(item("control-panels-heading")->property("text").toString(), QString("Mouse & Trackpad"));
+        QVERIFY(click("mouse-natural"));
+        QTRY_VERIFY(input->pointer().value("natural").toBool());
+        QVERIFY(click("trackpad-tap"));
+        QTRY_VERIFY(!input->touchpad().value("tap").toBool());
+        QCOMPARE(saved().value("touchpad").toObject().value("tap"), QJsonValue(false));
+        auto *speed = item("mouse-speed");
+        speed->forceActiveFocus();
+        QTest::keyClick(&view, Qt::Key_Left);
+        QTest::keyClick(&view, Qt::Key_Left);
+        QTRY_COMPARE(input->pointer().value("speed").toDouble(), -0.2);
+        QTRY_VERIFY(applies() > applied);
+        applied = applies();
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/mouse-panel.png"));
+        // A later session reads the choices back; out-of-range values are refused.
+        InputSettings reloaded(profile);
+        QVERIFY(reloaded.pointer().value("natural").toBool());
+        QCOMPARE(reloaded.pointer().value("speed").toDouble(), -0.2);
+        QVERIFY(!reloaded.touchpad().value("tap").toBool());
+        QVERIFY(!reloaded.set("keyboard", "repeatRate", 0));
+        QVERIFY(!reloaded.set("pointer", "speed", 3));
+        QVERIFY(!reloaded.set("pointer", "natural", 1));
+        QVERIFY(!reloaded.set("pointer", "fast", true));
+        QVERIFY(click("mouse-defaults"));
+        QTRY_VERIFY(input->touchpad().value("tap").toBool());
+        QVERIFY(!input->pointer().value("natural").toBool());
+        QTRY_COMPARE(saved().keys(), QStringList{"version"});
+        QTest::keyClick(&view, Qt::Key_Escape);
+        QTRY_VERIFY(!mouse->property("opened").toBool());
+
+        // Energy Saver: Never by default; one step left of Never is the longest time.
+        auto *energy = qobject_cast<EnergySettings *>(manager.energy());
+        QVERIFY(energy);
+        QCOMPARE(energy->sleep(), 0);
+        QCOMPARE(energy->displayOff(), 0);
+        QVERIFY(dispatch("energy"));
+        auto *energyPanel = view.rootObject()->findChild<QObject *>("energy-panel");
+        QTRY_VERIFY(energyPanel && energyPanel->property("opened").toBool());
+        QCOMPARE(item("energy-sleep-label")->property("text").toString(),
+                 QString("Put the computer to sleep when inactive for: Never"));
+        QVERIFY(!item("energy-sleep-now")->isEnabled()); // No power control outside the session.
+        auto *sleep = item("energy-sleep");
+        sleep->forceActiveFocus();
+        QTest::keyClick(&view, Qt::Key_Left);
+        QTRY_COMPARE(energy->sleep(), 240);
+        QTRY_VERIFY(commands.contains("energy apply\n"));
+        QCOMPARE(item("energy-sleep-label")->property("text").toString(),
+                 QString("Put the computer to sleep when inactive for: 4 hours"));
+        auto *display = item("energy-display");
+        display->forceActiveFocus();
+        for (int step = 0; step < 4; ++step)
+            QTest::keyClick(&view, Qt::Key_Left);
+        QTRY_COMPARE(energy->displayOff(), 45);
+        QTRY_COMPARE(item("energy-display-label")->property("text").toString(),
+                     QString("Turn the display off when inactive for: 45 minutes"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/energy-panel.png"));
+        QFile file(profile + "/energy.json");
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto stored = QJsonDocument::fromJson(file.readAll()).object();
+        QCOMPARE(stored.value("sleep").toInt(), 240);
+        QCOMPARE(stored.value("displayOff").toInt(), 45);
+        EnergySettings reloaded2(profile);
+        QCOMPARE(reloaded2.sleep(), 240);
+        QVERIFY(!reloaded2.set("sleep", 2));
+        QVERIFY(!reloaded2.set("displayOff", 500));
+        QVERIFY(!reloaded2.set("brightness", 5));
+        // Command-W closes the window, as any window.
+        QTest::keyClick(&view, Qt::Key_W, Qt::MetaModifier);
+        QTRY_VERIFY(!energyPanel->property("opened").toBool());
     }
     void controlStripAttachesToEdgesFoldsAndOpensPanelsFromModuleMenus()
     {
@@ -1908,12 +2507,12 @@ class DesktopTests : public QObject
         auto *panel = view.rootObject()->findChild<QObject *>("appearance-dialog");
         QVERIFY(panel);
         QTRY_VERIFY(panel->property("opened").toBool());
-        QVERIFY(manager.shellModal());
+        QVERIFY(!manager.shellModal()); // A panel of the modeless Control Panels window.
         // The panel opens on its Appearance tab; WindowShade speed lives under Options.
         QCOMPARE(panel->property("tab").toInt(), 0);
         QVERIFY(choose("appearance-tab-options"));
         QTRY_COMPARE(panel->property("tab").toInt(), 4);
-        panel->setProperty("draftDuration", 600);
+        QVERIFY(QMetaObject::invokeMethod(panel, "setShadeDuration", Q_ARG(QVariant, 600)));
         QVERIFY(choose("shade-preview-button"));
         auto *preview = view.rootObject()->findChild<QQuickItem *>("shade-preview");
         QVERIFY(preview);
@@ -1921,7 +2520,9 @@ class DesktopTests : public QObject
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() +
                                        "/artifacts/appearance.png"));
         QTest::keyClick(&view, Qt::Key_Escape);
-        QTRY_VERIFY(!manager.shellModal());
+        QTRY_VERIFY(!panel->property("opened").toBool());
+        QCOMPARE(settings->shadeDuration(), 600); // Applied when chosen.
+        QVERIFY(QMetaObject::invokeMethod(panel, "setShadeDuration", Q_ARG(QVariant, 240)));
         QCOMPARE(settings->shadeDuration(), 240);
         QVERIFY(click("control-strip-applications"));
         QVERIFY(choose("desktop-command-applications"));
@@ -1933,12 +2534,13 @@ class DesktopTests : public QObject
         QVERIFY(click("control-strip-appearance"));
         QVERIFY(choose("desktop-command-appearance"));
         QTRY_VERIFY(panel->property("opened").toBool());
-        panel->setProperty("draftDuration", 600);
-        panel->setProperty("draftStripVisible", false);
-        QVERIFY(click("appearance-dialog-accept"));
-        QTRY_VERIFY(!manager.shellModal());
-        QCOMPARE(settings->shadeDuration(), 600);
-        QVERIFY(!strip->isVisible());
+        QVERIFY(choose("appearance-tab-options"));
+        QVERIFY(choose("show-control-strip"));
+        QTRY_VERIFY(!strip->isVisible());
+        QVERIFY(!settings->controlStripVisible());
+        QCOMPARE(settings->shadeDuration(), 240);
+        QTest::keyClick(&view, Qt::Key_Escape);
+        QTRY_VERIFY(!panel->property("opened").toBool());
         // The menu provides a way back when the strip is hidden: Apple menu >
         // Control Panels, which also shows the strip's state with a check mark.
         QTest::mouseClick(&view, Qt::LeftButton, {}, QPoint(25, 13));
@@ -1954,8 +2556,7 @@ class DesktopTests : public QObject
         entry->parentItem()->ensurePolished();
         QVERIFY(click("desktop-command-appearance"));
         QTRY_VERIFY(panel->property("opened").toBool());
-        panel->setProperty("draftStripVisible", true);
-        QVERIFY(click("appearance-dialog-accept"));
+        QVERIFY(QMetaObject::invokeMethod(panel, "setStripVisible", Q_ARG(QVariant, true)));
         QTRY_VERIFY(strip->isVisible());
         auto *bar = visualItem(view.contentItem(), "bar-entry-1");
         QVERIFY(bar);
@@ -2066,22 +2667,25 @@ class DesktopTests : public QObject
         QTest::keyClick(&view, Qt::Key_Return);
         QTRY_VERIFY(panel->property("opened").toBool());
         QVERIFY(!browser->property("visible").toBool());
-        QVERIFY(manager.shellModal());
+        QVERIFY(!manager.shellModal()); // A panel of the modeless Control Panels window.
         QCOMPARE(requested.count(), 1);
         QCOMPARE(errors.count(), 0);
         QCOMPARE(manager.rowCount(), 0); // Internal panel, no application process.
         QCOMPARE(panel->property("service").value<QObject *>(), service);
-        // An active modal dialog still guards direct/recent-application requests.
+        // Asking again brings the same window forward: still no process, nothing new opened.
         manager.launchApplication("org.frankenstein.Bluetooth.desktop");
-        QCOMPARE(requested.count(), 1);
+        QTRY_COMPARE(requested.count(), 2);
+        QCOMPARE(manager.rowCount(), 0);
+        QVERIFY(panel->property("opened").toBool());
+        QTRY_VERIFY(visualItem(view.contentItem(), "control-panels-window")->hasActiveFocus());
         QTest::keyClick(&view, Qt::Key_Escape);
-        QTRY_VERIFY(!manager.shellModal());
+        QTRY_VERIFY(!panel->property("opened").toBool());
         const auto document = fixture.filePath("file.txt");
         QFile file(document);
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write("text"); file.close();
         manager.launchApplication("org.frankenstein.Bluetooth.desktop", document);
-        QCOMPARE(requested.count(), 1);
+        QCOMPARE(requested.count(), 2);
         QCOMPARE(errors.count(), 1);
         QVERIFY(!panel->property("visible").toBool());
     }
@@ -2219,10 +2823,16 @@ class DesktopTests : public QObject
         auto *field = view.rootObject()->findChild<QQuickItem *>("desktop-name-field");
         QVERIFY(field);
         QTRY_VERIFY(field->hasActiveFocus());
+        // Mac OS 9's focus ring around the field with the keyboard, as in application text fields.
+        auto *frame = field->property("background").value<QQuickItem *>();
+        QVERIFY(frame);
+        QTRY_COMPARE(frame->property("color").value<QColor>(), QColor("#666699"));
         commandKey(&view, Qt::Key_A, 30);
         QVERIFY(typeAscii(&view, "Context folder"));
         QTest::keyClick(&view, Qt::Key_Return);
         QTRY_VERIFY(!manager.shellModal() && !items->busy());
+        QTRY_VERIFY(!frame->property("focused").toBool());
+        QCOMPARE(frame->property("color").value<QColor>().alpha(), 0);
         QTRY_VERIFY(QFileInfo(items->directory() + "/Context folder").isDir());
         QVERIFY(!QFileInfo(items->directory() + "/One.txt").isDir());
     }

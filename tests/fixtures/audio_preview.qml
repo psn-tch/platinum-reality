@@ -18,6 +18,9 @@ Rectangle {
         width: parent.width; height: 24; color: "#eee"; border.color: "#333"
         Text { x: 20; anchors.verticalCenter: parent.verticalCenter; text: "Sound control panel — development preview"; font.pixelSize: 12 }
     }
-    Platinum.SoundPanel { id: panel; sessionManager: session; service: audioService }
+    Platinum.ControlPanelsWindow {
+        x: 40; y: 40
+        Platinum.SoundPanel { id: panel; service: audioService }
+    }
     Component.onCompleted: Qt.callLater(panel.edit)
 }

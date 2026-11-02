@@ -45,6 +45,78 @@ class BootSplashTests(unittest.TestCase):
         black = sum(row.count(0) for row in upright[:400])
         self.assertAlmostEqual(black / (400 * 2560), 0.5, places=2)
 
+    def test_the_unlock_dialog_is_drawn_in_the_pixel_font_and_fits_the_mac_screen(self):
+        # An encrypted disk asks for its password in a Macintosh dialog (docs/boot-splash.md).
+        for message in (splash.PROMPT, splash.RETRY):
+            self.assertTrue(set(message) <= set(splash.GLYPHS), message)
+            rows = splash.dialog_picture(message)
+            self.assertEqual((len(rows[0]), len(rows)), splash.DIALOG[2:])
+            text = splash.text_rows(message)
+            self.assertLess(splash.MESSAGE_AT[0] + len(text[0]), splash.FIELD[0] + splash.FIELD[2])
+            self.assertLess(splash.MESSAGE_AT[1] + len(text), splash.FIELD[1])
+        for glyph in splash.GLYPHS.values():
+            self.assertIn(len(glyph), (7, 9))
+            self.assertEqual(len(set(map(len, glyph))), 1)
+        # The two messages differ, and the field and frame are identical in both.
+        prompt, retry = splash.dialog_picture(splash.PROMPT), splash.dialog_picture(splash.RETRY)
+        self.assertNotEqual(prompt, retry)
+        self.assertEqual(prompt[splash.FIELD[1]:], retry[splash.FIELD[1]:])
+        # Below the startup icon, inside the 512 x 342 screen, with every bullet inside the field.
+        x, y, w, h = splash.DIALOG
+        self.assertTrue(0 <= x and x + w <= 512 and y > splash.ICON_CENTRE[1] + 20 and y + h <= 342)
+        last = splash.BULLET_AT[0] + (splash.BULLET_MAX - 1) * splash.BULLET_STEP + splash.BULLET
+        self.assertLessEqual(last, splash.FIELD[0] + splash.FIELD[2] - 4)
+        self.assertLessEqual(splash.BULLET_AT[1] + splash.BULLET, splash.FIELD[1] + splash.FIELD[3] - 4)
+        # A bullet looks the same every way up, so one picture serves a panel mounted sideways.
+        bullet, mask = splash.bullet_picture()
+        self.assertEqual(splash.rotate(bullet, 1), bullet)
+        self.assertEqual(splash.rotate(mask, 1), mask)
+
+    def test_the_boot_hook_runs_before_the_disk_is_unlocked(self):
+        # The dialog can only answer a password request if Plymouth starts before sd-encrypt or encrypt.
+        for hooks in ('base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck',
+                      'base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt filesystems fsck'):
+            with tempfile.TemporaryDirectory() as root:
+                (Path(root) / 'etc/mkinitcpio.conf.d').mkdir(parents=True)
+                (Path(root) / 'etc/mkinitcpio.conf').write_text(f'HOOKS=({hooks})\n')
+                result = splash.mkinitcpio_hooks(root)
+                unlock = 'sd-encrypt' if 'sd-encrypt' in result else 'encrypt'
+                self.assertLess(result.index('plymouth'), result.index(unlock))
+                self.assertEqual(result.index('plymouth'), result.index('kms') + 1)
+
+    def test_an_image_builder_gets_the_whole_theme_from_one_command(self):
+        # The live ISO filled the script itself and missed today's dialog numbers (2026-10-30):
+        # image builders use `theme`, which fills every number as install does.
+        with tempfile.TemporaryDirectory() as work:
+            work = Path(work)
+            result = tool('render', '--output', str(work / 'r'), '--size', '1024x768', '--rotate', '0',
+                          '--cmdline', '/dev/null', home=work)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = tool('theme', '--from', str(work / 'r'), '--output', str(work / 't'), home=work)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            script = (work / 't/platinum-reality.script').read_text()
+            self.assertNotIn('@', script)
+            self.assertIn('Plymouth.SetDisplayPasswordFunction', script)
+            # Every rendered picture, the last bullet too (RENDERED[:-1] dropped it; Rocky, 2026-10-30).
+            self.assertEqual(set(splash.PICTURES), set(splash.RENDERED) - {'manifest.json'})
+            for name in splash.PICTURES + ['platinum-reality.plymouth']:
+                self.assertTrue((work / 't' / name).is_file(), name)
+            self.assertFalse((work / 't/manifest.json').exists())
+            # A folder that already has something in it is refused.
+            self.assertNotEqual(tool('theme', '--from', str(work / 'r'), '--output', str(work / 't'),
+                                     home=work).returncode, 0)
+
+    def test_the_theme_script_gets_every_number(self):
+        script = (TOOL.parents[1] / 'packaging/plymouth/platinum-reality.script.in').read_text()
+        filled = splash.fill_script(script, {'PANEL_WIDTH': 1600, 'PANEL_HEIGHT': 2560, 'ICON_X': 243,
+                                             'ICON_Y': 145, 'PANEL_ROTATION': 3, 'PANEL_SCALE': 4})
+        self.assertNotIn('@', filled)
+        self.assertIn('panel_rotation = 3;', filled)
+        self.assertIn(f'bullet_max = {splash.BULLET_MAX};', filled)
+        self.assertIn('Plymouth.SetDisplayPasswordFunction(show_password);', filled)
+        with self.assertRaises(SystemExit):
+            splash.fill_script(script, {'PANEL_WIDTH': 1})
+
     def test_render_install_and_uninstall_in_a_fake_root(self):
         with tempfile.TemporaryDirectory() as work:
             work = Path(work)

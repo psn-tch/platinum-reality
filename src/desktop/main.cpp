@@ -20,9 +20,36 @@
 #include <QWaylandXdgDecorationManagerV1>
 #include <memory>
 
+namespace {
+QtMessageHandler previousMessageHandler = nullptr;
+
+// Qt's compositor prints its unimplemented wl_subsurface set_sync/set_desync handlers as debug
+// lines, one per call: about 200 a boot from Firefox alone (2026-10-30). Only those are dropped.
+void messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &message)
+{
+    if (type == QtDebugMsg && message.startsWith(QLatin1String(
+            "virtual void QWaylandSurfacePrivate::Subsurface::subsurface_set_")))
+        return;
+    previousMessageHandler(type, context, message);
+}
+}
+
 int main(int argc, char **argv)
 {
+    previousMessageHandler = qInstallMessageHandler(messageHandler);
+    // The desktop is a client of its private backend, which runs no input method, so text-input-v3
+    // there only made Qt warn on every focus change (about 360 "disableSurface … 0x0 is focused"
+    // lines a day in psn_tch's journal, 2026-10-30). Hidden from Qt while it connects, then put back:
+    // applications started from the desktop inherit this environment and keep their text input.
+    const bool hadDisabled = qEnvironmentVariableIsSet("QT_WAYLAND_DISABLED_INTERFACES");
+    const auto disabled = qgetenv("QT_WAYLAND_DISABLED_INTERFACES");
+    qputenv("QT_WAYLAND_DISABLED_INTERFACES",
+            disabled.isEmpty() ? QByteArray("zwp_text_input_manager_v3") : disabled + ",zwp_text_input_manager_v3");
     QGuiApplication app(argc, argv);
+    if (hadDisabled)
+        qputenv("QT_WAYLAND_DISABLED_INTERFACES", disabled);
+    else
+        qunsetenv("QT_WAYLAND_DISABLED_INTERFACES");
     app.setFont(classicInterfaceFont());
     QCoreApplication::setApplicationName("Platinum Reality");
     const bool preview = app.arguments().contains("--preview");
@@ -52,6 +79,7 @@ int main(int argc, char **argv)
     parser.addOption({"display-topology", "Experimental owned-session display snapshot (Extend only)", "path"});
     parser.addOption({"trash", "Trash directory shared with other file managers (default: the profile's own)", "path"});
     parser.addOption({"volume", "A further folder the Finder may work in (mounted drives)", "path"});
+    parser.addOption({"whole-computer", "The Finder may browse the whole computer (read-only outside the workspace)"});
     parser.addOption({"applications-dir",
                       "Application metadata directory (repeatable; replaces discovery roots)",
                       "path"});
@@ -60,6 +88,7 @@ int main(int argc, char **argv)
     if (parser.isSet("trash"))
         FinderPlaces::trash = QDir::cleanPath(QDir(parser.value("trash")).absolutePath());
     FinderPlaces::volumes = parser.values("volume");
+    FinderPlaces::wholeComputer = parser.isSet("whole-computer");
     QDir().mkpath(workspace);
     // The display must outlive the view's renderer and its client buffers.
     std::unique_ptr<PlatinumCompositor> compositor;
@@ -128,6 +157,7 @@ int main(int argc, char **argv)
         const auto reconcile=[&] {
             if(!topology->snapshot()) return;
             const auto &snapshot=*topology->snapshot();
+            manager.setDisplayDetails(snapshot.details);
             // Mirror presentation/input is still experimental; never silently
             // crop a canvas or claim a working Mirror session from metadata.
             if(snapshot.layout.mode()!=DisplayLayout::Mode::Extend) {

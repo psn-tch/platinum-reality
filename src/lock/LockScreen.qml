@@ -22,6 +22,10 @@ Rectangle {
         id: dialog
         objectName: "login-dialog"
         visible: screen.Window.active || !lock.keyboardOnLock
+        // Hiding takes the field's keyboard focus away, and showing it again does not give it
+        // back: as the keyboard arrives, keyboardOnLock can flip before this window is active,
+        // hiding the dialog for a moment. Typing then went nowhere (seen 2026-10-29).
+        onVisibleChanged: if (visible) password.forceActiveFocus()
         width: 440; height: lock.loginMode ? 270 : 236
         anchors.centerIn: parent
         color: "#dddddd"
@@ -246,6 +250,10 @@ Rectangle {
         target: lock
         function onRejected() { password.forceActiveFocus() }
     }
-    // Typing anywhere goes to the password field.
+    // Typing anywhere goes to the password field, also when this window becomes the active one.
     Component.onCompleted: password.forceActiveFocus()
+    Connections {
+        target: screen.Window.window
+        function onActiveChanged() { if (screen.Window.active) password.forceActiveFocus() }
+    }
 }

@@ -6,8 +6,8 @@
 
 class QMimeData;
 
-// The desktop's compositor. It reports each copy of the clipboard it keeps
-// (Qt's retained selection), so the shell can show and share it.
+// The desktop's compositor. Its retained-selection notification remains
+// available to the adapter; automatic bounded captures notify it directly.
 class PlatinumCompositor : public QWaylandQuickCompositor
 {
     Q_OBJECT
@@ -34,13 +34,15 @@ class PlatinumCompositor : public QWaylandQuickCompositor
 //   one, so it cancelled that very source and every Firefox/GTK copy vanished.
 //   Setting the current source again is now a no-op, as in wlroots.
 // - As on Mac OS, the clipboard outlives the application that copied it. Qt's
-//   retained selection keeps a copy, offered while no live source exists. An
+//   retained cache holds a bounded copy, offered while no live source exists. An
 //   application that deliberately clears the clipboard keeps it cleared.
 // - The shell's own text fields (rename, search) use the desktop process's
 //   clipboard. With a PlatinumCompositor, applications' copies reach it and
 //   the shell's copies reach applications. Nothing is read from a clipboard
 //   the desktop did not write itself.
 // - Edit > Show Clipboard displays what was last copied: text or a picture.
+// Automatic retention is capped at 64 MiB / 64 MIME formats / 10 seconds;
+// a live application's own clipboard and drag-and-drop are not truncated.
 class Clipboard final : public QObject
 {
     Q_OBJECT
@@ -63,14 +65,22 @@ class Clipboard final : public QObject
     QStringList selectionMimeTypes() const;
     // Writes one type of what the clipboard holds now to fd, which it takes and closes.
     void sendSelection(const QString &mimeType, int fd);
-    // A tool set the clipboard; its data was already read.
-    void setSelectionFromTool(std::unique_ptr<QMimeData> data);
+    // Reserve a tool copy's position in user intent order BEFORE reading it.
+    // Retention/source destruction can change selectionGeneration without a
+    // new user copy, so that generation is not a completion-order token.
+    quint64 beginToolCopy();
+    // A NULL tool selection is an explicit new clear, including retained data.
+    void clearSelectionFromTool();
+    // Commit only if this is still the latest intent. Completion is not a new
+    // copy request and cannot supersede a later application or shell copy.
+    bool setSelectionFromTool(quint64 intent, std::unique_ptr<QMimeData> data);
     // Counts clipboard changes, so a stale offer can be told from a current one.
     quint64 selectionGeneration() const;
   signals:
     void changed();
     // What the clipboard holds changed (an application copied, quit, cleared it, or a tool set it).
     void selectionChanged();
+    void copyIntentChanged(quint64 intent);
 
   private:
     void retained(const QMimeData *data);

@@ -1,0 +1,2 @@
+# Live media only; never copied to an installed target.
+liveuser ALL=(ALL:ALL) NOPASSWD: ALL

@@ -1,11 +1,15 @@
 #pragma once
+#include "energy_settings.hpp"
+#include "input_settings.hpp"
 #include "interface_sounds.hpp"
 #include "battery_status.hpp"
 #include "policy/transition.hpp"
 #include "window_presentation.hpp"
 #include "display_layout.hpp"
+#include "display_topology_feed.hpp"
 #include "power_control.hpp"
 #include "removable_media.hpp"
+#include "handheld.hpp"
 #include <QAbstractListModel>
 #include <QPointer>
 #include <QProcess>
@@ -100,10 +104,7 @@ class ManagedWindow final : public QObject
     {
         return shadeAllowed;
     }
-    bool modal() const
-    {
-        return top && top->isModal();
-    }
+    bool modal() const;
     bool canResize() const
     {
         return top && windowPresentation(modal(), top->minSize(), top->maxSize()).resize;
@@ -178,11 +179,23 @@ class NativeManager final : public QAbstractListModel
     // Monitors control panel: every connected display shows the desktop, from the next login.
     // The session supervisor reads <profile>/displays.json; off by default.
     Q_PROPERTY(bool useAllDisplays READ useAllDisplays NOTIFY useAllDisplaysChanged)
+    // A managed display session (every real login): each connected display can be turned on or
+    // off at once. displaysOff lists the connected ones that are off ({name, label, lidClosed}).
+    Q_PROPERTY(bool displaySwitchingAvailable READ displaySwitchingAvailable NOTIFY displayLayoutChanged)
+    Q_PROPERTY(QVariantList displaysOff READ displaysOff NOTIFY displayLayoutChanged)
+    // A switched display waits for "Keep"; the supervisor reverts it after 15 seconds otherwise.
+    Q_PROPERTY(bool displayChangePending READ displayChangePending NOTIFY displayLayoutChanged)
+    // Mirror displays: the displays ({name, label}) that show the main display.
+    Q_PROPERTY(QVariantList displayMirrors READ displayMirrors NOTIFY displayLayoutChanged)
     Q_PROPERTY(QObject *desktopItems READ desktopItems CONSTANT)
     Q_PROPERTY(bool desktopActive READ desktopActive NOTIFY contextChanged)
     Q_PROPERTY(bool shellModal READ shellModal NOTIFY contextChanged)
     Q_PROPERTY(QObject *applicationCatalog READ applicationCatalog CONSTANT)
     Q_PROPERTY(QObject *appearance READ appearance CONSTANT)
+    // The Keyboard and Mouse & Trackpad panels' choices (InputSettings).
+    Q_PROPERTY(QObject *input READ input CONSTANT)
+    // The Energy Saver panel's choices (EnergySettings).
+    Q_PROPERTY(QObject *energy READ energy CONSTANT)
     Q_PROPERTY(QObject *screenshots READ screenshots CONSTANT)
     Q_PROPERTY(QObject *systemControls READ systemControls CONSTANT)
     Q_PROPERTY(QObject *audio READ audio CONSTANT)
@@ -191,11 +204,13 @@ class NativeManager final : public QAbstractListModel
     // Wi-Fi networks through iwd on the host's system bus (docs/wifi.md); as Bluetooth.
     Q_PROPERTY(QObject *wifi READ wifi CONSTANT)
     Q_PROPERTY(QObject *removableMedia READ removableMedia CONSTANT)
+    Q_PROPERTY(QObject *handheld READ handheld CONSTANT)
     // Special ▸ Sleep, Restart and Shut Down: only in the whole session (power_control.hpp).
     Q_PROPERTY(bool powerAvailable READ powerAvailable CONSTANT)
     // Alert sounds (docs/alert-sounds.md); silent outside a real session.
     Q_PROPERTY(QObject *alertSounds READ alertSounds CONSTANT)
     Q_PROPERTY(QObject *interfaceSounds READ interfaceSounds CONSTANT)
+    Q_PROPERTY(QObject *startupSound READ startupSound CONSTANT)
     Q_PROPERTY(QObject *battery READ battery CONSTANT)
     // The user's own assets (icons/, sounds/), e.g. imported from their Mac OS 9; never bundled.
     Q_PROPERTY(QString personalAssets READ personalAssets CONSTANT)
@@ -261,14 +276,18 @@ class NativeManager final : public QAbstractListModel
     QObject *desktopItems() const;
     QObject *applicationCatalog() const;
     QObject *appearance() const;
+    QObject *input() const;
+    QObject *energy() const;
     QObject *screenshots() const;
     QObject *systemControls() const { return m_systemControls; }
     QObject *audio() const { return m_audio; }
     QObject *bluetooth() const { return m_bluetooth; }
     QObject *wifi() const { return m_wifi; }
     QObject *removableMedia() const { return m_removableMedia; }
+    QObject *handheld() const { return m_handheld; }
     QObject *alertSounds() const { return m_alertSounds; }
     QObject *interfaceSounds() const { return m_interfaceSounds; }
+    QObject *startupSound() const { return m_startupSound; }
     QObject *battery() const { return m_battery; }
     QString personalAssets() const { return m_personalAssets; }
     QObject *clipboard() const { return m_clipboard; }
@@ -324,6 +343,8 @@ class NativeManager final : public QAbstractListModel
     // Window menu: the active application's windows, by title (Finder's when the desktop is active).
     Q_INVOKABLE QVariantList windowMenu() const;
     Q_INVOKABLE QString aboutThisComputer() const;
+    // True once, on a new account's first login: the installer leaves a marker for the Help Center.
+    Q_INVOKABLE bool takeWelcome();
     // Games and X11 programs can lock or confine the pointer (relative-pointer/pointer-constraints).
     Q_INVOKABLE bool pointerCaptureAvailable() const;
     bool pointerCaptured() const;
@@ -351,6 +372,24 @@ class NativeManager final : public QAbstractListModel
     bool useAllDisplays() const { return m_useAllDisplays; }
     // Saved for the next login; the current session keeps its displays.
     Q_INVOKABLE bool setUseAllDisplays(bool all);
+    // Monitor names, displays that are off and a waiting change, from the published topology.
+    void setDisplayDetails(const DisplayDetails &details);
+    bool displaySwitchingAvailable() const;
+    QVariantList displaysOff() const { return m_displayDetails.available; }
+    bool displayChangePending() const { return m_displayDetails.pending; }
+    QVariantList displayMirrors() const { return m_displayDetails.mirrors; }
+    Q_INVOKABLE bool setDisplayMirroring(bool on);
+    // Turns a connected display on or off now; the change then waits for keepDisplayChange().
+    Q_INVOKABLE bool setDisplayOn(const QString &name, bool on);
+    // Resolution (refresh in mHz), rotation (normal, 90, 180, 270) and size (scale) of a display
+    // that is on: applied at once, then waiting for keepDisplayChange() like On and Off.
+    Q_INVOKABLE bool setDisplayMode(const QString &name, int width, int height, int refresh);
+    Q_INVOKABLE bool setDisplayRotation(const QString &name, const QString &transform);
+    Q_INVOKABLE bool setDisplayScale(const QString &name, double scale);
+    // Arrange: where a display sits beside the others (logical coordinates of its top-left corner).
+    Q_INVOKABLE bool setDisplayPosition(const QString &name, int x, int y);
+    Q_INVOKABLE bool keepDisplayChange();
+    Q_INVOKABLE bool revertDisplayChange();
     // Launched applications use the user's own settings folders (~/.config and so on) and the
     // normal Firefox profile, instead of the private session profile. Off by default; the
     // installed launcher turns it on.
@@ -384,6 +423,7 @@ class NativeManager final : public QAbstractListModel
     void removeUnclaimedApplication(frankenstein::policy::ApplicationId);
     QString applicationDisplayName(const QString &key, const QString &title) const;
     void createWindow(QWaylandXdgToplevel *, QWaylandXdgSurface *);
+    void updateWindowRelationship(ManagedWindow *);
     void retireWindow(ManagedWindow *);
     void dispatch(frankenstein::policy::Event);
     void synchronize();
@@ -403,13 +443,19 @@ class NativeManager final : public QAbstractListModel
     void queueClientFlush();
     void startDropReceiver();
     bool routeNativeDrag(QPointF position, Qt::KeyboardModifiers modifiers);
+    // A drag released (mouse button or finger lifted) at position; desktop: over the desktop.
+    void beginNativeDrop(QPoint position, bool desktop);
     ManagedWindow *desktopDropWindowAt(QPointF point, QPointF *local = nullptr) const;
     QWaylandQuickCompositor *m_compositor;
     QQuickView *m_view;
     std::optional<DisplayLayout> m_displayLayout;
+    DisplayDetails m_displayDetails;
+    QString m_displayRequestFailure;
+    bool requestDisplaySetting(const QString &name, const QByteArray &setting, const QString &failure);
     SessionControl *m_sessionControl = nullptr;
     PowerControl *m_power = nullptr;
     RemovableMedia *m_removableMedia = nullptr;
+    HandheldDaemon *m_handheld = nullptr;
     std::optional<PowerControl::Action> m_pendingPower;
     void endSession();
     bool m_normalApplicationSettings = false;
@@ -429,6 +475,13 @@ class NativeManager final : public QAbstractListModel
     DesktopItems *m_desktopItems;
     ApplicationCatalog *m_catalog;
     AppearanceSettings *m_appearance;
+    InputSettings *m_input = nullptr;
+    EnergySettings *m_energy = nullptr;
+    // "input apply" and "energy apply" wait while another supervisor request is answered.
+    QList<QByteArray> m_supervisorPending;
+    void requestSupervisor(const QByteArray &command);
+    void sendPendingSupervisorRequest();
+    void applyKeyboardRepeat();
     QObject *m_screenshots;
     QObject *m_systemControls;
     QObject *m_audio;
@@ -436,6 +489,7 @@ class NativeManager final : public QAbstractListModel
     QObject *m_wifi;
     QObject *m_alertSounds;
     InterfaceSounds *m_interfaceSounds;
+    QObject *m_startupSound;
     BatteryStatus *m_battery;
     QString m_personalAssets;
     QObject *m_clipboard = nullptr;
@@ -484,6 +538,7 @@ class NativeManager final : public QAbstractListModel
     bool m_nativeDragOnDesktop = false;
     bool m_pendingDesktopDrop = false, m_pendingDropCopy = false;
     qint64 m_pendingDropSourcePid = 0;
+    QPointer<QWaylandSurface> m_pendingDropSource;
     qulonglong m_dropGeneration = 0;
     qulonglong m_desktopDropWindow = 0;
     QVariantList m_recentApplications; // Apple menu > Recent Applications, newest first

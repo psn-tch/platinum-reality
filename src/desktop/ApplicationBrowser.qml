@@ -55,7 +55,7 @@ ShellDialog {
                 width: parent.width - refreshButton.width - 10; height: 28
                 placeholderText: "Find an application"; font.pixelSize: 12; selectByMouse: true
                 color: "black"; selectionColor: "#202050"; selectedTextColor: "white"
-                background: Rectangle {color:"white"; border.color:"#555"}
+                background: FieldBackground {}
                 onTextChanged: catalog.query = text
                 onAccepted: browser.acceptSelection()
                 Keys.onDownPressed: {applicationList.forceActiveFocus();applicationList.currentIndex = Math.max(0, applicationList.currentIndex)}
@@ -70,7 +70,7 @@ ShellDialog {
                 id: applicationList; objectName: "application-list"
                 anchors.fill:parent; anchors.margins:1; clip:true
                 model: browser.catalog; currentIndex:0; keyNavigationWraps:true
-                ScrollBar.vertical: ScrollBar {}
+                ScrollBar.vertical: PlatinumScrollBar {}
                 delegate: Rectangle {
                     id: row
                     required property int index

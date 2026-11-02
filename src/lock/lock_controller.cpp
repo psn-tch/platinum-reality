@@ -42,6 +42,8 @@ bool LockController::busy() const
 
 bool LockController::submit(const QString &password)
 {
+    // Never the password itself: only that one was submitted, and whether it could be checked.
+    qInfo("Lock screen: password submitted (ready=%d, empty=%d)", m_ready, password.isEmpty());
     if (!m_ready || password.isEmpty() || !m_authenticator->submit(password))
         return false;
     m_pamMessage = false;
@@ -60,6 +62,7 @@ void LockController::setKeyboardOnLock(bool keyboard)
     if (m_keyboard == keyboard)
         return;
     m_keyboard = keyboard;
+    qInfo("Lock screen: keyboard %s", keyboard ? "on the lock" : "away");
     emit changed();
 }
 

@@ -28,6 +28,7 @@ int main(int argc, char **argv)
     parser.addOption({"open", "Folder to open", "path"});
     parser.addOption({"trash", "Trash directory (default: the profile's own)", "path"});
     parser.addOption({"volume", "A further folder the user may work in (mounted drives)", "path"});
+    parser.addOption({"whole-computer", "Browse the whole computer (read-only outside the root and volumes)"});
     parser.addOption({"exit-after", "Exit after milliseconds", "ms"});
     parser.process(app);
     QDir().mkpath(parser.value("root"));
@@ -36,6 +37,7 @@ int main(int argc, char **argv)
     if (parser.isSet("trash"))
         FinderPlaces::trash = QDir::cleanPath(QFileInfo(parser.value("trash")).absoluteFilePath());
     FinderPlaces::volumes = parser.values("volume");
+    FinderPlaces::wholeComputer = parser.isSet("whole-computer");
     FinderService finder(root, profile);
     const auto directory = parser.isSet("open") ? parser.value("open") : root;
     if (qEnvironmentVariable("FRANKENSTEIN_ISOLATED") == "1")

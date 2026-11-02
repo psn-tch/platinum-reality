@@ -7,6 +7,7 @@
 #include <QKeyEvent>
 #include <QMenuBar>
 #include <QMenu>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QScreen>
@@ -105,6 +106,18 @@ class NativeProbe final : public QMainWindow
     void HideFileMenu() { menuBar()->actions().first()->menu()->hide(); }
     bool FileMenuVisible() const { return menuBar()->actions().first()->menu()->isVisible(); }
     void SetClipboard(QString value) { QApplication::clipboard()->setText(value); }
+    void SetLargeClipboard(int size)
+    {
+        // Test-owned payload, generated here rather than crossing D-Bus as a
+        // huge argument. The native regression checks retention vs live paste.
+        if (size < 0 || size > 66 * 1024 * 1024)
+            return;
+        auto *data = new QMimeData;
+        data->setData("application/x-platinum-large-copy", QByteArray(size, 'L'));
+        data->setText("large-copy description");
+        QApplication::clipboard()->setMimeData(data);
+    }
+    void ClearClipboard() { QApplication::clipboard()->clear(); }
     // The primary selection: what middle-click pastes.
     void SetSelection(QString value) { QApplication::clipboard()->setText(value, QClipboard::Selection); }
     QString Selection() const { return QApplication::clipboard()->text(QClipboard::Selection); }

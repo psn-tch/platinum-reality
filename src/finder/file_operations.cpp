@@ -205,14 +205,17 @@ bool FileOperations::readableDirectory(const QString &path) const
     const auto canonical = QFileInfo(path).canonicalFilePath();
     const auto trashFiles = QFileInfo(m_trash + "/files").canonicalFilePath();
     return QFileInfo(path).isDir() &&
-           (inside(canonical) || (!trashFiles.isEmpty() && within(trashFiles, canonical)));
+           (inside(canonical) || (!trashFiles.isEmpty() && within(trashFiles, canonical)) ||
+            (FinderPlaces::wholeComputer && !canonical.isEmpty() && QFileInfo(canonical).isReadable() &&
+             QFileInfo(canonical).isExecutable()));
 }
 bool FileOperations::readableFile(const QString &path) const
 {
     const auto canonical = QFileInfo(path).canonicalFilePath();
     const auto trashFiles = QFileInfo(m_trash + "/files").canonicalFilePath();
     return QFileInfo(path).isFile() &&
-           (inside(canonical) || (!trashFiles.isEmpty() && within(trashFiles, canonical)));
+           (inside(canonical) || (!trashFiles.isEmpty() && within(trashFiles, canonical)) ||
+            (FinderPlaces::wholeComputer && !canonical.isEmpty() && QFileInfo(canonical).isReadable()));
 }
 bool FileOperations::writableEntry(const QString &path) const
 {
@@ -303,6 +306,33 @@ FileResult FileOperations::createFolder(const QString &directory, const QString 
         return failure("An item with that name already exists.");
     return QDir().mkdir(path) ? FileResult{true, path, {}}
                               : failure("Could not create the folder.");
+}
+FileResult FileOperations::createFile(const QString &directory, const QString &name) const
+{
+    if (!inside(QFileInfo(directory).canonicalFilePath()) || !validName(name))
+        return failure("The file name or location is invalid.");
+    const QFileInfo info(name);
+    const auto suffix = info.suffix().isEmpty() ? QString() : "." + info.suffix();
+    const auto stem = suffix.isEmpty() ? name : info.completeBaseName();
+    auto path = QDir(directory).filePath(name);
+    for (int number = 2; exists(path); ++number)
+        path = QDir(directory).filePath(stem + " " + QString::number(number) + suffix);
+    QFile file(path);
+    if (!file.open(QIODevice::NewOnly | QIODevice::WriteOnly))
+        return failure("Could not create the file.");
+    return {true, path, {}};
+}
+FileResult FileOperations::makeAlias(const QString &source) const
+{
+    if (!writableEntry(source) || !exists(source))
+        return failure("The item is unavailable.");
+    const QFileInfo info(source);
+    const auto base = info.fileName() + " alias";
+    auto target = QDir(info.absolutePath()).filePath(base);
+    for (int number = 2; exists(target); ++number)
+        target = QDir(info.absolutePath()).filePath(base + " " + QString::number(number));
+    return QFile::link(info.absoluteFilePath(), target) ? FileResult{true, target, {}}
+                                                       : failure("Could not make the alias.");
 }
 FileResult FileOperations::trash(const QString &source) const
 {

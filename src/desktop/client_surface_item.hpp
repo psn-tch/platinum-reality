@@ -6,6 +6,11 @@
 class QWaylandSeat;
 class QWaylandXdgPopup;
 
+class QWaylandSeat;
+class QWaylandSurface;
+// Ends a source's touch that a desktop file drop held back (see ClientSurfaceItem::touchEvent).
+void releaseDeferredTouch(QWaylandSeat *seat, QWaylandSurface *surface);
+
 class ClientSurfaceItem : public QWaylandQuickShellSurfaceItem
 {
     Q_OBJECT

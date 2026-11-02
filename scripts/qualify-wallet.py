@@ -19,6 +19,9 @@ import time
 
 from session_support import WALLET_SERVICES, cleanup_runtime, write_bus_config
 
+# Never access the host HTTP daemon during installed-production-path checks.
+os.environ["PLATINUM_DISABLE_HOST_HANDHELD"] = "1"
+
 
 def wait_for(predicate, timeout=15):
     deadline = time.monotonic() + timeout
@@ -38,7 +41,9 @@ def absent(pid):
     # A daemon's orphaned supervisor can briefly await its host subreaper.
     try:
         return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] == "Z"
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
+        # Gone between kill(0) and the read: reading a just-reaped /proc entry fails with ESRCH
+        # (gate 23 stopped on this race, 2026-10-30).
         return True
 
 

@@ -6,7 +6,7 @@
 #include <limits>
 
 std::optional<DisplayLayout> DisplayLayout::create(QVector<DisplayOutput> outputs,
-                                                 QString primary, Mode mode, QString *error)
+                                                 QString primary, Mode mode, QString *error, QSize canvas)
 {
     if(error) error->clear();
     const auto reject=[&](const QString &message)->std::optional<DisplayLayout>{
@@ -39,6 +39,12 @@ std::optional<DisplayLayout> DisplayLayout::create(QVector<DisplayOutput> output
     }
     if(bounds.width()>16384 || bounds.height()>16384 || qint64(bounds.width())*bounds.height()>64*1024*1024)
         return reject("Display canvas is too large.");
+    if(canvas.isValid()) {
+        if(canvas.width()>16384 || canvas.height()>16384 || qint64(canvas.width())*canvas.height()>64*1024*1024 ||
+           !QRect(QPoint(),canvas).contains(bounds))
+            return reject("Displays must lie within the canvas.");
+        bounds=QRect(QPoint(),canvas);  // Already in canvas coordinates: no translation.
+    }
     // Stable connector order and external-first fallback after docking changes.
     std::sort(outputs.begin(),outputs.end(),[](const auto &a,const auto &b){return a.name<b.name;});
     if(!names.contains(primary)) {

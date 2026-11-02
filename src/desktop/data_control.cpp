@@ -59,6 +59,7 @@ class Reader final : public QObject
         m_source = nullptr;
         finish(false);
     }
+    void cancel() { finish(false); }
 
   private:
     void closeReading()
@@ -92,26 +93,32 @@ class Reader final : public QObject
     void readable()
     {
         char chunk[65536];
-        for (;;)
+        qsizetype consumed = 0;
+        while (consumed < 1024 * 1024)
         {
             const auto count = ::read(m_fd, chunk, sizeof chunk);
             if (count > 0)
             {
-                m_buffer.append(chunk, count);
-                m_total += count;
-                if (m_total > readLimit)
+                consumed += count;
+                if (count > readLimit - m_total)
                 {
                     finish(false);
                     return;
                 }
+                m_buffer.append(chunk, count);
+                m_total += count;
                 continue;
             }
             if (count < 0 && (errno == EINTR))
                 continue;
             if (count < 0 && errno == EAGAIN)
                 return;
-            break; // end of this type (or an error: keep what arrived)
+            completeType();
+            return;
         }
+    }
+    void completeType()
+    {
         closeReading();
         m_data->setData(m_types.at(m_index), m_buffer);
         ++m_index;
@@ -155,6 +162,16 @@ struct DataControl::State
     static State *of(DataControl *owner) { return owner ? owner->m_state.get() : nullptr; }
     void announce(wl_resource *device);
     void read(wl_resource *source);
+    void cancelReaders()
+    {
+        // A new copy is a newer intent even while its bytes are still pending.
+        // At most its one Reader may own a read pipe in this compositor.
+        auto previous = std::move(readers);
+        readers.clear();
+        for (const auto &[source, reader] : previous)
+            if (reader)
+                reader->cancel();
+    }
 };
 
 namespace
@@ -227,7 +244,11 @@ bool claim(wl_resource *device, wl_resource *sourceResource)
 void setSelection(wl_client *, wl_resource *device, wl_resource *source)
 {
     auto *state = DataControl::State::of(static_cast<Link *>(wl_resource_get_user_data(device))->owner);
-    if (state && source && claim(device, source))
+    if (!state || !state->clipboard)
+        return;
+    if (!source)
+        state->clipboard->clearSelectionFromTool();
+    else if (claim(device, source))
         state->read(source);
 }
 void setPrimarySelection(wl_client *, wl_resource *device, wl_resource *source)
@@ -326,21 +347,33 @@ void DataControl::State::announce(wl_resource *device)
 
 void DataControl::State::read(wl_resource *source)
 {
+    const auto intent = clipboard ? clipboard->beginToolCopy() : 0;
     QStringList types;
     for (const auto &type : static_cast<Source *>(wl_resource_get_user_data(source))->types)
         if (!protocolTarget(type) && !types.contains(type))
             types.push_back(type);
-    if (types.isEmpty())
+    if (!intent || types.isEmpty())
     {
         ext_data_control_source_v1_send_cancelled(source);
         return;
     }
     QPointer<Clipboard> target = clipboard;
-    readers[source] = new Reader(source, types, [target](std::unique_ptr<QMimeData> data) {
+    readers[source] = new Reader(source, types, [target, intent](std::unique_ptr<QMimeData> data) {
         if (target)
-            target->setSelectionFromTool(std::move(data));
+            target->setSelectionFromTool(intent, std::move(data));
     });
     readers[source]->setParent(owner);
+    QObject::connect(readers[source], &QObject::destroyed, owner,
+                     [guard = QPointer<DataControl>(owner), source] {
+        if (auto *state = DataControl::State::of(guard))
+        {
+            auto found = state->readers.find(source);
+            // QPointer is cleared before destroyed(). A later source can reuse
+            // an address; never erase its live Reader from an old callback.
+            if (found != state->readers.end() && !found->second)
+                state->readers.erase(found);
+        }
+    });
 }
 
 DataControl::DataControl(QWaylandCompositor *compositor, Clipboard *clipboard, QObject *parent)
@@ -355,10 +388,13 @@ DataControl::DataControl(QWaylandCompositor *compositor, Clipboard *clipboard, Q
         for (auto *device : state->devices)
             state->announce(device);
     });
+    connect(clipboard, &Clipboard::copyIntentChanged, this,
+            [state = m_state.get()] { state->cancelReaders(); });
 }
 
 DataControl::~DataControl()
 {
+    m_state->cancelReaders();
     if (m_state->global)
         wl_global_destroy(m_state->global);
 }

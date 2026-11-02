@@ -9,6 +9,11 @@
 //   release          read every stalled pipe to the end, then close it    -> released BYTES
 //   drop             close every stalled pipe unread                       -> dropped COUNT
 //   quit
+// Ordinary selection producer (SIGPIPE stays at its default, deliberately):
+//   copy N WORD      claim source N, holding its send FD   -> copy-claimed N; copy-send N
+//   finish-copy N    write WORD and close the held FD      -> copy-finished N COUNT
+//   destroy-copy N   destroy source N                     -> copy-destroyed N
+//   clear-copy       set_selection(NULL)                  -> copy-cleared
 // Events: ready, focus, unfocus, key CODE STATE, selection N (offers are numbered from 0 in the
 // order they arrive, and are kept, so an old one can still be used) or selection none.
 // Nothing here waits on the compositor except read and close: a compositor stuck writing into a
@@ -19,6 +24,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -144,13 +150,83 @@ static void synced(void *data, struct wl_callback *callback, uint32_t serial)
 }
 static const struct wl_callback_listener syncListener = {synced};
 
+enum { maximumCopies = 32 };
+static struct Copy
+{
+    struct wl_data_source *source;
+    int fd, index;
+    char text[256];
+} copies[maximumCopies];
+static void copyTarget(void *data, struct wl_data_source *source, const char *mime)
+{
+    (void)data; (void)source; (void)mime;
+}
+static void copySend(void *data, struct wl_data_source *source, const char *mime, int32_t fd)
+{
+    (void)source; (void)mime;
+    struct Copy *copy = data;
+    if (copy->fd >= 0)
+        close(copy->fd);
+    copy->fd = fd;
+    say("copy-send %d", copy->index);
+}
+static void copyCancelled(void *data, struct wl_data_source *source)
+{
+    (void)source;
+    say("copy-cancelled %d", ((struct Copy *)data)->index);
+}
+static void copyDone(void *data, struct wl_data_source *source) { (void)data; (void)source; }
+static void copyAction(void *data, struct wl_data_source *source, uint32_t action)
+{
+    (void)data; (void)source; (void)action;
+}
+static const struct wl_data_source_listener copyListener = {
+    copyTarget, copySend, copyCancelled, copyDone, copyDone, copyAction};
+
 static void command(char *line)
 {
     char *verb = strtok(line, " "), *number = strtok(NULL, " "), *mime = strtok(NULL, " ");
     int fd = -1, index;
     if (!verb)
         return;
-    if (!strcmp(verb, "stall") && app.stallCount < maximumStalls && receive(number, mime, &fd) >= 0)
+    if (!strcmp(verb, "copy") && number && mime && strlen(mime) < sizeof copies[0].text &&
+        (index = atoi(number)) >= 0 && index < maximumCopies && !copies[index].source)
+    {
+        struct Copy *copy = &copies[index];
+        strcpy(copy->text, mime);
+        copy->source = wl_data_device_manager_create_data_source(app.manager);
+        wl_data_source_add_listener(copy->source, &copyListener, copy);
+        wl_data_source_offer(copy->source, "text/plain");
+        wl_data_device_set_selection(app.device, copy->source, 0);
+        say("copy-claimed %d", index);
+    }
+    else if (!strcmp(verb, "finish-copy") && number &&
+             (index = atoi(number)) >= 0 && index < maximumCopies)
+    {
+        struct Copy *copy = &copies[index];
+        const ssize_t count = copy->fd >= 0 ? write(copy->fd, copy->text, strlen(copy->text)) : -1;
+        if (copy->fd >= 0)
+            close(copy->fd);
+        copy->fd = -1;
+        say("copy-finished %d %zd", index, count);
+    }
+    else if (!strcmp(verb, "destroy-copy") && number &&
+             (index = atoi(number)) >= 0 && index < maximumCopies && copies[index].source)
+    {
+        struct Copy *copy = &copies[index];
+        wl_data_source_destroy(copy->source);
+        copy->source = NULL;
+        if (copy->fd >= 0)
+            close(copy->fd);
+        copy->fd = -1;
+        say("copy-destroyed %d", index);
+    }
+    else if (!strcmp(verb, "clear-copy"))
+    {
+        wl_data_device_set_selection(app.device, NULL, 0);
+        say("copy-cleared");
+    }
+    else if (!strcmp(verb, "stall") && app.stallCount < maximumStalls && receive(number, mime, &fd) >= 0)
     {
         app.stalls[app.stallCount++] = fd;
         say("stalling %d", app.stallCount);
@@ -385,6 +461,9 @@ static const struct wl_registry_listener registryListener = {global, globalRemov
 
 int main(void)
 {
+    signal(SIGPIPE, SIG_DFL); // Do not inherit a test runner's ignored disposition.
+    for (int i = 0; i < maximumCopies; ++i)
+        copies[i] = (struct Copy){.fd = -1, .index = i};
     app.display = wl_display_connect(NULL);
     if (!app.display)
     {

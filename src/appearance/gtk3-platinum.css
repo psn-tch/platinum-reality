@@ -1,0 +1,36 @@
+/* Platinum Reality application appearance v1. GTK 3 only (GTK 4 has no scroll arrows). */
+/* Mac OS 9.2.2 Smart Scrolling: both scroll arrows together at the end of the bar. */
+scrollbar {
+    -GtkScrollbar-has-backward-stepper: false;
+    -GtkScrollbar-has-forward-stepper: true;
+    -GtkScrollbar-has-secondary-backward-stepper: true;
+    -GtkScrollbar-has-secondary-forward-stepper: false;
+}
+scrollbar button {
+    min-width: 14px;
+    min-height: 14px;
+    padding: 0;
+    margin: 0;
+    border: 0 solid #000000;
+    border-radius: 0;
+    background-color: #dddddd;
+    background-image: none;
+    box-shadow: inset 1px 1px #ffffff, inset -1px -1px #bbbbbb;
+    color: #000000;
+}
+scrollbar.vertical button { border-top-width: 1px; }
+scrollbar.horizontal button { border-left-width: 1px; }
+scrollbar button:active { background-color: #bbbbbb; box-shadow: inset 1px 1px #888888, inset -1px -1px #eeeeee; }
+/* GTK disables an arrow at the end of its range; 9.2.2 keeps both live while there is anything to scroll. */
+scrollbar:disabled button { background-color: #eeeeee; box-shadow: none; color: #888888; }
+scrollbar:backdrop button { background-color: #eeeeee; box-shadow: none; color: transparent; border-color: #eeeeee; }
+/* The solid 9.2.2 triangles (black; gray when there is nothing to scroll), beside this file. */
+scrollbar.vertical button.up { -gtk-icon-source: url("platinum-scroll-up.svg"); }
+scrollbar.vertical button.down { -gtk-icon-source: url("platinum-scroll-down.svg"); }
+scrollbar.horizontal button.up { -gtk-icon-source: url("platinum-scroll-left.svg"); }
+scrollbar.horizontal button.down { -gtk-icon-source: url("platinum-scroll-right.svg"); }
+scrollbar.vertical:disabled button.up { -gtk-icon-source: url("platinum-scroll-up-idle.svg"); }
+scrollbar.vertical:disabled button.down { -gtk-icon-source: url("platinum-scroll-down-idle.svg"); }
+scrollbar.horizontal:disabled button.up { -gtk-icon-source: url("platinum-scroll-left-idle.svg"); }
+scrollbar.horizontal:disabled button.down { -gtk-icon-source: url("platinum-scroll-right-idle.svg"); }
+scrollbar:backdrop button { -gtk-icon-source: none; }

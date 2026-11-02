@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <algorithm>
 #include <cmath>
 #include <unistd.h>
 
@@ -52,11 +53,92 @@ std::optional<DisplaySnapshot> parseDisplaySnapshot(const QByteArray &bytes, QSt
                         QRect(coordinates[0],coordinates[1],coordinates[2],coordinates[3]),
                         output.value("scale").toDouble(),output.value("transform").toString()});
     }
+    QSize canvas;
+    if(root.contains("canvas")) {
+        const auto c=root.value("canvas").toObject();
+        const double w=c.value("width").toDouble(-1),h=c.value("height").toDouble(-1);
+        if(!root.value("canvas").isObject() || w<80 || h<80 || w>16384 || h>16384 || std::floor(w)!=w || std::floor(h)!=h)
+            return reject("Invalid display canvas.");
+        canvas=QSize(int(w),int(h));
+    }
     QString geometryError;
     auto layout=DisplayLayout::create(outputs,root.value("primary").toString(),
-                modeName=="extend"?DisplayLayout::Mode::Extend:DisplayLayout::Mode::Mirror,&geometryError);
+                modeName=="extend"?DisplayLayout::Mode::Extend:DisplayLayout::Mode::Mirror,&geometryError,canvas);
     if(!layout) return reject(geometryError);
-    return DisplaySnapshot{session,quint64(serial),*layout};
+    DisplayDetails details;
+    static const QRegularExpression connector("^[A-Za-z0-9_.-]{1,64}$");
+    const auto label=[](const QJsonValue &value){
+        return value.isString() && !value.toString().isEmpty() && value.toString().size()<=64;
+    };
+    if(root.contains("labels")) {
+        if(!root.value("labels").isObject()) return reject("Invalid display names.");
+        const auto labels=root.value("labels").toObject();
+        for(auto it=labels.begin();it!=labels.end();++it) {
+            if(!connector.match(it.key()).hasMatch() || !label(it.value())) return reject("Invalid display name.");
+            details.labels.insert(it.key(),it.value().toString());
+        }
+        details.managed=true;
+    }
+    if(root.contains("available")) {
+        const auto available=root.value("available").toArray();
+        if(!root.value("available").isArray() || available.size()>16) return reject("Invalid list of displays that are off.");
+        for(const auto &value:available) {
+            const auto output=value.toObject();
+            const auto name=output.value("name").toString();
+            if(!value.isObject() || !connector.match(name).hasMatch() || !label(output.value("label")) ||
+               !output.value("lid_closed").isBool() ||
+               std::any_of(outputs.cbegin(),outputs.cend(),[&](const DisplayOutput &o){return o.name==name;}))
+                return reject("Invalid display that is off.");
+            details.available.append(QVariantMap{{"name",name},{"label",output.value("label").toString()},
+                                                 {"lidClosed",output.value("lid_closed").toBool()}});
+        }
+    }
+    if(root.contains("modes")) {
+        if(!root.value("modes").isObject()) return reject("Invalid display modes.");
+        const auto all=root.value("modes").toObject();
+        const auto mode=[](const QJsonValue &value)->QVariant{
+            const auto m=value.toObject();
+            const double w=m.value("width").toDouble(-1),h=m.value("height").toDouble(-1),r=m.value("refresh").toDouble(-1);
+            if(!value.isObject() || w<80 || w>16384 || h<80 || h>16384 || r<0 || r>1000000 ||
+               std::floor(w)!=w || std::floor(h)!=h || std::floor(r)!=r)
+                return {};
+            return QVariantMap{{"width",int(w)},{"height",int(h)},{"refresh",int(r)}};
+        };
+        for(auto it=all.begin();it!=all.end();++it) {
+            const auto entry=it.value().toObject();
+            const auto list=entry.value("modes").toArray();
+            if(!connector.match(it.key()).hasMatch() || !it.value().isObject() || !entry.value("modes").isArray() ||
+               list.size()>64 || std::none_of(outputs.cbegin(),outputs.cend(),[&](const DisplayOutput &o){return o.name==it.key();}))
+                return reject("Invalid display modes.");
+            QVariantList modes;
+            for(const auto &value:list) {
+                const auto parsed=mode(value);
+                if(!parsed.isValid()) return reject("Invalid display mode.");
+                modes.append(parsed);
+            }
+            const auto current=entry.contains("mode")?mode(entry.value("mode")):QVariant();
+            if(entry.contains("mode") && !current.isValid()) return reject("Invalid current display mode.");
+            details.modes.insert(it.key(),QVariantMap{{"modes",modes},{"mode",current}});
+        }
+    }
+    if(root.contains("mirrors")) {
+        const auto mirrors=root.value("mirrors").toArray();
+        if(!root.value("mirrors").isArray() || mirrors.size()>16 || !canvas.isValid())
+            return reject("Invalid mirrored displays.");
+        for(const auto &value:mirrors) {
+            const auto mirror=value.toObject();
+            const auto name=mirror.value("name").toString();
+            if(!value.isObject() || !connector.match(name).hasMatch() || !label(mirror.value("label")) ||
+               std::any_of(outputs.cbegin(),outputs.cend(),[&](const DisplayOutput &o){return o.name==name;}))
+                return reject("Invalid mirrored display.");
+            details.mirrors.append(QVariantMap{{"name",name},{"label",mirror.value("label").toString()}});
+        }
+    }
+    if(root.contains("pending")) {
+        if(!root.value("pending").isBool()) return reject("Invalid pending display change.");
+        details.pending=root.value("pending").toBool();
+    }
+    return DisplaySnapshot{session,quint64(serial),*layout,details};
 }
 
 DisplayTopologyFeed::DisplayTopologyFeed(QString path,QObject *parent):QObject(parent),m_path(std::move(path))

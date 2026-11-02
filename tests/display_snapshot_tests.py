@@ -23,6 +23,56 @@ def inventory():
 
 
 class DisplaySnapshotTests(unittest.TestCase):
+    def test_explicit_extend_enables_the_panel_kde_had_disabled_without_overlap(self):
+        outputs = inventory()
+        outputs[0]['name'] = 'DP-3'
+        outputs[1]['name'] = 'eDP-1'
+        outputs[1]['rect']['x'] = 0
+        seed = {'DP-3': dict(enabled=True, x=696, y=0, primary=True),
+                'eDP-1': dict(enabled=False, x=0, y=0, primary=False)}
+        plan = session.extended_connected_arrangement(outputs, seed, 'DP-3', False)
+        self.assertTrue(all(p['enabled'] for p in plan.values()))
+        self.assertEqual((plan['DP-3']['x'], plan['DP-3']['y']), (0, 0))
+        self.assertEqual(plan['eDP-1']['x'], outputs[0]['rect']['width'])
+        self.assertTrue(plan['DP-3']['primary'])
+
+    def test_valid_positions_sizes_and_scale_are_not_guessed_or_repacked(self):
+        outputs = inventory()
+        seed = {o['name']: dict(enabled=True, x=o['rect']['x'], y=o['rect']['y'],
+                                primary=i == 1) for i, o in enumerate(outputs)}
+        plan = session.extended_connected_arrangement(outputs, seed, 'HEADLESS-1')
+        self.assertEqual([plan[o['name']]['x'] for o in outputs], [o['rect']['x'] for o in outputs])
+        self.assertTrue(plan['HEADLESS-2']['primary'])
+        outputs[1]['rect']['width'] = 0
+        with self.assertRaises(ValueError):
+            session.extended_connected_arrangement(outputs, seed, 'HEADLESS-1')
+
+    def test_a_closed_lid_keeps_external_screens_but_never_leaves_no_display(self):
+        outputs = inventory()
+        outputs[0]['name'], outputs[1]['name'] = 'eDP-1', 'DP-3'
+        self.assertEqual(session.connected_display_names(outputs, True), ['DP-3'])
+        self.assertEqual(session.connected_display_names(outputs, False), ['DP-3', 'eDP-1'])
+        self.assertEqual(session.connected_display_names(outputs[:1], True), ['eDP-1'])
+        outputs[1]['non_desktop'] = True
+        self.assertEqual(session.connected_display_names(outputs, True), ['eDP-1'])
+
+    def test_extend_plan_rejects_an_oversized_canvas_before_position_commands(self):
+        outputs = inventory()
+        for o in outputs:
+            o['rect'].update(width=10000, height=8000, x=0)
+        with self.assertRaises(ValueError):
+            session.extended_connected_arrangement(outputs, {}, 'HEADLESS-1')
+
+    def test_failed_activation_restores_the_old_screen_before_disabling_new_outputs(self):
+        outputs = inventory()
+        outputs[1]['active'] = False
+        commands = session.restore_display_commands(outputs)
+        self.assertEqual(commands[0], 'output HEADLESS-1 enable')
+        self.assertEqual(commands[-1], 'output HEADLESS-2 disable')
+        self.assertNotIn('output HEADLESS-1 disable', commands)
+        outputs[0]['active'] = False
+        self.assertEqual(session.restore_display_commands(outputs), [])
+
     def test_shared_consumer_fixture_and_atomic_private_publication(self):
         description = session.describe_displays(inventory(), 'HEADLESS-1')
         with tempfile.TemporaryDirectory() as temporary:

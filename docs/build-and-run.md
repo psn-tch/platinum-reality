@@ -114,8 +114,13 @@ service activation directories and does not exercise portals or host services. R
 `build/artifacts/native-runs/<run>/native-tests.txt`, with a manifest and separate
 test/cleanup status. A venue failure exits 77; an assertion failure
 is a failed test. It requires a working parent display and OpenGL-capable Qt Quick
-renderer. The current Wayland/OpenGL startup selects the installed linux-dmabuf-v1
-compositor plugin when no override exists. The gate exercises native rendering
+renderer. Wayland/OpenGL startup selects the installed linux-dmabuf-v1
+compositor plugin only when its actual Qt platform EGL display reports import
+support, a usable DRM device and drawable formats. Otherwise it requests the
+known wayland-egl plugin, retaining shared-memory clients without advertising an
+unusable DMA-BUF global. Explicit hardware/client integration requests take
+precedence. See [software-display qualification](software-rendering.md).
+The gate exercises native rendering
 at 1.5x; exact client acceleration, other displays and every buffer path remain
 unqualified. Explicit graphics overrides and software previews remain independent.
 
@@ -182,3 +187,13 @@ graphical terminal. The eighth now also checks marquee selection and a group
 transfer; that extension passed the 11:09 complete native run.
 Native execution remains unavailable in the socket-restricted executor. The private `frankenstein-drop-receiver` executable is a build dependency;
 it is not installed or placed on the host desktop.
+
+
+### Handheld service isolation in checks
+
+The Handheld Daemon uses HTTP, so a private D-Bus system address does not isolate
+it. Native-test mode uses only its explicit fake endpoint, or no token file.
+Installed-path checks additionally set `PLATINUM_DISABLE_HOST_HANDHELD=1` while
+exercising production wallet/session routing. The opt-out disables host access;
+it never redirects the real token to another endpoint. Normal logins leave it
+unset. The fake override is accepted only in native-test mode.

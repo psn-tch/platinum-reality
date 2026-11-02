@@ -36,6 +36,8 @@ class ScreenshotService final : public QObject
     Q_INVOKABLE bool capture();
     Q_INVOKABLE bool select(int x, int y, int width, int height);
     Q_INVOKABLE bool save(QString path);
+    // The selection as a PNG picture on the clipboard, for any application to paste.
+    Q_INVOKABLE bool copy();
     Q_INVOKABLE void discard();
   signals:
     void changed();

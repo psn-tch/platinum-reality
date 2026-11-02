@@ -8,6 +8,9 @@
                                         firmware splash and quiet kernel options, then rebuild the
                                         boot image. Everything changed is backed up first.
   sudo boot-splash.py uninstall         as root: put every changed file back and rebuild.
+  boot-splash.py theme --from DIR --output THEME
+                                        for image builders: write the complete theme folder
+                                        (pictures, .plymouth, filled script); changes nothing else.
 
 The panel's picture is the 512 x 342 screen of the first Macintosh, scaled by a whole number and
 centred: a 50% checkerboard with the icon where that screen had it. A panel mounted sideways
@@ -69,9 +72,48 @@ LEGACY = "platinum-dreams"   # the name before Platinum Reality; its install is 
 # raises the console level itself before printing one. Everything stays in the journal.
 QUIET = ["quiet", "splash", "loglevel=0", "rd.udev.log_level=3", "vt.global_cursor_default=0",
          "plymouth.force-scale=1"]
-RENDERED = ["panel.png", "splash.bmp", "manifest.json"] + [f"tile-{s}.png" for s in SCALES] + [
-    f"icon-{s}.png" for s in SCALES]
+RENDERED = (["panel.png", "splash.bmp", "panel-dialog.png", "panel-retry.png", "manifest.json"]
+            + [f"{kind}-{s}.png" for kind in ("tile", "icon", "dialog", "retry", "bullet") for s in SCALES])
+PICTURES = [name for name in RENDERED if name != "manifest.json"]  # What the theme folder gets.
 LIMIT = 16 << 20             # No rendered file is anywhere near this.
+
+
+# The password dialog for unlocking an encrypted disk, in Mac screen pixels: below the startup icon,
+# with a message, a field and one bullet per typed character. The theme script gets these numbers.
+DIALOG = (106, 202, 300, 68)          # x, y, width, height
+MESSAGE_AT = (14, 13)
+FIELD = (14, 34, 272, 20)             # inside the dialog
+BULLET, BULLET_STEP = 6, 9            # bullets start 6 pixels into the field, 7 down
+BULLET_AT = (FIELD[0] + 6, FIELD[1] + 7)
+BULLET_MAX = (FIELD[2] - 12) // BULLET_STEP
+PROMPT = "Enter your password to start up."
+RETRY = "Wrong password. Please try again."
+# An original 1-bit pixel font with just the letters the dialog needs: 7 rows above the baseline,
+# 2 below. Plymouth can draw text itself, but not turned for a panel mounted sideways.
+GLYPHS = {
+    "E": ["#####", "#....", "#....", "####.", "#....", "#....", "#####"],
+    "P": ["####.", "#...#", "#...#", "####.", "#....", "#....", "#...."],
+    "T": ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."],
+    "W": ["#.....#", "#.....#", "#.....#", "#..#..#", "#..#..#", "#.#.#.#", ".#...#."],
+    "a": [".....", ".....", ".###.", "....#", ".####", "#...#", ".####"],
+    "d": ["....#", "....#", ".####", "#...#", "#...#", "#...#", ".####"],
+    "e": [".....", ".....", ".###.", "#...#", "#####", "#....", ".###."],
+    "g": [".....", ".....", ".####", "#...#", "#...#", "#...#", ".####", "....#", ".###."],
+    "i": ["#", ".", "#", "#", "#", "#", "#"],
+    "l": ["#", "#", "#", "#", "#", "#", "#"],
+    "n": [".....", ".....", "####.", "#...#", "#...#", "#...#", "#...#"],
+    "o": [".....", ".....", ".###.", "#...#", "#...#", "#...#", ".###."],
+    "p": [".....", ".....", "####.", "#...#", "#...#", "#...#", "####.", "#....", "#...."],
+    "r": ["....", "....", "#.##", "##..", "#...", "#...", "#..."],
+    "s": ["....", "....", ".###", "#...", ".##.", "...#", "###."],
+    "t": ["...", ".#.", "###", ".#.", ".#.", ".#.", "..#"],
+    "u": [".....", ".....", "#...#", "#...#", "#...#", "#...#", ".####"],
+    "w": [".......", ".......", "#.....#", "#.....#", "#..#..#", "#.#.#.#", ".#...#."],
+    "y": [".....", ".....", "#...#", "#...#", "#...#", "#...#", ".####", "....#", ".###."],
+    ".": [".", ".", ".", ".", ".", ".", "#"],
+    " ": ["..", "..", "..", "..", "..", "..", ".."],
+}
+BULLET_SHAPE = [".####.", "######", "######", "######", "######", ".####."]
 
 
 # Pictures: rows of bytes, 0 black and 255 white; icons also carry a mask.
@@ -139,6 +181,42 @@ def checker(width, height, scale, origin=(0, 0)):
         period = [0 if (((x - origin[0]) // scale + row_unit) & 1) == 0 else 255 for x in range(2 * scale)]
         rows.append((period * (width // (2 * scale) + 1))[:width])
     return rows
+
+
+def text_rows(text):
+    """The text in the dialog's pixel font, black on white, 9 rows high."""
+    rows = [[] for _ in range(9)]
+    for index, character in enumerate(text):
+        glyph = GLYPHS[character]
+        width = len(glyph[0])
+        for y in range(9):
+            line = glyph[y] if y < len(glyph) else "." * width
+            rows[y] += [0 if c == "#" else 255 for c in line] + ([255] if index < len(text) - 1 else [])
+    return rows
+
+
+def dialog_picture(message):
+    """A Macintosh modal dialog: a black line, white, a double-width black line, then the message
+    and an empty password field. The bullets are drawn separately as they are typed."""
+    width, height = DIALOG[2], DIALOG[3]
+    rows = [[255] * width for _ in range(height)]
+    def frame(x, y, w, h, thickness=1):
+        for t in range(thickness):
+            for i in range(x + t, x + w - t):
+                rows[y + t][i] = rows[y + h - 1 - t][i] = 0
+            for j in range(y + t, y + h - t):
+                rows[j][x + t] = rows[j][x + w - 1 - t] = 0
+    frame(0, 0, width, height)
+    frame(3, 3, width - 6, height - 6, 2)
+    frame(*FIELD)
+    for y, line in enumerate(text_rows(message)):
+        rows[MESSAGE_AT[1] + y][MESSAGE_AT[0]:MESSAGE_AT[0] + len(line)] = line
+    return rows
+
+
+def bullet_picture():
+    return [[0 if c == "#" else 255 for c in row] for row in BULLET_SHAPE], [
+        [0 if c == "." else 255 for c in row] for row in BULLET_SHAPE]
 
 
 def scaled(rows, scale):
@@ -223,12 +301,30 @@ def render(options):
         # A tile is a whole number of checker pairs; (0, 0) black, as on the Mac screen.
         png(output / f"tile-{s}.png", checker(64 * s, 64 * s, s))
         png(output / f"icon-{s}.png", *(scaled(part, s) for part in icon))
+        png(output / f"dialog-{s}.png", scaled(dialog_picture(PROMPT), s))
+        png(output / f"retry-{s}.png", scaled(dialog_picture(RETRY), s))
+        png(output / f"bullet-{s}.png", *(scaled(part, s) for part in bullet_picture()))
+    # The built-in panel's dialog, turned as its picture is (a bullet is the same every way up).
+    png(output / "panel-dialog.png", rotate(scaled(dialog_picture(PROMPT), scale), turns))
+    png(output / "panel-retry.png", rotate(scaled(dialog_picture(RETRY), scale), turns))
     at = icon_position(icon)
     (output / "manifest.json").write_text(json.dumps(
         {"panel_width": width, "panel_height": height, "rotation": turns, "scale": scale,
          "icon": "user" if own else "original", "icon_x": at[0], "icon_y": at[1]}) + "\n")
     print(f"Rendered {width}x{height} (turned {turns * 90} degrees, scale {scale}, "
           f"{'your own' if own else 'the original'} startup icon) into {output}")
+
+
+def fill_script(script, numbers):
+    """The theme script's @NAME@ numbers: the panel's, from the manifest, and the dialog's layout."""
+    numbers = dict(numbers, DIALOG_X=DIALOG[0], DIALOG_Y=DIALOG[1], DIALOG_WIDTH=DIALOG[2],
+                   DIALOG_HEIGHT=DIALOG[3], BULLET_X=BULLET_AT[0], BULLET_Y=BULLET_AT[1],
+                   BULLET_SIZE=BULLET, BULLET_STEP=BULLET_STEP, BULLET_MAX=BULLET_MAX)
+    for name, value in numbers.items():
+        script = script.replace(f"@{name}@", str(int(value)))
+    if "@" in script:
+        raise SystemExit("The theme script has a number nobody filled in.")
+    return script
 
 
 # Root: copy, edit configuration with backups, rebuild.
@@ -290,18 +386,50 @@ def mkinitcpio_hooks(root):
     raise SystemExit("mkinitcpio HOOKS have neither udev nor systemd.")
 
 
-def install(options):
-    root = options.root
-    source = Path(options.source).resolve()
+def checked_rendering(source):
+    """The rendered folder's manifest numbers, after checking every file is there and sane."""
     manifest = json.loads((source / "manifest.json").read_text())
     width, height = int(manifest["panel_width"]), int(manifest["panel_height"])
     icon_x, icon_y = int(manifest.get("icon_x", 243)), int(manifest.get("icon_y", 145))
-    if not (64 <= width <= 8192 and 64 <= height <= 8192 and 0 <= icon_x < 512 and 0 <= icon_y < 342):
+    turns, scale = int(manifest.get("rotation", 0)), int(manifest.get("scale", 1))
+    if not (64 <= width <= 8192 and 64 <= height <= 8192 and 0 <= icon_x < 512 and 0 <= icon_y < 342
+            and 0 <= turns <= 3 and 1 <= scale <= 8):
         raise SystemExit("The rendered manifest is not usable.")
     for name in RENDERED:
         path = source / name
         if path.is_symlink() or not path.is_file() or path.stat().st_size > LIMIT:
             raise SystemExit(f"Rendered file missing or unusable: {name}. Run render first.")
+    return {"PANEL_WIDTH": width, "PANEL_HEIGHT": height, "ICON_X": icon_x, "ICON_Y": icon_y,
+            "PANEL_ROTATION": turns, "PANEL_SCALE": scale}
+
+
+def write_theme(source, theme):
+    """The complete Plymouth theme folder: the pictures, the .plymouth file and the filled script."""
+    numbers = checked_rendering(source)
+    theme.mkdir(parents=True, exist_ok=True)
+    for name in PICTURES:
+        shutil.copyfile(source / name, theme / name)
+    packaging = Path(__file__).resolve().parent.parent / "packaging/plymouth"
+    if not packaging.is_dir():
+        packaging = Path(__file__).resolve().parent / "plymouth"
+    shutil.copyfile(packaging / f"{THEME}.plymouth", theme / f"{THEME}.plymouth")
+    script = fill_script((packaging / f"{THEME}.script.in").read_text(), numbers)
+    (theme / f"{THEME}.script").write_text(script)
+
+
+def theme_only(options):
+    """For image builders (the live ISO): write the theme into a folder; nothing on this system changes."""
+    output = Path(options.output)
+    if output.exists() and any(output.iterdir()):
+        raise SystemExit("The theme folder must be new or empty.")
+    write_theme(Path(options.source).resolve(), output)
+    print(f"Wrote the {THEME} Plymouth theme into {output}")
+
+
+def install(options):
+    root = options.root
+    source = Path(options.source).resolve()
+    checked_rendering(source)
     if not under(root, "/usr/bin/plymouth").exists():
         run(["pacman", "-S", "--needed", "plymouth"], options)
     adopt_legacy(root)
@@ -312,18 +440,7 @@ def install(options):
     for path, name in ((cmdline_path, "cmdline"), (preset_path, "linux.preset")):
         if path.is_file() and not (backups / name).exists():
             shutil.copy2(path, backups / name)
-    theme = under(root, f"/usr/share/plymouth/themes/{THEME}")
-    theme.mkdir(parents=True, exist_ok=True)
-    for name in RENDERED[:-1]:
-        shutil.copyfile(source / name, theme / name)
-    packaging = Path(__file__).resolve().parent.parent / "packaging/plymouth"
-    if not packaging.is_dir():
-        packaging = Path(__file__).resolve().parent / "plymouth"
-    shutil.copyfile(packaging / f"{THEME}.plymouth", theme / f"{THEME}.plymouth")
-    script = (packaging / f"{THEME}.script.in").read_text()
-    script = script.replace("@PANEL_WIDTH@", str(width)).replace("@PANEL_HEIGHT@", str(height)).replace(
-        "@ICON_X@", str(icon_x)).replace("@ICON_Y@", str(icon_y))
-    (theme / f"{THEME}.script").write_text(script)
+    write_theme(source, under(root, f"/usr/share/plymouth/themes/{THEME}"))
     # Every edit starts from the backed-up original, so installing again (or after a failed
     # attempt) gives the same files. Quiet kernel options; the user's own options stay.
     if cmdline_path.is_file():
@@ -381,6 +498,9 @@ def main():
     drawing.add_argument("--size", help="The panel's native WIDTHxHEIGHT (default: read from the kernel)")
     drawing.add_argument("--rotate", type=int, choices=range(4), help="Quarter turns clockwise (default: fbcon=rotate)")
     drawing.add_argument("--cmdline", default="/etc/kernel/cmdline")
+    theme = commands.add_parser("theme", help="write the theme into a new folder, for image builders")
+    theme.add_argument("--from", dest="source", required=True)
+    theme.add_argument("--output", required=True)
     for name in ("install", "uninstall"):
         command = commands.add_parser(name)
         command.add_argument("--root", default="/", help=argparse.SUPPRESS)
@@ -393,6 +513,8 @@ def main():
         if os.geteuid() == 0:
             raise SystemExit("Render as yourself, not as root.")
         return render(options)
+    if options.command == "theme":
+        return theme_only(options)
     if os.geteuid() != 0 and options.root == "/":
         raise SystemExit("Install and uninstall change the boot configuration: run them with sudo.")
     return install(options) if options.command == "install" else uninstall(options)

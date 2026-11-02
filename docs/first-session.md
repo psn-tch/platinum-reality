@@ -3,6 +3,9 @@
 Choose **Platinum Reality** in your login screen's session menu and log in. You get the desktop,
 a Finder window, the menu bar across the top and the Control Strip in the bottom-left corner.
 
+**Help ▸ Help Center** (Command-?) has this guide inside the desktop. It opens by itself the first
+time a newly installed account logs in.
+
 ## The keyboard
 
 The **Command** key is the Super (Windows) key. Command shortcuts work the way they did on a Mac,

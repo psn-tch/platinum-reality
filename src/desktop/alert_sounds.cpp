@@ -40,6 +40,20 @@ QByteArray simpleBeep()
     return wav + samples;
 }
 
+// The names the session supervisor plays, in its order (scripts/standalone-session.py CHIME_NAMES).
+const QStringList chimeNames{"startup-chime.wav", "startup-chime.aiff", "startup-chime.aif", "startup-chime.flac",
+                             "startup-chime.ogg"};
+
+QProcessEnvironment playerEnvironment()
+{
+    auto environment = QProcessEnvironment::systemEnvironment();
+    // The desktop's runtime directory is private; use the user's own audio service.
+    const auto runtime = QString("/run/user/%1").arg(getuid());
+    if (!environment.contains("PIPEWIRE_RUNTIME_DIR") && QFileInfo(runtime + "/pipewire-0").exists())
+        environment.insert("PIPEWIRE_RUNTIME_DIR", runtime);
+    return environment;
+}
+
 bool validWave(const QFileInfo &file)
 {
     if (!file.isFile() || file.size() < 44 || file.size() > maximumBytes)
@@ -159,15 +173,111 @@ void AlertSounds::play()
     // One alert at a time; a burst of alerts is one sound.
     if (m_process.state() != QProcess::NotRunning)
         return;
-    auto environment = QProcessEnvironment::systemEnvironment();
-    // The desktop's runtime directory is private; use the user's own audio service.
-    const auto runtime = QString("/run/user/%1").arg(getuid());
-    if (!environment.contains("PIPEWIRE_RUNTIME_DIR") && QFileInfo(runtime + "/pipewire-0").exists())
-        environment.insert("PIPEWIRE_RUNTIME_DIR", runtime);
-    m_process.setProcessEnvironment(environment);
+    m_process.setProcessEnvironment(playerEnvironment());
     m_process.setStandardOutputFile(QProcess::nullDevice());
     m_process.setStandardErrorFile(QProcess::nullDevice());
     m_process.start(m_player, {"--volume", QString::number(m_volume / 100.0, 'f', 2), path});
     m_limit.start();
     emit played(path, m_volume);
+}
+
+StartupSound::StartupSound(QString profile, QString assets, QString player, QObject *parent)
+    : QObject(parent), m_profile(std::move(profile)), m_assets(std::move(assets)), m_player(std::move(player))
+{
+    // Startup sounds run longer than alerts; the IIsi chime is under two seconds.
+    m_limit.setSingleShot(true);
+    m_limit.setInterval(10000);
+    connect(&m_limit, &QTimer::timeout, &m_process, &QProcess::kill);
+    connect(&m_process, &QProcess::finished, &m_limit, &QTimer::stop);
+    QFile saved(m_profile + "/startup-sound.json");
+    if (!QFileInfo(saved.fileName()).isSymLink() && saved.size() <= 4096 && saved.open(QIODevice::ReadOnly))
+    {
+        const auto object = QJsonDocument::fromJson(saved.readAll()).object();
+        if (object.value("enabled").isBool())
+            m_enabled = object.value("enabled").toBool();
+        if (object.value("volume").isDouble())
+            m_volume = std::clamp(object.value("volume").toInt(), 0, 100);
+    }
+    refresh();
+}
+
+StartupSound::~StartupSound()
+{
+    m_process.disconnect(this);
+    if (m_process.state() != QProcess::NotRunning)
+    {
+        m_process.kill();
+        m_process.waitForFinished(500);
+    }
+}
+
+QString StartupSound::fileName() const
+{
+    return QFileInfo(m_path).fileName();
+}
+
+void StartupSound::refresh()
+{
+    // As the supervisor finds it: a regular file, never a link, and not an empty or huge one.
+    QString path;
+    for (const auto &name : chimeNames)
+    {
+        const QFileInfo file(m_assets + "/" + name);
+        if (file.isFile() && !file.isSymLink() && file.size() > 0 && file.size() <= 4 * maximumBytes)
+        {
+            path = file.absoluteFilePath();
+            break;
+        }
+    }
+    if (path == m_path)
+        return;
+    m_path = path;
+    emit changed();
+}
+
+void StartupSound::save() const
+{
+    QDir().mkpath(m_profile);
+    QSaveFile file(m_profile + "/startup-sound.json");
+    if (file.open(QIODevice::WriteOnly) &&
+        file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enabled", m_enabled}, {"volume", m_volume}}).toJson()) > 0)
+        file.commit();
+}
+
+void StartupSound::setEnabled(bool value)
+{
+    if (value == m_enabled)
+        return;
+    m_enabled = value;
+    save();
+    emit changed();
+}
+
+void StartupSound::setVolume(int value)
+{
+    value = std::clamp(value, 0, 100);
+    if (value == m_volume)
+        return;
+    m_volume = value;
+    save();
+    emit changed();
+}
+
+void StartupSound::play()
+{
+    // A new preview replaces one still playing.
+    if (m_process.state() != QProcess::NotRunning)
+    {
+        m_process.kill();
+        m_process.waitForFinished(500);
+    }
+    refresh();
+    if (m_path.isEmpty() || m_volume == 0 || m_player.isEmpty() || !QFileInfo(m_player).isExecutable())
+        return;
+    m_process.setProcessEnvironment(playerEnvironment());
+    m_process.setStandardOutputFile(QProcess::nullDevice());
+    m_process.setStandardErrorFile(QProcess::nullDevice());
+    m_process.start(m_player, {"--volume", QString::number(m_volume / 100.0, 'f', 2), m_path});
+    m_limit.start();
+    emit played(m_path, m_volume);
 }

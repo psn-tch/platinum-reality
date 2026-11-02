@@ -1,5 +1,65 @@
 # Live display topology — experimental Extend session
 
+## Remembered main display (2026-10-26 development)
+
+A successful main-display request now saves `main-display.json` in the desktop
+profile. The supervisor owns this file; the shell continues to own `displays.json`
+for Use all displays. Changing either preference cannot erase the other or race
+over a shared read/modify/write. Settings writes are atomic and owner-only. A
+failed write rejects the request and republishes the previous main-display
+choice instead of reporting success. Symlinks, directories, FIFOs and malformed
+or oversized preference files are not read as settings.
+
+On subsequent extended logins the saved monitor takes priority over the
+launcher's connector hint and KDE's main-display choice. Matching first uses the
+monitor's EDID hash, read only from sysfs, so the same monitor can move to another
+dock connector. Identical EDIDs require the original connector if ambiguous.
+Without EDID, a useful serial plus known make/model can follow a connector
+change; otherwise the original connector and matching known metadata are
+required. Unidentified identical monitors cannot be distinguished reliably.
+This preference never enables an output by itself: Use all displays and the
+lid policy still determine which screens are active. If it is absent or off,
+the session uses an available screen, retains the preference and restores it
+when a matching active screen returns.
+
+The owned extended-session qualifier now covers 25 checks, including saving,
+two later supervisor sessions with conflicting startup hints, unavailable-screen
+recovery, deterministic failed-save rollback and mode-file preservation. Unit
+fixtures cover renamed connectors, unrelated monitors on reused ports and
+ambiguous identities. These are software tests, not physical dock/EDID or
+suspend qualification. The preference applies to extended sessions; the
+single-output launch policy remains unchanged.
+
+## Explicit Use-all choice (2026-10-24 development)
+
+The saved Monitors **Use all displays** choice now enables connected desktop
+outputs, even when KDE's saved docked setup disabled the built-in panel. KDE's
+usable positions remain seeds. Newly enabled or overlapping screens are placed
+to the right, with a normalized origin and the existing canvas/overlap bounds.
+Actual enabled geometry is read after applying each screen's rotation and scale;
+disabled output dimensions are never guessed. With a closed lid and an external
+monitor, only external outputs are enabled; the sole connected screen is always
+kept. Lid changes as well as connector changes trigger reconciliation.
+Connected-but-inactive screens are also noticed. An unusable seed/canvas is
+rejected before position commands, the previous usable activation/scale/position
+is restored, and that failed inventory is held rather than retried every 250 ms.
+The supervisor records `display_configuration_error` for this case; the desktop
+can continue on the prior layout. This is distinct from a user-facing timed
+confirmation interface for arbitrary display edits.
+
+This setting applies at the next chosen login. The development
+`--experimental-extended` path without a saved Use-all choice continues to honor
+KDE's enabled flags. No physical monitor configuration is changed by automated
+qualification. The regression uses an owned two-output backend and a fake KDE
+setup which disables its second output, then requires both outputs, the returning
+panel's 270-degree/2.3x geometry, a valid acknowledged layout and a real Finder.
+The preceding supervisor fails that same assertion with its second screen off.
+
+Production Mirror, arbitrary arrangement/scale/resolution controls and timed
+confirmation remain unfinished. Earlier sections below describe historical
+checkpoints: the current inner compositor does advertise per-monitor outputs and
+tracks client output membership, as covered by the later two-screen suite.
+
 This is an opt-in development path, not the selected daily-use login. It wires
 the monitor-aware desktop policy to a live, privately owned Sway backend. The
 existing single-output session remains the default. No physical monitor settings
@@ -59,11 +119,12 @@ python3 -B scripts/standalone-session.py --control /OWNED/SESSION/control primar
 ```
 
 This command is descriptive: never substitute the user's inherited Sway socket.
-Primary choice is session-local. Claude subsequently added a native **Monitors**
+At this historical checkpoint primary choice was session-local; see the
+remembered-main-display update above. Claude subsequently added a native **Monitors**
 panel: drag the miniature menu bar or choose Use as Main Display, then accept.
 The panel is available through Control Panels/Control Strip. It enables changes
 only when the extended session's private control channel is available. There is
-no persisted display profile yet. Mode/scale/rotation/arrangement transactions and timed rollback
+no persisted arrangement profile yet. Mode/scale/rotation/arrangement transactions and timed rollback
 are still required before exposing hardware configuration controls.
 
 ## Qualification

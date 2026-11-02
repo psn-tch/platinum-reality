@@ -72,6 +72,10 @@ class WifiService final : public QObject
     // The user's answer to request(): the password, and the user name where one is asked for.
     Q_INVOKABLE void answer(bool accept, const QString &password = {}, const QString &user = {});
     Q_INVOKABLE void clearMessage() { setMessage({}); }
+    // This computer's network connections as the Network control panel shows them: for each
+    // interface that is up (loopback left out), {name, kind ("Wi-Fi", "Ethernet", "Other"),
+    // hardware, addresses: [{address, version}]}. Read from the kernel, not from iwd.
+    Q_INVOKABLE QVariantList connections() const;
 
   signals:
     void changed();

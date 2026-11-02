@@ -33,6 +33,21 @@ Rectangle {
                  Component.onCompleted:desktop.checkBattery()}
     property date clockTime: new Date()
     Timer {interval:1000;running:true;repeat:true;onTriggered:desktop.clockTime=new Date()}
+    // The menu bar clock, as Date & Time sets it (AppearanceSettings.clock). Flashing separators
+    // are drawn in the menu bar's own colour every other second, so the time never shifts.
+    function clockText(time, options, showDate) {
+        let c=options||({})
+        if(showDate)return Qt.formatDate(time,"dddd, MMMM d, yyyy")
+        let separator=c.flash && time.getSeconds()%2?"<font color=\"#dddddd\">:</font>":":"
+        let parts=[Qt.formatTime(time,c.hours24?"HH":"h"),Qt.formatTime(time,"mm")]
+        if(c.seconds)parts.push(Qt.formatTime(time,"ss"))
+        let text=parts.join(separator)+(c.hours24?"":" "+Qt.formatTime(time,"AP"))
+        let day=(c.weekday?Qt.formatDate(time,"ddd")+" ":"")+(c.date?Qt.formatDate(time,"MMM d")+" ":"")
+        return (day?day+" ":"")+text
+    }
+    // Clicking the clock shows the date for a few seconds, as in Mac OS 9.
+    property bool clockShowsDate:false
+    Timer {id:clockDate;interval:4000;onTriggered:desktop.clockShowsDate=false}
     property var broker: manager.menuBroker
     property var exportPopup: null
     property int exportedRoot: -1
@@ -149,6 +164,12 @@ Rectangle {
         else if(action==="appearance")appearanceDialog.edit()
         else if(action==="desktop-picture")desktopPictureDialog.edit()
         else if(action==="monitors")monitorsPanel.edit()
+        else if(action==="network")networkPanel.edit()
+        else if(action==="date-time")dateTimePanel.edit()
+        else if(action==="keyboard")keyboardPanel.edit()
+        else if(action==="energy")energyPanel.edit()
+        else if(action==="mouse")mousePanel.edit()
+        else if(action==="control-panels-window")controlPanels.show("")
         else if(action==="sound")soundPanel.edit()
         else if(action==="bluetooth")bluetoothPanel.edit()
         else if(action==="bluetooth-add")bluetoothPanel.addDevice()
@@ -164,10 +185,12 @@ Rectangle {
         else if(action==="copy-names")copySelectedNames()
         else if(action==="quit")manager.quitSession()
         else if(action==="eject")manager.removableMedia.eject(desktopFiles.selectedDrive)
+        else if(action==="handheld-set")manager.handheld.set(applicationId.key,applicationId.value)
         else if(action==="sleep")manager.sleepComputer()
         else if(action==="restart")manager.restartComputer()
         else if(action==="shut-down")manager.shutDownComputer()
         else if(action==="about")statusMessage=manager.aboutThisComputer()
+        else if(action==="help")showHelp("welcome")
     }
     // Get Info windows, one per item (FS-G01): above the desktop icons, below application windows
     // (z 0.6 to 1), as Finder windows are.
@@ -182,6 +205,26 @@ Rectangle {
         if(names!=="" && manager.clipboard)manager.clipboard.copyText(names)
     }
     Component {id:clipboardFactory;ClipboardWindow {}}
+    // Help Center: one modeless window, above application windows and under the menus like the
+    // Clipboard. It opens by itself once, on a new account's first login (manager.takeWelcome).
+    property var helpWindow: null
+    Component {id:helpFactory;HelpWindow {}}
+    function showHelp(topic) {
+        if(!helpWindow) {
+            let area=manager.primaryDisplayRect
+            helpWindow=helpFactory.createObject(desktop,{z:4000,
+                x:area.x+Math.max(8,Math.round((area.width-640)/2)),y:area.y+Math.max(30,Math.round((area.height-440)/3))})
+            helpWindow.closeRequested.connect(function(){
+                let window=desktop.helpWindow
+                desktop.helpWindow=null
+                window.destroy()
+                desktop.forceActiveFocus()
+            })
+        }
+        helpWindow.show(topic)
+        helpWindow.forceActiveFocus()
+    }
+    Timer {interval:1500;running:true;onTriggered:if(manager.takeWelcome())desktop.showHelp("welcome")}
     function showClipboard() {
         if(!manager.clipboard)return
         if(!clipboardWindow) {
@@ -270,11 +313,18 @@ Rectangle {
                 {separator:true,action:"separator"},
                 {text:"Applications…",action:"applications",glyph:"application"},
                 {text:"Control Panels",action:"control-panels",glyph:"application",children:[
+                    {text:"All Control Panels…",action:"control-panels-window"},
+                    {separator:true,action:"separator"},
                     {text:"Appearance…",action:"appearance"},
                     {text:"Bluetooth…",action:"bluetooth"},
                     {text:"Control Strip",action:"control-strip",checked:desktop.appearance.controlStripVisible},
+                    {text:"Date & Time…",action:"date-time"},
                     {text:"Desktop Picture…",action:"desktop-picture"},
+                    {text:"Energy Saver…",action:"energy"},
+                    {text:"Keyboard…",action:"keyboard"},
                     {text:"Monitors…",action:"monitors"},
+                    {text:"Mouse & Trackpad…",action:"mouse"},
+                    {text:"Network…",action:"network"},
                     {text:"Quick Controls…",action:"quick-controls"},
                     {text:"Sound…",action:"sound"}]},
                 {text:"Puzzle",action:"puzzle",glyph:"application"},
@@ -333,7 +383,9 @@ Rectangle {
             {text:"Shut Down",action:"shut-down"},
             {separator:true,action:"separator"}] : []).concat([
             {text:"Log Out",action:"quit"}])
-        return [{text:"About Platinum Reality…",action:"about"}]
+        return [{text:"Help Center",key:"⌘?",action:"help"},
+            {separator:true,action:"separator"},
+            {text:"About Platinum Reality…",action:"about"}]
     }
     function openStripModule(module, anchor) {
         if(manager.shellModal)return
@@ -343,6 +395,7 @@ Rectangle {
         stripAnchor=Qt.rect(origin.x,origin.y,anchor.width,anchor.height)
         stripModule=module
         if(["sound","monitors","wifi"].includes(module))quickControls.service.refresh()
+        if(module==="handheld")manager.handheld.refresh()
         // Opening the Wi-Fi module looks for networks, as later AirPort menus do.
         if(module==="wifi")wifiAlert.service.scan()
         else if(module==="battery" && manager.battery)manager.battery.refresh()
@@ -452,7 +505,9 @@ Rectangle {
         }
         if(module==="bluetooth")return bluetoothMenuEntries()
         if(module==="battery")return batteryMenuEntries()
+        if(module==="handheld")return handheldMenuEntries()
         let radio=values.wifi||({})
+        open=[{text:"Open Network…",action:"network"},{separator:true,action:"separator"}]
         if(!radio.available)return open.concat([unavailable("Wi-Fi")])
         let entries=open.concat([{text:"Wi-Fi: "+(radio.enabled?"On":"Off"),action:"none",name:"status",enabled:false},
                                  {text:(radio.enabled?"Turn Wi-Fi Off":"Turn Wi-Fi On"),action:"set-wifi",id:radio.enabled?0:1,name:"wifi"}])
@@ -481,6 +536,36 @@ Rectangle {
         return entries
     }
     // The Battery module, as a PowerBook's Battery Monitor: the charge and an estimate, nothing to set.
+    // The Handheld module: Handheld Daemon's own choices for this device (HandheldDaemon), each a
+    // checked line under its heading, as the Mac OS 9 strip modules listed their settings.
+    function handheldMenuEntries() {
+        let service=manager.handheld, state=service.state||({})
+        let entries=[{text:"Open Handheld Daemon…",action:"launch",id:"hhd-ui.desktop"},{separator:true,action:"separator"}]
+        if(!service.available)return entries.concat([
+            {text:service.busy?"Checking…":"Handheld Daemon Unavailable",action:"none",name:"status",enabled:false}])
+        let ready=!service.busy
+        let choice=function(item,value,text,name){return {text:text,action:"handheld-set",id:{key:item.key,value:value},
+                                                           name:name,checked:value===item.value,enabled:ready}}
+        // "Controller: Xbox", its choices beside it, as in the menu bar's submenus.
+        let setting=function(title,item,name){
+            if(!item)return []
+            let current=item.options.find(function(o){return o.value===item.value})
+            return [{text:title+": "+(current?current.title:item.value),action:"submenu",name:name,enabled:ready,
+                     children:item.options.map(function(o){return choice(item,o.value,o.title,"handheld-"+o.value)})}]
+        }
+        entries=entries.concat(setting("Controller",state.controller,"handheld-controller"))
+        if(state.tdp){
+            let t=state.tdp, levels=[t.min,8,12,15,20,25,t.max,t.value].filter(function(w,i,all){return w>=t.min && w<=t.max && all.indexOf(w)===i})
+            levels.sort(function(a,b){return a-b})
+            let power=levels.map(function(w){return choice(t,w,w+" W","handheld-tdp-"+w)})
+            if(state.boost)power=power.concat([{separator:true,action:"separator"},
+                {text:"TDP Boost",action:"handheld-set",id:{key:state.boost.key,value:!state.boost.value},
+                 name:"handheld-boost",checked:state.boost.value,enabled:ready}])
+            entries.push({text:"Power: "+t.value+" W"+(state.boost&&state.boost.value?" (Boost)":""),action:"submenu",
+                          name:"handheld-power",enabled:ready,children:power})
+        }
+        return entries.concat(setting("Fan",state.fan,"handheld-fan"),setting("Charge Limit",state.chargeLimit,"handheld-charge"))
+    }
     function batteryMenuEntries() {
         let battery=manager.battery
         if(!battery || !battery.present)return [{text:"No Battery",action:"none",name:"status",enabled:false}]
@@ -514,6 +599,17 @@ Rectangle {
     }
     function openShellSubmenu(index, entries, sceneY) {
         submenuEntries=entries;submenuY=sceneY;openSubmenu=index
+    }
+    // Command-Shift-3 puts the whole desktop on the clipboard; Command-Shift-4 shows a crosshair,
+    // and the area dragged across goes on the clipboard (Mac OS's picture-to-clipboard keys).
+    // The desktop is captured first, so the crosshair is never in the picture.
+    function copyScreenshot(area) {
+        if(manager.shellModal || manager.nativeDragging || screenshotArea.visible)return
+        closeMenu()
+        if(!manager.screenshots.capture()){statusMessage=manager.screenshots.error;return}
+        if(area){screenshotArea.begin();return}
+        if(!manager.screenshots.copy())statusMessage=manager.screenshots.error
+        manager.screenshots.discard()
     }
     function takeScreenshot() {
         if(manager.shellModal || manager.nativeDragging)return
@@ -597,6 +693,8 @@ Rectangle {
     Binding {target:manager;property:"shellMenuOpen";value:(desktop.openMenu>=0 && desktop.exportedRoot<0) || desktop.stripModule!==""}
     Connections {target:manager;function onShellMenuKeyPressed(){desktop.closeMenu()}}
     Shortcut {sequence:"Meta+H";enabled:!manager.shellModal;onActivated:manager.hideApplication()}
+    // Command-? opens the Help Center, as on a Mac (? is Shift-/ on most layouts).
+    Shortcut {sequences:["Meta+?","Meta+Shift+?","Meta+Shift+/"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging;onActivated:{desktop.closeMenu();desktop.showHelp("welcome")}}
     // Frees a pointer that a game locked or confined. Only bound while one is captured, so the
     // chord otherwise reaches the application. See docs/relative-pointer-plan.md.
     Shortcut {sequence:"Ctrl+Alt+Escape";autoRepeat:false;enabled:manager.pointerCaptured;onActivated:manager.releasePointerCapture()}
@@ -605,6 +703,9 @@ Rectangle {
     Shortcut {sequence:"Alt+D";autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging;onActivated:{desktop.closeMenu();applicationBrowser.browse("")}}
     Shortcut {sequences:["Meta+Q","Alt+Q"];autoRepeat:false;enabled:!manager.shellModal && !manager.menuOpen && !manager.nativeDragging;onActivated:manager.requestQuitActiveApplication()}
     Shortcut {sequences:["Meta+Shift+S","Alt+Shift+S"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging;onActivated:desktop.takeScreenshot()}
+    // Shift-3 and Shift-4 arrive as # and $ on most layouts.
+    Shortcut {sequences:["Meta+Shift+3","Meta+Shift+#","Meta+#"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging;onActivated:desktop.copyScreenshot(false)}
+    Shortcut {sequences:["Meta+Shift+4","Meta+Shift+$","Meta+$"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging;onActivated:desktop.copyScreenshot(true)}
     Shortcut {sequence:"Escape";enabled:manager.desktopActive && !manager.shellModal && (desktopFiles.dragging || desktopFiles.selecting);onActivated:desktopFiles.selecting ? desktopFiles.cancelSelection() : desktopFiles.cancelDrag()}
     Shortcut {sequences:["Meta+I","Ctrl+I"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && desktopFiles.selectionCount===1;onActivated:desktop.showInfo()}
     Shortcut {sequences:["Meta+O","Ctrl+O"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && !desktopFiles.busy;onActivated:desktopFiles.openSelected()}
@@ -633,7 +734,7 @@ Rectangle {
         function onErrorOccurred(message) { desktop.statusMessage = message }
         function onOpenWithRequested(document) {applicationBrowser.browse(document)}
         function onControlPanelRequested(action) {desktop.dispatchShellCommand(action,0)}
-        function onFocusDesktop() { desktop.forceActiveFocus() }
+        function onFocusDesktop() { if(controlPanels.visible && controlPanels.front)controlPanels.forceActiveFocus();else desktop.forceActiveFocus() }
         function onContextChanged() { if(!manager.menuOpen && (desktop.openMenu>=0 || desktop.exportPopup || desktop.stripModule!==""))desktop.closeMenu(false) }
     }
     // While a menu bar or Control Strip menu is open, a click anywhere else (a window included)
@@ -892,7 +993,13 @@ Rectangle {
                 }
             }
         }
-        Text {anchors.right:appDivider.left;anchors.rightMargin:7;anchors.verticalCenter:parent.verticalCenter;text:Qt.formatTime(desktop.clockTime,"h:mm AP");font.pixelSize:12}
+        Text {
+            id:menuClock;objectName:"menu-bar-clock"
+            anchors.right:appDivider.left;anchors.rightMargin:7;anchors.verticalCenter:parent.verticalCenter
+            visible:desktop.appearance.clock.visible!==false
+            text:desktop.clockText(desktop.clockTime,desktop.appearance.clock,desktop.clockShowsDate);textFormat:Text.StyledText;font.pixelSize:12
+            MouseArea {anchors.fill:parent;anchors.margins:-4;onClicked:{desktop.clockShowsDate=!desktop.clockShowsDate;if(desktop.clockShowsDate)clockDate.restart()}}
+        }
         // The application menu's etched strip, as in 9.2.2 (psn_tch's About This Computer capture):
         // a solid white line, four grip dots, then a solid grey line through the top highlight.
         Item {
@@ -974,8 +1081,10 @@ Rectangle {
     }
     Rectangle {visible:submenu.visible;z:10001.5;x:submenu.x+3;y:submenu.y+3;width:submenu.width;height:submenu.height;color:"#50000000"}
     Rectangle {
-        id: submenu; objectName:"desktop-submenu"; z: 10002; visible:popup.visible && desktop.openSubmenu>=0
-        x:popup.x+popup.width+width-4<=menuBar.x+menuBar.width?popup.x+popup.width-4:Math.max(menuBar.x,popup.x-width+4)
+        id: submenu; objectName:"desktop-submenu"; z: 10002; visible:owner.visible && desktop.openSubmenu>=0
+        // Beside the menu it belongs to: the menu bar's, or a Control Strip module's.
+        readonly property Item owner: desktop.stripModule!=="" ? stripMenu : popup
+        x:owner.x+owner.width+width-4<=menuBar.x+menuBar.width?owner.x+owner.width-4:Math.max(menuBar.x,owner.x-width+4)
         y:Math.max(menuBar.y+26,Math.min(desktop.submenuY-3,menuBar.y+manager.primaryDisplayRect.height-height-2))
         width:220;height:subitems.height+6;color:"#ddd";border.color:"#222"
         Column {
@@ -990,7 +1099,10 @@ Rectangle {
         width:220;height:stripItems.height+6;color:"#ddd";border.color:"#222"
         x:Math.max(menuBar.x,Math.min(desktop.stripAnchor.x,menuBar.x+menuBar.width-width))
         // Above the module (V922 E12), or below it when the strip sits under the menu bar.
-        y:desktop.stripAnchor.y-height>=menuBar.y+26?desktop.stripAnchor.y-height:desktop.stripAnchor.y+desktop.stripAnchor.height
+        y:desktop.stripAnchor.y-height>=menuBar.y+26?desktop.stripAnchor.y-height
+          :desktop.stripAnchor.y+desktop.stripAnchor.height+height<=manager.primaryDisplayRect.y+manager.primaryDisplayRect.height
+            ?desktop.stripAnchor.y+desktop.stripAnchor.height
+          :Math.max(menuBar.y+26,manager.primaryDisplayRect.y+manager.primaryDisplayRect.height-height)
         Column {
             id:stripItems;x:3;y:3;width:parent.width-6
             Repeater {model:desktop.stripModule!=="" ? desktop.stripMenuEntries(desktop.stripModule) : [];delegate:shellMenuRow}
@@ -1002,19 +1114,103 @@ Rectangle {
         Text {id:operationLabel;anchors.centerIn:parent;text:desktopFiles.operationStatus;textFormat:Text.PlainText;font.pixelSize:12}
     }
     ApplicationBrowser {id:applicationBrowser;sessionManager:manager;catalog:manager.applicationCatalog}
-    AppearanceDialog {id:appearanceDialog;sessionManager:manager;settings:desktop.appearance
-        // After the panel's modal input is released, so the chooser can take it.
-        onPlacePictureRequested:Qt.callLater(function(){desktopPictureDialog.edit()})}
-    DesktopPictureDialog {id:desktopPictureDialog;sessionManager:manager;settings:desktop.appearance}
     ScreenshotDialog {id:screenshotDialog;sessionManager:manager;tool:manager.screenshots}
-    QuickControls {id:quickControls;sessionManager:manager;service:manager.systemControls;bluetooth:bluetoothPanel.service}
-    SoundPanel {id:soundPanel;sessionManager:manager;service:manager.audio;alertSounds:manager.alertSounds}
+    // Command-Shift-4's crosshair over the whole desktop. Escape, another button or a click without
+    // a drag copies nothing.
+    Item {
+        id:screenshotArea;objectName:"screenshot-area";anchors.fill:parent;z:100000;visible:false
+        property point start:Qt.point(0,0)
+        property point end:Qt.point(0,0)
+        property bool dragging:false
+        property var token:0
+        function clamp(x,y){return Qt.point(Math.max(0,Math.min(width,x)),Math.max(0,Math.min(height,y)))}
+        function begin(){dragging=false;token=manager.beginShellModal();visible=true;forceActiveFocus()}
+        function finish(copy){
+            visible=false;dragging=false
+            if(token){manager.endShellModal(token);token=0}
+            // Round both corners, then subtract: rounding the size separately could reach a pixel
+            // past the picture at a fractional scale, and the copy would silently not happen (Rocky).
+            const ratio=manager.screenshots.imageSize.width/Math.max(1,width)
+            const x=Math.round(Math.min(start.x,end.x)*ratio), y=Math.round(Math.min(start.y,end.y)*ratio)
+            const w=Math.round(Math.max(start.x,end.x)*ratio)-x, h=Math.round(Math.max(start.y,end.y)*ratio)-y
+            if(copy && w>0 && h>0 && manager.screenshots.select(x,y,w,h) && !manager.screenshots.copy())
+                statusMessage=manager.screenshots.error
+            manager.screenshots.discard()
+            desktop.forceActiveFocus()
+        }
+        Keys.onPressed:function(event){event.accepted=true;if(event.key===Qt.Key_Escape)finish(false)}
+        MouseArea {
+            anchors.fill:parent;cursorShape:Qt.CrossCursor;acceptedButtons:Qt.AllButtons
+            onPressed:function(mouse){
+                if(mouse.button!==Qt.LeftButton){screenshotArea.finish(false);return}
+                screenshotArea.start=screenshotArea.clamp(mouse.x,mouse.y);screenshotArea.end=screenshotArea.start
+                screenshotArea.dragging=true
+            }
+            onPositionChanged:function(mouse){if(screenshotArea.dragging)screenshotArea.end=screenshotArea.clamp(mouse.x,mouse.y)}
+            onReleased:function(mouse){
+                if(!screenshotArea.dragging)return
+                screenshotArea.end=screenshotArea.clamp(mouse.x,mouse.y)
+                screenshotArea.finish(true)
+            }
+        }
+        Rectangle {
+            visible:screenshotArea.dragging
+            x:Math.min(screenshotArea.start.x,screenshotArea.end.x);y:Math.min(screenshotArea.start.y,screenshotArea.end.y)
+            width:Math.abs(screenshotArea.end.x-screenshotArea.start.x);height:Math.abs(screenshotArea.end.y-screenshotArea.start.y)
+            color:"transparent";border.color:"black";border.width:1
+            Rectangle {anchors.fill:parent;anchors.margins:1;color:"transparent";border.color:"white"}
+        }
+    }
+    // Every control panel in one modeless window (Apple menu ▸ Control Panels). The Control Strip
+    // stays for quick changes; its "Open …" items open this window at that panel.
+    // In front it is above every application window; behind, it sits below them, above the icons.
+    // It belongs to the desktop (the Finder): bringing it forward makes the desktop the active
+    // application, so the manager hands it the keyboard (onFocusDesktop) and not an application.
+    // Opened from an application, closing it goes back to that application, as when a Mac OS 9
+    // control panel quit; unless something else was brought forward in between.
+    property var controlPanelsReturnTo:0
+    property bool controlPanelsPending:false
+    function bringControlPanelsForward() {
+        // An alert or the Applications browser still has the input: come forward after it.
+        if(manager.shellModal){controlPanelsPending=true;return}
+        controlPanelsPending=false
+        if(!manager.desktopActive){let a=manager.applications.find(function(x){return x.active});controlPanelsReturnTo=a?a.id:0}
+        manager.activateDesktop()
+        if(controlPanels.visible)controlPanels.forceActiveFocus()
+    }
+    Connections {target:manager;function onContextChanged(){if(desktop.controlPanelsPending && !manager.shellModal)Qt.callLater(desktop.bringControlPanelsForward)}}
+    ControlPanelsWindow {
+        id:controlPanels;z:front?3990:0.75
+        onRaised:desktop.bringControlPanelsForward()
+        onFrontChanged:if(!front && visible)desktop.controlPanelsReturnTo=0
+        onClosed:{
+            let id=desktop.controlPanelsReturnTo
+            desktop.controlPanelsReturnTo=0;desktop.controlPanelsPending=false
+            if(id && manager.desktopActive && manager.applications.some(function(a){return a.id===id && !a.hidden}))manager.activateApplication(id)
+        }
+        x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
+        y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
+        // In the list's order, alphabetical as in Mac OS 9's Control Panels folder.
+        AppearanceDialog {id:appearanceDialog;sessionManager:manager;settings:desktop.appearance
+            onPlacePictureRequested:desktopPictureDialog.edit()}
+        // Tests substitute bluetoothPanel.service; the alert, strip module and Quick Controls follow it.
+        BluetoothPanel {id:bluetoothPanel;service:manager.bluetooth
+            onForgetRequested:function(path,name){forgetBluetoothDialog.path=path;forgetBluetoothDialog.name=name;forgetBluetoothDialog.open()}}
+        DateTimePanel {id:dateTimePanel;settings:desktop.appearance}
+        DesktopPictureDialog {id:desktopPictureDialog;settings:desktop.appearance}
+        EnergySaverPanel {id:energyPanel;settings:manager.energy;sessionManager:manager}
+        KeyboardPanel {id:keyboardPanel;settings:manager.input}
+        MonitorsPanel {id:monitorsPanel;sessionManager:manager}
+        MousePanel {id:mousePanel;settings:manager.input}
+        // Tests substitute wifiAlert.service and quickControls.service; this panel follows both.
+        NetworkPanel {id:networkPanel;service:wifiAlert.service;controls:quickControls.service
+            onForgetRequested:function(path,name){forgetWifiDialog.path=path;forgetWifiDialog.name=name;forgetWifiDialog.open()}}
+        QuickControls {id:quickControls;service:manager.systemControls;bluetooth:bluetoothPanel.service}
+        SoundPanel {id:soundPanel;service:manager.audio;alertSounds:manager.alertSounds;startupSound:manager.startupSound}
+    }
     // A silent alert (alert volume 0, or no sound player) flashes the menu bar, as Mac OS 9 did.
     Timer {id:menuFlash;interval:140}
     Connections {target:manager.alertSounds;function onFlash(){menuFlash.restart()}}
-    // Tests substitute bluetoothPanel.service; the alert, strip module and Quick Controls follow it.
-    BluetoothPanel {id:bluetoothPanel;sessionManager:manager;service:manager.bluetooth
-        onForgetRequested:function(path,name){forgetBluetoothDialog.path=path;forgetBluetoothDialog.name=name;forgetBluetoothDialog.open()}}
     BluetoothAlert {id:bluetoothAlert;sessionManager:manager;service:bluetoothPanel.service}
     // Tests substitute wifiAlert.service; the strip module and the dialogs below follow it.
     WifiAlert {id:wifiAlert;sessionManager:manager;service:manager.wifi}
@@ -1036,7 +1232,32 @@ Rectangle {
         Connections {target:wifiAlert.service;function onMessageChanged(){if(wifiAlert.service.message)wifiMessageDialog.open()}}
         onClosed:if(wifiAlert.service)wifiAlert.service.clearMessage()
     }
-    MonitorsPanel {id:monitorsPanel;sessionManager:manager}
+    // After a display is turned on or off: keep it, or have it undone (also after 15 seconds,
+    // by the session supervisor, so a dark or unreadable screen comes back by itself).
+    ShellDialog {
+        id:displayKeepDialog;objectName:"monitors-keep-dialog";sessionManager:manager;width:420;title:"Monitors"
+        alertSound:true
+        cancelIsDefault:true
+        standardButtons:Dialog.Ok | Dialog.Cancel
+        property int seconds:15
+        contentItem:Text {
+            objectName:"monitors-keep-text"
+            text:"Keep this display setting? The previous one comes back in "+displayKeepDialog.seconds+(displayKeepDialog.seconds===1?" second.":" seconds.")
+            textFormat:Text.PlainText;wrapMode:Text.WordWrap;font.pixelSize:12
+        }
+        Component.onCompleted:{standardButton(Dialog.Ok).text="Keep";standardButton(Dialog.Cancel).text="Revert"}
+        Timer {interval:1000;repeat:true;running:displayKeepDialog.visible;onTriggered:displayKeepDialog.seconds=Math.max(0,displayKeepDialog.seconds-1)}
+        onAboutToShow:seconds=15
+        onAccepted:manager.keepDisplayChange()
+        onRejected:manager.revertDisplayChange()
+    }
+    Connections {
+        target:manager
+        function onDisplayLayoutChanged() {
+            if(manager.displayChangePending && !displayKeepDialog.visible)displayKeepDialog.open()
+            else if(!manager.displayChangePending && displayKeepDialog.visible)displayKeepDialog.close()
+        }
+    }
     ControlStrip {id:desktopControlStrip;z:8000;sessionManager:manager;settings:desktop.appearance;openModule:desktop.stripModule
         extraModules:manager.statusItems ? manager.statusItems.items.map(function(i){return {command:"status:"+i.key,name:i.title,icon:i.icon,statusId:i.id}}) : []
         onModuleRequested:function(module,anchor){desktop.openStripModule(module,anchor)}}
@@ -1094,7 +1315,7 @@ Rectangle {
             TextField {
                 id:nameField;objectName:"desktop-name-field";width:parent.width;selectByMouse:true;font.pixelSize:12
                 color:"black";selectionColor:"#202050";selectedTextColor:"white"
-                background:Rectangle{color:"white";border.color:"#555"}
+                background:FieldBackground{}
                 onAccepted:nameDialog.accept()
                 Keys.onPressed:function(event){if(event.key===Qt.Key_A && (event.modifiers & Qt.MetaModifier)){selectAll();event.accepted=true}}
             }

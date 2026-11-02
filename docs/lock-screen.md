@@ -96,6 +96,81 @@ Defects found while building it, all caught by the session test:
 
 ## Not yet proven on hardware (ask psn_tch)
 
+### Wake-up recovery (2026-10-24 development)
+
+An already-ready, living lock process does not establish that its window or renderer
+survived suspend. The supervisor now treats `after-resume` separately from an ordinary
+lock request: it retires the pre-sleep client and acquires the abandoned session lock
+with a fresh client. It never sends an unlock request during this handover, interprets
+the retired client's exit as authentication, or permits logout while recovery is pending.
+Ctrl+Alt+L on an already-locked session requests the same recovery. Two unexpected
+Platinum failures still fall back to swaylock; deliberate refreshes do not count as failures.
+
+The locker logs output coverage, first rendered frames, removal and authenticated exit.
+These are diagnostics, not proof that the physical panel displayed a frame. No password
+or typed text is logged.
+
+The observed report was a frozen old desktop after wake. In the previous session's
+logs, the lock had become ready before suspend and remained alive after resume; an
+external display disappeared during the first sleep transition. This does **not**
+establish whether Qt, Sway/wlroots, the graphics driver or the panel retained that frame.
+Fresh clients are a recovery measure, not a verified root-cause fix. A frozen outer
+compositor/DRM path cannot be repaired by replacing its lock client.
+
+`lock_session_tests.py` exercises output power cycling, all outputs disappearing and
+returning, rotated fractional scaling, a wrong password and a correct password on an
+owned headless compositor. `qualify-session.py` deliberately stops its own verified
+locker through a pidfd and sends a simulated `resume` request. Neither test suspends
+the host or authenticates against its real PAM services. Actual lid-close/wake behavior
+still needs a voluntary hardware check after a qualified release is selected.
+
+Qt references for diagnostics and surface integration:
+[Qt 6.12 logging](https://github.com/qt/qtbase/blob/6.12/src/corelib/global/qlogging.cpp),
+[Qt 6.12 Wayland windows](https://github.com/qt/qtbase/blob/6.12/src/plugins/platforms/wayland/qwaylandwindow.cpp).
+
+### Docked-wake regression coverage (2026-10-26)
+
+Two additional owned-headless cases exercise the external-monitor report:
+
+- Kill the first locker while locked, remove every output, and start its
+  replacement before any display exists. Return only the external output;
+  verify a visible Log In dialog, rejection of the wrong disposable password,
+  and acceptance of the right one.
+- Observe which output actually shows the focused dialog, then remove that
+  output while the other remains. Verify the surviving display shows the dialog
+  and accepts authentication. An ordinary Sway `focus output` command is not
+  evidence of lock-surface keyboard focus, so this test observes pixels rather
+  than assuming a particular initial output.
+
+Both pass against the unchanged update19 runtime. They close coverage gaps;
+these passing controls do not reproduce or identify the physical frozen-frame
+cause. The two initial focus-fixture failures occurred before output removal
+because they assumed an output-selection command/ephemeral pointer implied lock
+keyboard focus; they are retained as fixture failures, not product defects.
+
+The expanded five-case suite passes with software and OpenGL renderers in both
+normal and ASan/UBSan builds against the unchanged runtime. An earlier sanitized
+OpenGL run timed out in the existing killed-locker replacement authentication
+case; the two new docked cases passed. A traced repeat passed, so the original
+timeout's cause remains unproven. That test now additionally waits for visible
+replacement-dialog pixels before its first synthetic key burst; this strengthens
+readiness without changing production authentication or its timeout. Keep the
+failed run and trace with the passing matrix, rather than calling the timeout a
+proven physical-wake reproduction or resolved production defect.
+
+Read-only journals associate the last recorded sleep cycles with the older
+pre-refresh supervisor: wake callbacks appear as ordinary lock requests. There
+were no recorded suspend cycles in the following boot or the current session at
+investigation time. Update19 is selected and includes fresh-client after-resume
+recovery, but selection alone does not activate it. A user-chosen logout/login
+and later voluntary docked sleep/wake trial are needed to assess that recovery
+on the physical machine. No automated host suspend or real PAM/fingerprint
+attempt is part of this work. If wake still fails, Ctrl+Alt+L requests a fresh
+locker when the outer compositor is responsive; it cannot repair a hung DRM
+backend. Preserve new supervisor/lock/backend logs to distinguish those cases.
+
+### Physical authentication
+
 - Real `pam_unix` (via `unix_chkpwd`) and real fprintd. In particular, check that a typed
   password is accepted promptly while the reader is claimed (`pam_fprintd` should fail to claim
   and step aside).

@@ -20,8 +20,11 @@ class DisplayLayout
 {
   public:
     enum class Mode { Extend, Mirror };
+    // canvas: a host window larger than the displays (Mirror shows the main display inside the
+    // bigger mirrored screens); outputs are then given in canvas coordinates, within it.
     static std::optional<DisplayLayout> create(QVector<DisplayOutput> outputs,
-                                               QString primary, Mode mode, QString *error = nullptr);
+                                               QString primary, Mode mode, QString *error = nullptr,
+                                               QSize canvas = {});
     static DisplayLayout single(QSize size);
     const QVector<DisplayOutput> &outputs() const { return m_outputs; }
     QString primary() const { return m_primary; }

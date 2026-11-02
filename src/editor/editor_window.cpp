@@ -128,9 +128,12 @@ void EditorWindow::closeEvent(QCloseEvent *event)
 {
     if (m_text->document()->isModified())
     {
-        auto choice = QMessageBox::question(
-            this, "Save Changes?", "Save changes before closing?",
-            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+        QMessageBox ask(QMessageBox::Question, "Save Changes?", "Save changes before closing?",
+                        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, this);
+        ask.setObjectName("editor-save-changes");
+        ask.setDefaultButton(QMessageBox::Save);
+        keepReturnOnTheDefault(ask); // Return saves, even with Discard focused.
+        const auto choice = QMessageBox::StandardButton(ask.exec());
         if (choice == QMessageBox::Cancel || (choice == QMessageBox::Save && !save()))
         {
             event->ignore();

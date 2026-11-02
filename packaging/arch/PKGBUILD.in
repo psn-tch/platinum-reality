@@ -13,7 +13,7 @@ url='https://github.com/psn-tch/platinum-reality'
 # package as a whole is distributed under GPL-3.0 terms. The title-bar drawings are MIT
 # (PlatinumWayland); the bundled X11 bridge is MPL-2.0 (xwayland-satellite).
 license=('MIT' 'GPL-3.0-only' 'MPL-2.0')
-depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'qt6-svg' 'glib2' 'wayland' 'libxkbcommon' 'pam'
+depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'qt6-svg' 'glib2' 'wayland' 'libxkbcommon' 'pam' 'libglvnd'
          'systemd-libs' 'dbus' 'python' 'fontconfig' 'xcb-util-cursor'
          # The whole session: its display backend, idle handling and the lock's PAM service;
          # polkit lets logind accept Special ▸ Sleep, Restart and Shut Down from the active session;
@@ -25,7 +25,9 @@ makedepends=('cmake' 'ninja' 'pkgconf' 'gcc' 'vulkan-headers' 'vulkan-icd-loader
              # A test-only game-like client for pointer capture.
              'sdl3')
 # check(): GTK's settings schemas and CSS, GIO's MIME lookup from Python, and the startup-screen drawing.
-checkdepends=('gtk3' 'python-gobject' 'imagemagick')
+# Explicit-default regressions also run with the real KDE platform helper used
+# by launched apps. Missing plugin/fallback is a failure, not a passing test.
+checkdepends=('gtk3' 'gtk4' 'python-gobject' 'imagemagick' 'plasma-integration')
 optdepends=('pipewire-audio: interface and alert sounds, the startup chime'
             'wireplumber: the startup chime waits for your speakers'
             'libpulse: the Sound control panel'
