@@ -1,5 +1,6 @@
 #pragma once
 #include "energy_settings.hpp"
+#include "sticky_notes.hpp"
 #include "input_settings.hpp"
 #include "interface_sounds.hpp"
 #include "battery_status.hpp"
@@ -19,6 +20,9 @@
 #include <QWaylandXdgShell>
 class MenuBroker;
 class DesktopItems;
+class NotePad;
+class Scrapbook;
+class KeyCaps;
 class ApplicationCatalog;
 class AppearanceSettings;
 class QWaylandSurface;
@@ -196,6 +200,14 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(QObject *input READ input CONSTANT)
     // The Energy Saver panel's choices (EnergySettings).
     Q_PROPERTY(QObject *energy READ energy CONSTANT)
+    // Sticky Notes on the desktop (StickyNotes).
+    Q_PROPERTY(QObject *stickies READ stickies CONSTANT)
+    // Note Pad's eight pages (NotePad).
+    Q_PROPERTY(QObject *notePad READ notePad CONSTANT)
+    // The Scrapbook's kept clipboard items (Scrapbook).
+    Q_PROPERTY(QObject *scrapbook READ scrapbook CONSTANT)
+    // Key Caps' labels for the applications' keyboard layout (KeyCaps).
+    Q_PROPERTY(QObject *keyCaps READ keyCaps CONSTANT)
     Q_PROPERTY(QObject *screenshots READ screenshots CONSTANT)
     Q_PROPERTY(QObject *systemControls READ systemControls CONSTANT)
     Q_PROPERTY(QObject *audio READ audio CONSTANT)
@@ -278,6 +290,10 @@ class NativeManager final : public QAbstractListModel
     QObject *appearance() const;
     QObject *input() const;
     QObject *energy() const;
+    QObject *stickies() const;
+    QObject *notePad() const;
+    QObject *scrapbook() const;
+    QObject *keyCaps() const;
     QObject *screenshots() const;
     QObject *systemControls() const { return m_systemControls; }
     QObject *audio() const { return m_audio; }
@@ -343,6 +359,7 @@ class NativeManager final : public QAbstractListModel
     // Window menu: the active application's windows, by title (Finder's when the desktop is active).
     Q_INVOKABLE QVariantList windowMenu() const;
     Q_INVOKABLE QString aboutThisComputer() const;
+    Q_INVOKABLE QVariantMap computerInformation() const;
     // True once, on a new account's first login: the installer leaves a marker for the Help Center.
     Q_INVOKABLE bool takeWelcome();
     // Games and X11 programs can lock or confine the pointer (relative-pointer/pointer-constraints).
@@ -477,11 +494,15 @@ class NativeManager final : public QAbstractListModel
     AppearanceSettings *m_appearance;
     InputSettings *m_input = nullptr;
     EnergySettings *m_energy = nullptr;
+    StickyNotes *m_stickies = nullptr;
+    NotePad *m_notePad = nullptr;
+    Scrapbook *m_scrapbook = nullptr;
+    KeyCaps *m_keyCaps = nullptr;
     // "input apply" and "energy apply" wait while another supervisor request is answered.
     QList<QByteArray> m_supervisorPending;
     void requestSupervisor(const QByteArray &command);
     void sendPendingSupervisorRequest();
-    void applyKeyboardRepeat();
+    void applyKeyboard();
     QObject *m_screenshots;
     QObject *m_systemControls;
     QObject *m_audio;

@@ -127,12 +127,21 @@ F06 (divided zoom box, two-bar collapse box, diagonal size grip).
     control shows a disabled "… Unavailable" line and offers no commands. They use the Quick
     Controls service, so tests run against the fake helper and never touch real hardware. The
     Bluetooth module follows the Bluetooth service live, tested against a fake BlueZ.
-- **Assumptions (PROP).**
+- **Tab dragging, verified in the 9.2.2 reference VM (Sammy, 2026-11-04, private `-snapshot`
+  copy, disk mtime/size unchanged).** Implemented to match:
   - Clicking the end tab collapses the strip to the tab, and clicking again expands it. Clicking the
     collapse box also collapses it.
-  - A plain drag of the tab moves the strip vertically and to either side edge (DOC C211 documents
-    Option-drag). Dropping snaps it to the nearer edge.
-  - Resizing the strip's length by dragging the tab is not implemented.
+  - A **plain drag** of the tab changes the strip's **length** only, never its height. The tab is
+    drawn pressed and an outline of the new length follows the pointer; on release the strip keeps
+    whole modules and the scroll arrows become active. Dragging back to the edge collapses it, and
+    a plain drag of a collapsed tab pulls the strip out to that length. The length survives moves.
+  - An **Option-drag** moves the strip: the outline of the whole strip follows the pointer's height
+    and attaches to the side edge of the half of the screen the pointer is in; the strip moves on
+    release, mirrored on the right edge. It goes from just below the menu bar to the screen bottom
+    and floats above windows. It never floats free of an edge (C211 confirmed).
+  - 9.2.2 draws the outline by inverting the screen (a 2 px band straddling the strip's border);
+    ours is the same band in black and white, since Qt Quick has no XOR drawing.
+- **Assumptions (PROP).**
   - The menus open on click, like the shell menus, not press-and-hold.
   - Older saved free positions migrate to the nearer edge.
 - **Tests.** `DesktopTests::controlStripAttachesToEdgesFoldsAndOpensPanelsFromModuleMenus` covers

@@ -20,66 +20,62 @@ Item {
     readonly property var pointer: settings.pointer
     readonly property var touchpad: settings.touchpad
     function edit() { if (host) host.show(panelId) }
+    // Laid out as 9.2.2's Mouse control panel: titled boxes, sliders with tick marks.
     Column {
         id: body
         width: parent.width
-        spacing: 10
-        Row {
-            spacing: 10
-            StripGlyph { kind: "mouse"; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: "Mouse"; font.pixelSize: 12; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+        spacing: 14
+        PlatinumGroup {
+            title: "Mouse Tracking"
+            width: Math.min(parent.width, 460)
+            PlatinumSlider {
+                objectName: "mouse-speed"
+                width: parent.width; from: -1; to: 1; stepSize: 0.1
+                tickCount: 7; tickLabels: ["Very Slow", "", "Slow", "", "", "", "Fast"]
+                value: panel.pointer.speed
+                onCommitted: function(value) { panel.settings.set("pointer", "speed", Math.round(value * 10) / 10) }
+            }
+            PlatinumCheckBox {
+                objectName: "mouse-natural"
+                text: "Natural scrolling: content follows your fingers"
+                checked: panel.pointer.natural === true
+                onToggled: panel.settings.set("pointer", "natural", checked)
+            }
+            PlatinumCheckBox {
+                objectName: "mouse-left-handed"
+                text: "Left-handed: swap the left and right buttons"
+                checked: panel.pointer.leftHanded === true
+                onToggled: panel.settings.set("pointer", "leftHanded", checked)
+            }
         }
-        Text { text: "Tracking Speed"; font.pixelSize: 12 }
-        PlatinumSlider {
-            objectName: "mouse-speed"
-            width: 320; from: -1; to: 1; stepSize: 0.1
-            lowLabel: "Slow"; highLabel: "Fast"
-            value: panel.pointer.speed
-            onCommitted: function(value) { panel.settings.set("pointer", "speed", Math.round(value * 10) / 10) }
-        }
-        PlatinumCheckBox {
-            objectName: "mouse-natural"
-            text: "Natural scrolling: content follows your fingers"
-            checked: panel.pointer.natural === true
-            onToggled: panel.settings.set("pointer", "natural", checked)
-        }
-        PlatinumCheckBox {
-            objectName: "mouse-left-handed"
-            text: "Left-handed: swap the left and right buttons"
-            checked: panel.pointer.leftHanded === true
-            onToggled: panel.settings.set("pointer", "leftHanded", checked)
-        }
-        Rectangle { width: parent.width; height: 1; color: "#999" }
-        Row {
-            spacing: 10
-            StripGlyph { kind: "trackpad"; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: "Trackpad"; font.pixelSize: 12; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-        }
-        Text { text: "Tracking Speed"; font.pixelSize: 12 }
-        PlatinumSlider {
-            objectName: "trackpad-speed"
-            width: 320; from: -1; to: 1; stepSize: 0.1
-            lowLabel: "Slow"; highLabel: "Fast"
-            value: panel.touchpad.speed
-            onCommitted: function(value) { panel.settings.set("touchpad", "speed", Math.round(value * 10) / 10) }
-        }
-        PlatinumCheckBox {
-            objectName: "trackpad-tap"
-            text: "Tap to click"
-            checked: panel.touchpad.tap === true
-            onToggled: panel.settings.set("touchpad", "tap", checked)
-        }
-        PlatinumCheckBox {
-            objectName: "trackpad-natural"
-            text: "Natural scrolling"
-            checked: panel.touchpad.natural === true
-            onToggled: panel.settings.set("touchpad", "natural", checked)
-        }
-        PlatinumCheckBox {
-            objectName: "trackpad-typing"
-            text: "Ignore the trackpad while typing"
-            checked: panel.touchpad.disableWhileTyping === true
-            onToggled: panel.settings.set("touchpad", "disableWhileTyping", checked)
+        PlatinumGroup {
+            title: "Trackpad Tracking"
+            width: Math.min(parent.width, 460)
+            PlatinumSlider {
+                objectName: "trackpad-speed"
+                width: parent.width; from: -1; to: 1; stepSize: 0.1
+                tickCount: 7; tickLabels: ["Very Slow", "", "Slow", "", "", "", "Fast"]
+                value: panel.touchpad.speed
+                onCommitted: function(value) { panel.settings.set("touchpad", "speed", Math.round(value * 10) / 10) }
+            }
+            PlatinumCheckBox {
+                objectName: "trackpad-tap"
+                text: "Tap to click"
+                checked: panel.touchpad.tap === true
+                onToggled: panel.settings.set("touchpad", "tap", checked)
+            }
+            PlatinumCheckBox {
+                objectName: "trackpad-natural"
+                text: "Natural scrolling"
+                checked: panel.touchpad.natural === true
+                onToggled: panel.settings.set("touchpad", "natural", checked)
+            }
+            PlatinumCheckBox {
+                objectName: "trackpad-typing"
+                text: "Ignore the trackpad while typing"
+                checked: panel.touchpad.disableWhileTyping === true
+                onToggled: panel.settings.set("touchpad", "disableWhileTyping", checked)
+            }
         }
         Row {
             spacing: 10
@@ -89,7 +85,7 @@ Item {
             }
         }
         Text {
-            width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12; color: "#333"; textFormat: Text.PlainText
+            width: Math.min(parent.width, 460); wrapMode: Text.Wrap; font.pixelSize: 12; color: "#333"; textFormat: Text.PlainText
             text: "Changes apply at once to every mouse and trackpad, including ones connected later."
         }
     }

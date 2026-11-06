@@ -46,39 +46,68 @@ Item {
         }
         return list
     }
+    // Laid out as 9.2.2's Date & Time (captured in the reference VM, 2026-11-04): Current Date,
+    // Current Time and Time Zone boxes, and Menu Bar Clock below; the calendar is ours.
     Column {
         id: body
         width: parent.width
         spacing: 12
         Row {
-            width: parent.width; spacing: 18
-            // Today and the time, large.
+            spacing: 14
             Column {
-                width: 230; spacing: 4
-                Text {
-                    objectName: "date-time-today"
-                    width: parent.width; wrapMode: Text.Wrap
-                    text: Qt.formatDate(panel.now, "dddd, MMMM d, yyyy"); textFormat: Text.PlainText
-                    font.pixelSize: 13; font.bold: true
+                width: 250; spacing: 12
+                PlatinumGroup {
+                    title: "Current Date"
+                    // The date as 9.2.2 shows it, in a field, and spelled out under it.
+                    Rectangle {
+                        width: 130; height: 24; color: "white"; border.color: "#222"
+                        Rectangle { x: 1; y: 1; width: parent.width - 2; height: 1; color: "#888" }
+                        Text {
+                            objectName: "date-time-short-date"
+                            x: 6; anchors.verticalCenter: parent.verticalCenter
+                            text: Qt.formatDate(panel.now, "M/d/yyyy"); textFormat: Text.PlainText; font.pixelSize: 12
+                        }
+                    }
+                    Text {
+                        objectName: "date-time-today"
+                        width: parent.width; wrapMode: Text.Wrap
+                        text: Qt.formatDate(panel.now, "dddd, MMMM d, yyyy"); textFormat: Text.PlainText
+                        font.pixelSize: 12
+                    }
                 }
-                Text {
-                    objectName: "date-time-now"
-                    text: Qt.formatTime(panel.now, panel.clock.hours24 ? "HH:mm:ss" : "h:mm:ss AP"); textFormat: Text.PlainText
-                    font.pixelSize: 26
+                PlatinumGroup {
+                    title: "Current Time"
+                    Rectangle {
+                        width: 130; height: 24; color: "white"; border.color: "#222"
+                        Rectangle { x: 1; y: 1; width: parent.width - 2; height: 1; color: "#888" }
+                        Text {
+                            objectName: "date-time-now"
+                            x: 6; anchors.verticalCenter: parent.verticalCenter
+                            text: Qt.formatTime(panel.now, panel.clock.hours24 ? "HH:mm:ss" : "h:mm:ss AP"); textFormat: Text.PlainText
+                            font.pixelSize: 12
+                        }
+                    }
                 }
-                Text {
-                    objectName: "date-time-zone"
-                    width: parent.width; wrapMode: Text.Wrap; color: "#333"; font.pixelSize: 12; textFormat: Text.PlainText
-                    text: "Time zone: " + panel.zone.name + (panel.zone.id ? " (" + panel.zone.id + ")" : "")
-                          + "\n" + panel.zone.offset
+                PlatinumGroup {
+                    title: "Time Zone"
+                    Text {
+                        objectName: "date-time-zone"
+                        width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12; textFormat: Text.PlainText
+                        text: "Time zone: " + panel.zone.name + (panel.zone.id ? " (" + panel.zone.id + ")" : "")
+                              + "\n" + panel.zone.offset
+                    }
+                    Text {
+                        width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 11; color: "#444"; textFormat: Text.PlainText
+                        text: "The computer sets its clock and time zone itself, from the network."
+                    }
                 }
             }
             // The month, Sunday first; today circled.
             Rectangle {
                 id: calendar
                 objectName: "date-time-calendar"
-                width: 7 * 34 + 12; height: 220
-                color: "white"; border.color: "#555"
+                width: 7 * 30 + 12; height: 206
+                color: "white"; border.color: "#222"
                 Row {
                     x: 6; y: 6; width: parent.width - 12; height: 24
                     PlatinumButton {
@@ -101,7 +130,7 @@ Item {
                         model: ["S", "M", "T", "W", "T", "F", "S"]
                         Text {
                             required property string modelData
-                            width: 34; height: 20; horizontalAlignment: Text.AlignHCenter
+                            width: 30; height: 18; horizontalAlignment: Text.AlignHCenter
                             text: modelData; font.pixelSize: 11; font.bold: true; color: "#444"
                         }
                     }
@@ -109,9 +138,9 @@ Item {
                         model: panel.days
                         Item {
                             required property var modelData
-                            width: 34; height: 26
+                            width: 30; height: 24
                             Rectangle {
-                                anchors.centerIn: parent; width: 24; height: 24; radius: 12
+                                anchors.centerIn: parent; width: 22; height: 22; radius: 11
                                 visible: modelData.today; color: panel.settings.accentColor
                             }
                             Text {
@@ -124,46 +153,48 @@ Item {
                 }
             }
         }
-        Rectangle { width: parent.width; height: 1; color: "#999" }
-        Text { text: "Menu Bar Clock"; font.pixelSize: 12; font.bold: true }
-        // A sample of the menu bar as it will look.
-        Rectangle {
-            width: Math.max(220, sample.implicitWidth + 24); height: 24
-            color: "#ddd"; border.color: "#222"
+        PlatinumGroup {
+            title: "Menu Bar Clock"
+            width: Math.min(parent.width, 250 + 14 + calendar.width)
+            // A sample of the menu bar as it will look.
+            Rectangle {
+                width: Math.max(220, sample.implicitWidth + 24); height: 24
+                color: "#ddd"; border.color: "#222"
+                Text {
+                    id: sample
+                    objectName: "date-time-sample"
+                    anchors.centerIn: parent
+                    text: panel.clock.visible ? desktopClock(panel.now) : "No clock"; textFormat: Text.StyledText
+                    font.pixelSize: 12; color: panel.clock.visible ? "black" : "#888"
+                    function desktopClock(time) {
+                        return typeof desktop !== "undefined" && desktop ? desktop.clockText(time, panel.clock, false)
+                                                                         : Qt.formatTime(time, "h:mm AP")
+                    }
+                }
+            }
+            Grid {
+                columns: 2; columnSpacing: 24; rowSpacing: 6
+                Repeater {
+                    model: [{key: "visible", label: "Show the clock in the menu bar"},
+                            {key: "hours24", label: "Use a 24-hour clock"},
+                            {key: "seconds", label: "Show the seconds"},
+                            {key: "weekday", label: "Show the day of the week"},
+                            {key: "date", label: "Show the date"},
+                            {key: "flash", label: "Flash the time separators"}]
+                    PlatinumCheckBox {
+                        required property var modelData
+                        objectName: "clock-" + modelData.key
+                        text: modelData.label
+                        enabled: modelData.key === "visible" || panel.clock.visible
+                        checked: panel.clock[modelData.key] === true
+                        onToggled: panel.settings.setClockOption(modelData.key, checked)
+                    }
+                }
+            }
             Text {
-                id: sample
-                objectName: "date-time-sample"
-                anchors.centerIn: parent
-                text: panel.clock.visible ? desktopClock(panel.now) : "No clock"; textFormat: Text.StyledText
-                font.pixelSize: 12; color: panel.clock.visible ? "black" : "#888"
-                function desktopClock(time) {
-                    return typeof desktop !== "undefined" && desktop ? desktop.clockText(time, panel.clock, false)
-                                                                     : Qt.formatTime(time, "h:mm AP")
-                }
+                width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12; color: "#333"; textFormat: Text.PlainText
+                text: "Click the clock in the menu bar to see the date."
             }
-        }
-        Grid {
-            columns: 2; columnSpacing: 24; rowSpacing: 6
-            Repeater {
-                model: [{key: "visible", label: "Show the clock in the menu bar"},
-                        {key: "hours24", label: "Use a 24-hour clock"},
-                        {key: "seconds", label: "Show the seconds"},
-                        {key: "weekday", label: "Show the day of the week"},
-                        {key: "date", label: "Show the date"},
-                        {key: "flash", label: "Flash the time separators"}]
-                PlatinumCheckBox {
-                    required property var modelData
-                    objectName: "clock-" + modelData.key
-                    text: modelData.label
-                    enabled: modelData.key === "visible" || panel.clock.visible
-                    checked: panel.clock[modelData.key] === true
-                    onToggled: panel.settings.setClockOption(modelData.key, checked)
-                }
-            }
-        }
-        Text {
-            width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12; color: "#333"; textFormat: Text.PlainText
-            text: "Click the clock in the menu bar to see the date."
         }
     }
 }

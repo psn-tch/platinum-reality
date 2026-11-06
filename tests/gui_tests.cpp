@@ -36,6 +36,7 @@
 #include <QTextEdit>
 #include <QTimer>
 #include <QtTest>
+#include "finder/file_labels.hpp"
 #include "qt_theme_evidence.hpp"
 
 class GuiTests : public QObject
@@ -98,6 +99,91 @@ class GuiTests : public QObject
         QTRY_VERIFY(QFileInfo::exists(root.path() + "/dst/C.txt") && !QFileInfo::exists(root.path() + "/src/C.txt"));
         // The move is visible before its worker reports back; closing a busy window asks the user to wait.
         QTRY_VERIFY(!target->directoryState().value("busy").toBool());
+    }
+    void aDragHeldOverAFolderSpringsItOpen()
+    {
+        // Spring-loaded folders (Mac OS 9): holding a drag over a folder for a second opens it in
+        // the window, so the drop can go further in; moving away first does not.
+        QTemporaryDir root, profile;
+        QVERIFY(QDir(root.path()).mkpath("Projects/Inner"));
+        {
+            QFile f(root.path() + "/Report.txt");
+            QVERIFY(f.open(QIODevice::WriteOnly) && f.write("report") > 0);
+        }
+        QPointer<FinderWindow> window = new FinderWindow(root.path(), profile.path(), root.path());
+        const auto cleanup = qScopeGuard([&] { delete window; });
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *icons = window->findChild<FolderIcons *>();
+        auto *model = qobject_cast<QFileSystemModel *>(icons->model());
+        QTRY_VERIFY(model->index(root.path() + "/Projects").isValid());
+        QTRY_VERIFY(icons->visualRect(model->index(root.path() + "/Projects")).isValid());
+        QTRY_VERIFY(icons->visualRect(model->index(root.path() + "/Report.txt")).isValid());
+        // Where each item is now: the view sorts again once the folder has loaded.
+        const auto folderAt = [&] { return icons->visualRect(model->index(root.path() + "/Projects")).center(); };
+        const auto fileAt = [&] { return icons->visualRect(model->index(root.path() + "/Report.txt")).center(); };
+        QMimeData mime;
+        mime.setUrls({QUrl::fromLocalFile(profile.path() + "/elsewhere.txt")});
+        const auto move = [&](QPoint at) {
+            QDragMoveEvent event(at, Qt::CopyAction | Qt::MoveAction, &mime, Qt::LeftButton, {});
+            QCoreApplication::sendEvent(icons->viewport(), &event);
+        };
+        QDragEnterEvent enter(fileAt(), Qt::CopyAction | Qt::MoveAction, &mime, Qt::LeftButton, {});
+        QCoreApplication::sendEvent(icons->viewport(), &enter);
+        // Over the folder briefly, then off it: nothing opens.
+        move(folderAt());
+        QTest::qWait(SpringLoading::delay / 2);
+        QCOMPARE(model->filePath(icons->indexAt(fileAt())), root.path() + "/Report.txt");
+        move(fileAt());
+        QTest::qWait(SpringLoading::delay);
+        QCOMPARE(window->directory(), root.path());
+        // Held over it: it opens in this window.
+        move(folderAt());
+        QTRY_COMPARE_WITH_TIMEOUT(window->directory(), root.path() + "/Projects", 3000);
+        QDragLeaveEvent leave;
+        QCoreApplication::sendEvent(icons->viewport(), &leave);
+    }
+    void labelsColourItemsAndShowInGetInfo()
+    {
+        // File ▸ Label (Mac OS 9): None and seven colours, kept with the file.
+        QTemporaryDir root, profile;
+        {
+            QFile f(root.path() + "/Report.txt");
+            QVERIFY(f.open(QIODevice::WriteOnly) && f.write("report") > 0);
+        }
+        QPointer<FinderWindow> window = new FinderWindow(root.path(), profile.path(), root.path());
+        const auto cleanup = qScopeGuard([&] { delete window; });
+        window->show();
+        auto *icons = window->findChild<FolderIcons *>();
+        auto *model = qobject_cast<QFileSystemModel *>(icons->model());
+        const auto path = root.path() + "/Report.txt";
+        QTRY_VERIFY(model->index(path).isValid());
+        icons->selectionModel()->select(model->index(path), QItemSelectionModel::ClearAndSelect);
+        auto *red = window->findChild<QAction *>("label2");
+        QVERIFY(red);
+        QCOMPARE(red->text(), QString("Red"));
+        red->trigger();
+        QCOMPARE(FileLabels::label(path, profile.path()), 2);
+        QTRY_COMPARE(model->data(model->index(path), Qt::ForegroundRole).value<QColor>(), QColor("#dd0907"));
+        auto *menu = window->findChild<QMenu *>("labelMenu");
+        QVERIFY(menu);
+        QMetaObject::invokeMethod(menu, "aboutToShow");
+        QVERIFY(red->isChecked());
+        QVERIFY(!window->findChild<QAction *>("label0")->isChecked());
+        // Get Info shows it.
+        window->findChild<QAction *>("getInfo")->trigger();
+        QWidget *info = nullptr;
+        QTRY_VERIFY((info = [&]() -> QWidget * {
+            for (auto *w : QApplication::topLevelWidgets())
+                if (w->objectName() == "infoWindow" && w->isVisible()) return w;
+            return nullptr; }()));
+        QCOMPARE(info->findChild<QLabel *>("infoLabel")->text(), QString("Red"));
+        info->close();
+        // None removes it.
+        window->findChild<QAction *>("label0")->trigger();
+        QCOMPARE(FileLabels::label(path, profile.path()), 0);
+        QTRY_VERIFY(!model->data(model->index(path), Qt::ForegroundRole).value<QColor>().isValid() ||
+                    model->data(model->index(path), Qt::ForegroundRole).value<QColor>() != QColor("#dd0907"));
     }
     void rightClickMenusOfferTheFileCommandsLikeDolphin()
     {

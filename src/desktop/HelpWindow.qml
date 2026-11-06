@@ -27,13 +27,53 @@ FocusScope {
         {id: "menus", title: "The menu bar", body:
             "<h3>The menu bar and Control Strip</h3>" +
             "<p>The menu at the far left of the menu bar is the <b>Apple menu</b>. It has About This " +
-            "Computer, Applications…, the Control Panels, Recent Applications and Terminal.</p>" +
+            "Computer, Applications…, Calculator, the Control Panels, Key Caps, Note Pad, Scrapbook, Recent Applications and Terminal.</p>" +
             "<p>The menus next to it belong to the application in front. On the desktop they are File, " +
             "Edit, View, Window, Special and Help.</p>" +
             "<p>The <b>application menu</b> at the far right shows which application is in front. Choose " +
-            "another one there to switch to it, or hide the others.</p>" +
+            "another one there to switch to it, or hide the others. Drag down past the open menu to " +
+            "tear it off as the <b>Application Switcher</b>, a palette of running applications: " +
+            "click one to switch to it.</p>" +
             "<p>The <b>Control Strip</b> in the bottom-left corner has volume, brightness, monitors, " +
-            "battery, Wi-Fi and Bluetooth. Click its tab to fold it away, or drag the tab to move it.</p>"},
+            "battery, Wi-Fi and Bluetooth. Click its tab to fold it away. Drag the tab sideways to make the " +
+            "strip shorter or longer. Drag it up or down to move the strip, and across the screen to put it " +
+            "on the other side; holding down Option (Alt) while you drag always moves it.</p>"},
+        {id: "computer", title: "About This Computer", body:
+            "<h3>About This Computer</h3>" +
+            "<p><b>Apple menu ▸ About This Computer</b> shows your system version, built-in RAM, " +
+            "swap and available memory, with live resident-memory bars for running applications.</p>" +
+            "<p>Bars compare the listed applications. Shared pages can appear in more than one app; " +
+            "helper processes are not included. Measurements that cannot be read say Unavailable. " +
+            "Linux does not report a classic largest unused application block.</p>" +
+            "<p>The values update while the window is open. Close it with its close box, " +
+            "Command-W or Escape.</p>"},
+        {id: "note-pad", title: "Note Pad", body:
+            "<h3>Note Pad</h3>" +
+            "<p>Choose <b>Apple menu ▸ Note Pad</b> for eight pages of notes. Type on a page; it is saved " +
+            "as you go and is there at your next login.</p>" +
+            "<p>To turn the page, click the turned-up corner at the bottom left. Click the corner below " +
+            "the fold to go back a page. The page number is beside it. Command-W puts Note Pad away.</p>"},
+        {id: "key-caps", title: "Key Caps", body:
+            "<h3>Key Caps</h3>" +
+            "<p><b>Apple menu ▸ Key Caps</b> shows a keyboard with what each key types. Hold down Shift " +
+            "or Option to see what the keys type with them. Press keys, or click them, and the text " +
+            "appears in the strip at the top: a handy way to find a character.</p>"},
+        {id: "scrapbook", title: "Scrapbook", body:
+            "<h3>Scrapbook</h3>" +
+            "<p><b>Apple menu ▸ Scrapbook</b> keeps text and pictures you want to use again. Copy " +
+            "something, open the Scrapbook and choose <b>Edit ▸ Paste</b> (Command-V): it goes in front " +
+            "of the item shown. <b>Edit ▸ Copy</b> (Command-C) puts the item shown back on the clipboard " +
+            "to paste into any application; <b>Clear</b> (Delete) removes it. The scroll bar, or the left " +
+            "and right arrow keys, move through the items. The Scrapbook is kept between logins.</p>"},
+        {id: "calculator", title: "Calculator", body:
+            "<h3>Calculator</h3>" +
+            "<p>Choose <b>Apple menu ▸ Calculator</b>. Click the keypad or type numbers and " +
+            "+, −, * or /. Return or = gives the result; calculations happen in entry order.</p>" +
+            "<p>Type <b>%</b> for a percentage: 200 + 10 % = gives 220. " +
+            "Backspace corrects the number you are entering; <b>C</b> or Escape clears everything.</p>" +
+            "<p><b>Edit ▸ Copy</b> (Command-C) copies the displayed number; <b>Edit ▸ Paste</b> types a copied " +
+            "number in. Command-W or the close " +
+            "box puts the calculator away. It keeps your calculation until you log out.</p>"},
         {id: "apps", title: "Opening applications", body:
             "<h3>Opening applications</h3><ul>" +
             "<li><b>Apple menu ▸ Applications…</b> (Alt-D) lists every installed application. Type to " +
@@ -55,9 +95,12 @@ FocusScope {
             "<h3>Files and the Finder</h3>" +
             "<p><b>Hard Disk</b> on the desktop is your home folder. Folders open in their own windows " +
             "and remember where you left them.</p><ul>" +
-            "<li>Drag to move. Drag with Option (Alt) held down to copy.</li>" +
+            "<li>Drag to move. Drag with Option (Alt) held down to copy. Hold a drag over a folder for " +
+            "a second and it springs open, so you can drop further in.</li>" +
             "<li>Cut, Copy and Paste work on files too.</li>" +
             "<li><b>Get Info</b> (Command-I) shows what an item is and where it lives.</li>" +
+            "<li><b>File ▸ Label</b> colours the selected items: one of seven colours, or None. The " +
+            "label stays with the file, and Get Info shows it.</li>" +
             "<li>Command-Delete moves the selection to the Trash. <b>Special ▸ Empty Trash…</b> " +
             "deletes it for good, and <b>Put Away</b> brings an item back.</li>" +
             "<li>Select a disk and press Command-E to eject it.</li></ul>"},
@@ -72,13 +115,29 @@ FocusScope {
             "seconds, the date). Click the clock in the menu bar to see the date.</li>" +
             "<li><b>Desktop Picture</b>: choose a picture, then Set Desktop.</li>" +
             "<li><b>Energy Saver</b>: when the display turns off and the computer sleeps.</li>" +
-            "<li><b>Keyboard</b>: how fast keys repeat when held down.</li>" +
+            "<li><b>General Controls</b>: whether the desktop's icons show behind other applications, " +
+            "how many times a chosen menu item blinks, and how fast the insertion point blinks.</li>" +
+            "<li><b>Keyboard</b>: your keyboard layouts (check more than one for a keyboard menu in the menu bar), " +
+            "and how fast keys repeat when held down.</li>" +
             "<li><b>Monitors</b>: turn screens on or off, and change resolution, rotation, size and " +
             "arrangement. A change goes back by itself after 15 seconds unless you click Keep, so a " +
             "blank screen fixes itself.</li>" +
             "<li><b>Mouse &amp; Trackpad</b>: tracking speed, scrolling direction, tap to click.</li>" +
             "<li><b>Network</b>: join and forget Wi-Fi networks, and this computer's addresses.</li>" +
             "<li><b>Sound</b>: speakers and microphones, alert sounds and the startup sound.</li></ul>"},
+        {id: "stickies", title: "Stickies", body:
+            "<h3>Stickies</h3>" +
+            "<p>Choose <b>Apple menu ▸ Stickies ▸ New Note</b> for a note on your desktop, ready " +
+            "for typing. Notes are saved as you type and come back where you left them each time you " +
+            "log in.</p><ul>" +
+            "<li>Drag a note by its top strip to move it. Drag its bottom-right corner to resize it.</li>" +
+            "<li>Double-click the strip, or click the box at its right, to roll the note up to its strip; " +
+            "its first line still shows. Do it again to roll it down.</li>" +
+            "<li>Right-click a note to change its color or text size, or choose <b>Keep in Front</b> to " +
+            "keep it above your applications.</li>" +
+            "<li>The close box deletes a note. If it has text, you are asked first.</li>" +
+            "<li>Command-N makes another note and Command-W closes the one you are in. " +
+            "<b>Hide All Notes</b> puts them away without losing them.</li></ul>"},
         {id: "keys", title: "Keyboard shortcuts", body:
             "<h3>Keyboard shortcuts</h3>" +
             "<p>The Command key (⌘) is the Windows or Super key. Command shortcuts work in every " +
@@ -89,12 +148,15 @@ FocusScope {
             "<li>Command-Q: Quit. Command-H: Hide</li>" +
             "<li>Command-. (period): Cancel</li>" +
             "<li>Command-Tab: next application</li>" +
+            "<li>Command-Option-Space: next keyboard layout, when more than one is checked</li>" +
             "<li>Command-Shift-S: take a screenshot</li>" +
             "<li>Command-Shift-3: a picture of the whole screen on the clipboard</li>" +
-            "<li>Command-Shift-4: drag across an area for a picture of it on the clipboard</li>" +
+            "<li>Command-Shift-4 or Command-Shift-P: drag across an area for a picture of it on the clipboard</li>" +
             "<li>Command-?: this Help Center</li>" +
             "<li>Alt-D: Applications…</li>" +
             "<li>Ctrl-Alt-L: lock the screen</li></ul>" +
+            "<p>An unassigned Command chord leaves a desktop text field unchanged. Command-N " +
+            "creates another sticky note; Command-W closes a note or Control Panels.</p>" +
             "<p>In a terminal, Command-C and Command-V copy and paste, so Ctrl-C still stops a " +
             "program.</p>"},
         {id: "software", title: "Software and updates", body:

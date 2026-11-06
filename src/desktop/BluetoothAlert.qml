@@ -105,7 +105,7 @@ ShellDialog {
                     // Typing goes straight to the field when the alert opens.
                     focus: alert.typed
                     width: 180; height: 28; font.pixelSize: 14; selectByMouse: true
-                    color: "black"; selectionColor: "#202050"; selectedTextColor: "white"
+                    color: "black"; selectionColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightColor : "#ccccff"; selectedTextColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightTextColor : "black"
                     background: FieldBackground {}
                     maximumLength: alert.kind === "passkey" ? 6 : 16
                     validator: RegularExpressionValidator {

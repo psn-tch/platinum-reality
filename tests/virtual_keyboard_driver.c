@@ -1,8 +1,9 @@
 // Types on the HOST compositor's seat (an owned headless Sway) through virtual-keyboard, so a
 // lock screen receives real wl_keyboard input. Never run against a user's live session.
 // One command per line:
-//   type TEXT     lowercase letters, digits, space and . , - typed in order  -> ok
+//   type TEXT     lowercase letters, digits, space and . , - / typed in order  -> ok
 //   key NAME      return | escape | backspace | ctrl-alt-l                    -> ok
+//   chord MODS+K  modifiers (super, shift, ctrl, alt) and one key from "type", e.g. super+shift+3
 //   quit
 #define _GNU_SOURCE
 #include "virtual-keyboard-client.h"
@@ -43,7 +44,7 @@ static uint32_t now(void)
 
 static int keycode(char c)
 {
-    static const char *const rows[] = {"1234567890-", "qwertyuiop", "asdfghjkl", "zxcvbnm,."};
+    static const char *const rows[] = {"1234567890-", "qwertyuiop", "asdfghjkl", "zxcvbnm,./"};
     static const int starts[] = {KEY_1, KEY_Q, KEY_A, KEY_Z};
     if (c == ' ')
         return KEY_SPACE;
@@ -51,6 +52,18 @@ static int keycode(char c)
         if (strchr(rows[row], c))
             return starts[row] + (int)(strchr(rows[row], c) - rows[row]);
     return -1;
+}
+
+static int namedKey(const char *name)
+{
+    static const struct { const char *name; int code; } keys[] = {
+        {"return", KEY_ENTER}, {"escape", KEY_ESC}, {"backspace", KEY_BACKSPACE},
+        {"tab", KEY_TAB}, {"f2", KEY_F2}, {"volume-up", KEY_VOLUMEUP},
+        {"volume-down", KEY_VOLUMEDOWN}, {"volume-mute", KEY_MUTE},
+        {"brightness-up", KEY_BRIGHTNESSUP}, {"brightness-down", KEY_BRIGHTNESSDOWN}};
+    for (size_t i = 0; i < sizeof keys / sizeof keys[0]; ++i)
+        if (!strcmp(name, keys[i].name)) return keys[i].code;
+    return strlen(name) == 1 ? keycode(name[0]) : -1;
 }
 
 static void press(struct zwp_virtual_keyboard_v1 *keyboard, int code)
@@ -130,8 +143,44 @@ int main(void)
                 zwp_virtual_keyboard_v1_modifiers(keyboard, 0, 0, 0, 0);
             }
         }
+        else if (!strncmp(line, "chord ", 6))
+        {
+            // The modifier keys go down (with their state) before the key, as a hand presses them.
+            static const struct { const char *name; const char *mod; int key; } table[] = {
+                {"super", XKB_MOD_NAME_LOGO, KEY_LEFTMETA}, {"shift", XKB_MOD_NAME_SHIFT, KEY_LEFTSHIFT},
+                {"ctrl", XKB_MOD_NAME_CTRL, KEY_LEFTCTRL}, {"alt", XKB_MOD_NAME_ALT, KEY_LEFTALT}};
+            uint32_t mask = 0;
+            int held[4], count = 0, code = -1;
+            char *rest = line + 6;
+            for (char *part = strtok(rest, "+"); part && ok; part = strtok(NULL, "+"))
+            {
+                int found = 0;
+                for (int i = 0; i < 4 && !found; ++i)
+                    if (!strcmp(part, table[i].name))
+                    {
+                        const xkb_mod_index_t index = xkb_keymap_mod_get_index(keymap, table[i].mod);
+                        if (index == XKB_MOD_INVALID || index >= 32 || count >= 4) { ok = 0; break; }
+                        zwp_virtual_keyboard_v1_key(keyboard, now(), (uint32_t)table[i].key, WL_KEYBOARD_KEY_STATE_PRESSED);
+                        mask |= 1u << index;
+                        zwp_virtual_keyboard_v1_modifiers(keyboard, mask, 0, 0, 0);
+                        held[count++] = table[i].key;
+                        found = 1;
+                    }
+                if (!found && ok)
+                    code = namedKey(part);
+            }
+            if (ok && code >= 0)
+                press(keyboard, code);
+            else
+                ok = 0;
+            while (count > 0)
+                zwp_virtual_keyboard_v1_key(keyboard, now(), (uint32_t)held[--count], WL_KEYBOARD_KEY_STATE_RELEASED);
+            zwp_virtual_keyboard_v1_modifiers(keyboard, 0, 0, 0, 0);
+        }
         else if (!strcmp(line, "quit"))
             break;
+        else if (!strncmp(line, "key ", 4) && namedKey(line + 4) >= 0)
+            press(keyboard, namedKey(line + 4));
         else
             ok = 0;
         if (wl_display_roundtrip(display) < 0)

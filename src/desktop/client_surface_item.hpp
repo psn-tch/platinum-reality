@@ -24,6 +24,10 @@ class ClientSurfaceItem : public QWaylandQuickShellSurfaceItem
     Q_INVOKABLE bool sendCommand(uint evdevKey);
     // A menu command that is a plain key (Clear is Delete), without modifiers.
     Q_INVOKABLE bool sendKey(uint evdevKey);
+    // Popups that still exist, as the xdg shell announces them. Qt 6.12 frees a closing menu's
+    // QWaylandXdgPopup while its xdg surface still returns it from popup(); only popups on this
+    // list are touched (a native test crashed in parentXdgSurface(), Sammy 2026-11-04).
+    static void trackPopup(QWaylandXdgPopup *popup);
 
   protected:
     bool eventFilter(QObject *, QEvent *) override;

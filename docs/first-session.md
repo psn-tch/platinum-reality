@@ -22,6 +22,10 @@ in every application:
 In a terminal, Command-C and Command-V copy and paste (sent as Ctrl-Shift-C and Ctrl-Shift-V), so
 Ctrl-C still stops a program. Ctrl shortcuts keep working everywhere.
 
+In the desktop's text fields, an unassigned Command chord leaves the text alone.
+Command-N still creates another sticky note and Command-W closes the current
+note or Control Panels window.
+
 ## Opening applications
 
 - **Apple menu ▸ Applications…** lists every installed application. Type to search.
@@ -49,12 +53,43 @@ left them. You can drag to move, drag with Option (Alt) to copy, Cut/Copy/Paste 
 Info** and **Find**, and choose **View ▸ Show Hidden Files**. Items moved to the Trash go to the
 same Trash as your other desktops, and **Put Away** brings them back.
 
+## About this computer
+
+**Apple menu ▸ About This Computer** opens a window showing your system version,
+RAM, swap and running applications' resident memory. Its values update while
+the window is open. Shared pages can count toward more than one application;
+unavailable measurements are shown as such. Close it with its close box,
+Command-W or Escape.
+
+## Calculator
+
+Choose **Apple menu ▸ Calculator**. Click the keypad or type numbers and `+`, `-`, `*`, `/`.
+Return or `=` gives the result. Calculations happen in entry order: `2 + 3 × 4` gives 20.
+Type **%** for a percentage (for example, `200 + 10 % =` gives 220).
+Press Backspace to correct the number you are entering, or **C** or Escape to clear everything.
+Choose **Edit ▸ Copy** (Command-C) to copy the displayed number, then paste it into an
+application. Command-W or the close box puts the calculator away; reopening it keeps your
+calculation until you log out.
+
+## Note Pad
+
+Choose **Apple menu ▸ Note Pad** for eight pages of notes, saved as you type. Click the
+turned-up corner at the bottom left for the next page, or the corner below the fold to go back.
+
+## Scrapbook
+
+Choose **Apple menu ▸ Scrapbook** to keep text and pictures. Copy something, then choose
+**Edit ▸ Paste** with the Scrapbook in front; **Edit ▸ Copy** puts an item back on the clipboard,
+**Clear** removes it.
+
 ## Settings
 
 **Apple menu ▸ Control Panels**: Appearance (highlight colour, sounds, WindowShade), Desktop
-Picture, Monitors, Sound, Bluetooth and Quick Controls. The **Control Strip** at the bottom left
-has volume, brightness, monitors, battery, Wi-Fi and Bluetooth. Click its tab to fold it away, or
-drag the tab to move it.
+Picture, General Controls (desktop in the background, menu and insertion point blinking), Monitors,
+Sound, Bluetooth and Quick Controls. The panels are laid out as in Mac OS 9.2.2. The **Control Strip** at the bottom left
+has volume, brightness, monitors, battery, Wi-Fi and Bluetooth. Click its tab to fold it away.
+Drag the tab to make the strip shorter or longer; Option-drag (Alt) the tab to move the strip to
+any height on either side of the screen, as in Mac OS 9.2.2.
 
 - Wi-Fi in the Control Strip needs `iwd`.
 - Bluetooth needs `bluez` and its service running.

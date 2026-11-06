@@ -13,6 +13,16 @@ def words(text):
     return [{'text':w,'x':i*40,'y':100,'w':30,'h':16,'line':('1','1','1','1')} for i,w in enumerate(text.split())]
 
 
+def window_words():
+    result=[]
+    for text,x,y in [('Control Panels',400,50),('Monitors',400,80),('Keyboard',120,180),
+                     ('Monitors',120,214),('Energy Saver',120,248),('Network',120,282)]:
+        for w in words(text):
+            w.update(x=w['x']+x,y=y,line=(text,y))
+            result.append(w)
+    return result
+
+
 class MonitorsUiChecks(unittest.TestCase):
     def record(self):
         return {'topology':{'primary':'Virtual-1','outputs':[
@@ -42,7 +52,7 @@ class MonitorsUiChecks(unittest.TestCase):
     def test_panel_opening_requires_actual_managed_control_text(self):
         for controls in ('Mirror displays Show the desktop on','Mirror displays unrelated'):
             guest=Mock();steps=[((1280,800),[],{'x':80,'y':100}),((1280,800),[],{'x':220,'y':160}),
-                               ((1280,800),words(controls),{'x':300,'y':400})]
+                               ((1280,800),window_words()+words(controls),{'x':300,'y':400})]
             with patch.object(ui,'capture',return_value=((1280,800),words('File Edit View'))), \
                     patch.object(ui,'wait',side_effect=steps),patch.object(ui,'tap') as tap:
                 if 'unrelated' in controls:
@@ -52,6 +62,13 @@ class MonitorsUiChecks(unittest.TestCase):
                     self.assertIn('persistence NOT TESTED',result['scope'])
                     self.assertEqual(result['visual_review'],'REQUIRED')
                 self.assertEqual(tap.call_count,3)
+
+    def test_new_control_panels_container_is_required_and_legacy_or_ambiguous_frames_refuse(self):
+        self.assertEqual(ui.control_window(window_words())['mode'],'immediate-apply-with-Keep')
+        for frame in (words('Monitors Mirror displays'), window_words()+words('Cancel'),
+                      window_words()+words('Control Panels'),
+                      [w for w in window_words() if w['text']!='Keyboard']):
+            with self.subTest(frame=frame),self.assertRaises(RuntimeError):ui.control_window(frame)
 
     def activation_record(self,pending=None):
         value=self.record();topology=value['topology']
@@ -80,7 +97,7 @@ class MonitorsUiChecks(unittest.TestCase):
         for w in label:w['y']=130
         question=words('Keep this display setting');button=words('Keep')
         button[0]['y']=160
-        frames=[((1280,800),heading+label),((1280,800),question+button),((1280,800),[])]
+        frames=[((1280,800),window_words()+heading+label),((1280,800),question+button),((1280,800),[])]
         recollect=Mock(side_effect=[pending,kept]);guest=Mock()
         with patch.object(ui,'capture',side_effect=frames),patch.object(ui,'tap') as tap:
             final,record=ui.enable_second(guest,initial,recollect)

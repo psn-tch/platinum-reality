@@ -59,6 +59,8 @@ class Clipboard final : public QObject
     QUrl picture() const { return m_picture; }
     // The shell copies text (Edit > Copy of desktop icons): offered to applications.
     Q_INVOKABLE void copyText(const QString &text);
+    // The shell copies a picture (Scrapbook): a local PNG or a data: URL; false when unreadable.
+    Q_INVOKABLE bool copyImage(const QUrl &picture);
 
     // For clipboard tools (data_control.cpp), which read and set the clipboard without
     // having the keyboard. The types the clipboard holds now (empty: nothing).

@@ -91,37 +91,66 @@ Item {
             color: "#eee"; border.color: "#222"
             Rectangle {x: 1; y: 1; width: parent.width - 2; height: 1; color: "white"}
 
-            // Appearance: the highlight variation (blue by default; graphite seen in V922 E11).
-            Column {
+            // Appearance, laid out as 9.2.2's tab (reference VM, 2026-11-04): Appearance, Highlight
+            // Color (selected text) and Variation (menus and controls: blue, or graphite as V922 E11).
+            Grid {
                 visible: panel.tab === 0
-                x: 20; y: 18; width: parent.width - 40; spacing: 12
-                Text {text: "Appearance: Platinum"; font.pixelSize: 12; font.bold: true}
-                Text {text: "Highlight color:"; font.pixelSize: 12}
+                x: 20; y: 22; columns: 2; columnSpacing: 8; rowSpacing: 4
+                Text { width: 120; height: 20; text: "Appearance:"; font.pixelSize: 12; font.bold: true
+                       horizontalAlignment: Text.AlignRight; verticalAlignment: Text.AlignVCenter }
+                PlatinumPopup {
+                    objectName: "appearance-theme"; implicitWidth: 200; enabled: false
+                    choices: [{name: "Platinum", value: "platinum"}]; current: "platinum"
+                }
+                Item { width: 1; height: 1 }
+                Text { text: "for the overall look of menus, icons, windows and controls"; font.pixelSize: 11; color: "#333"; bottomPadding: 10 }
+                Text { width: 120; height: 20; text: "Highlight Color:"; font.pixelSize: 12; font.bold: true
+                       horizontalAlignment: Text.AlignRight; verticalAlignment: Text.AlignVCenter }
+                PlatinumPopup {
+                    objectName: "appearance-highlight"; implicitWidth: 200
+                    choices: panel.settings.highlightChoices(); current: panel.settings.highlight
+                    onChosen: function(value) { panel.settings.setHighlight(value) }
+                }
+                Item { width: 1; height: 1 }
+                Text { text: "for selected text"; font.pixelSize: 11; color: "#333"; bottomPadding: 10 }
+                Text { width: 120; height: 20; text: "Variation:"; font.pixelSize: 12; font.bold: true
+                       horizontalAlignment: Text.AlignRight; verticalAlignment: Text.AlignVCenter }
+                PlatinumPopup {
+                    objectName: "appearance-variation"; implicitWidth: 200
+                    choices: [{name: "Blue", value: "blue", color: "#6666cc"}, {name: "Graphite", value: "graphite", color: "#888888"}]
+                    current: panel.settings.accent
+                    onChosen: function(value) { panel.setAccent(value) }
+                }
+                Item { width: 1; height: 1 }
+                Text { text: "for menus and controls"; font.pixelSize: 11; color: "#333"; bottomPadding: 14 }
+                Item { width: 1; height: 1 }
+                // How both look together: a menu with its selected item, and selected text.
                 Row {
-                    spacing: 10
-                    Repeater {
-                        model: [{name: "Blue", value: "blue", color: "#2c2994"},
-                                {name: "Graphite", value: "graphite", color: "#656565"}]
-                        delegate: PlatinumButton {
-                            required property var modelData
-                            objectName: "appearance-accent-" + modelData.value
-                            text: modelData.name; implicitWidth: 110
-                            defaultAction: panel.settings.accent === modelData.value
-                            onClicked: panel.setAccent(modelData.value)
-                            Rectangle {x: 8; anchors.verticalCenter: parent.verticalCenter; width: 12; height: 12
-                                       color: parent.modelData.color; border.color: "#222"}
+                    spacing: 14
+                    Rectangle {
+                        objectName: "appearance-accent-sample"
+                        width: 160; height: 58; color: "#eee"; border.color: "#222"
+                        Column {
+                            x: 3; y: 3; width: parent.width - 6
+                            Rectangle {width: parent.width; height: 25; color: "transparent"
+                                Text {x: 12; anchors.verticalCenter: parent.verticalCenter; text: "Menu Item"; font.pixelSize: 12}}
+                            Rectangle {width: parent.width; height: 25; color: panel.settings.accentColor
+                                Text {x: 12; anchors.verticalCenter: parent.verticalCenter; text: "Selected Item"; font.pixelSize: 12; color: "white"}}
                         }
                     }
-                }
-                Rectangle {
-                    objectName: "appearance-accent-sample"
-                    width: 200; height: 58; color: "#eee"; border.color: "#222"
-                    Column {
-                        x: 3; y: 3; width: parent.width - 6
-                        Rectangle {width: parent.width; height: 25; color: "transparent"
-                            Text {x: 12; anchors.verticalCenter: parent.verticalCenter; text: "Menu Item"; font.pixelSize: 12}}
-                        Rectangle {width: parent.width; height: 25; color: panel.settings.accent === "graphite" ? "#656565" : "#2c2994"
-                            Text {x: 12; anchors.verticalCenter: parent.verticalCenter; text: "Selected Item"; font.pixelSize: 12; color: "white"}}
+                    Rectangle {
+                        width: 150; height: 26; color: "white"; border.color: "#222"; anchors.verticalCenter: parent.verticalCenter
+                        Row {
+                            x: 6; anchors.verticalCenter: parent.verticalCenter
+                            Text { text: "Some "; font.pixelSize: 12 }
+                            Rectangle {
+                                objectName: "appearance-highlight-sample"
+                                width: selectedWord.implicitWidth + 2; height: 16; color: panel.settings.highlightColor
+                                Text { id: selectedWord; x: 1; anchors.verticalCenter: parent.verticalCenter; text: "selected"
+                                       font.pixelSize: 12; color: panel.settings.highlightTextColor }
+                            }
+                            Text { text: " text"; font.pixelSize: 12 }
+                        }
                     }
                 }
             }

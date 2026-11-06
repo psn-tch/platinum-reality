@@ -1,4 +1,5 @@
 #include "clipboard.hpp"
+#include <QFileInfo>
 #include "clipboard_reader.hpp"
 #include "clipboard_transfers.hpp"
 #include <new>
@@ -712,6 +713,24 @@ quint64 Clipboard::selectionGeneration() const
 void Clipboard::copyText(const QString &text)
 {
     QGuiApplication::clipboard()->setText(text);
+}
+bool Clipboard::copyImage(const QUrl &picture)
+{
+    QImage image;
+    if (picture.isLocalFile() && !QFileInfo(picture.toLocalFile()).isSymLink() &&
+        QFileInfo(picture.toLocalFile()).size() <= 32 * 1024 * 1024)
+        image.load(picture.toLocalFile());
+    else if (picture.scheme() == "data")
+    {
+        const auto url = picture.toString(QUrl::FullyEncoded).toLatin1();
+        const auto comma = url.indexOf(',');
+        if (comma > 0 && url.left(comma).endsWith(";base64"))
+            image.loadFromData(QByteArray::fromBase64(url.mid(comma + 1)));
+    }
+    if (image.isNull() || qint64(image.width()) * image.height() > 16 * 1024 * 1024)
+        return false;
+    QGuiApplication::clipboard()->setImage(image);
+    return true;
 }
 
 void Clipboard::shellClipboardChanged()

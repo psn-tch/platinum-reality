@@ -47,30 +47,9 @@ FocusScope {
         }
         if (JSON.stringify(found) !== JSON.stringify(entries)) entries = found
     }
-    // Whether this window is in front: it had the keyboard last. An alert opened over it (pairing,
-    // Forget, Keep display) takes the keyboard for a while; when it closes, or when the item that
-    // had focus disappears (Add Device's Pair button), the keyboard comes back here, as on a Mac.
-    // Anything else taking the keyboard (the desktop, an application) puts the window behind.
-    property bool front: false
-    readonly property var focusedItem: Window.activeFocusItem
-    function contains(item) {
-        for (let i = item; i; i = i.parent) if (i === window) return true
-        return false
-    }
-    function inPopup(item) {
-        for (let i = item; i; i = i.parent) if (i === Overlay.overlay) return true
-        return false
-    }
-    onFocusedItemChanged: {
-        const item = focusedItem
-        if (!visible) { front = false; return }
-        if (contains(item)) front = true
-        else if (item && item !== Window.contentItem && !inPopup(item)) front = false
-        else if (front) Qt.callLater(function() {
-            const now = window.focusedItem
-            if (window.visible && window.front && (!now || now === window.Window.contentItem)) window.forceActiveFocus()
-        })
-    }
+    // In front: it had the keyboard last (ShellWindowFocus).
+    property alias front: focusTracker.front
+    ShellWindowFocus { id: focusTracker; window: window }
     onCurrentChanged: { updatePanels(); contents.contentY = 0 }
     onVisibleChanged: updatePanels()
     Component.onCompleted: updatePanels()

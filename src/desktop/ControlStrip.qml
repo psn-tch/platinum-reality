@@ -33,31 +33,42 @@ Item {
     readonly property int moduleWidth: 36
     readonly property int endWidth: 16
     readonly property int arrowWidth: 13
-    readonly property int visibleModules: Math.max(1, Math.min(modules.length,
-        Math.floor((screenRect.width - 2*endWidth - 2*arrowWidth) / moduleWidth)))
+    readonly property int fixedWidth: 2*endWidth + 2*arrowWidth
+    readonly property int fittingModules: Math.max(1, Math.min(modules.length,
+        Math.floor((screenRect.width - fixedWidth) / moduleWidth)))
+    // The length chosen by dragging the end tab, in whole modules (0 shows all that fit).
+    readonly property int visibleModules: settings.controlStripModules > 0
+        ? Math.min(settings.controlStripModules, fittingModules) : fittingModules
     property int firstModule: 0
     onVisibleModulesChanged: firstModule = Math.max(0, Math.min(firstModule, modules.length - visibleModules))
     readonly property bool collapsed: settings.controlStripCollapsed
-    property bool dragging: false
-    property bool dragFromRight: false
+    // Verified in the 9.2.2 reference VM (2026-11-04): a plain drag of the end tab changes the
+    // strip's length, in whole modules, and dragging it right back to the edge collapses it.
+    // Option-drag moves the strip to any height on either side edge (whichever half of the screen
+    // the pointer is in), from just below the menu bar to the bottom. Either way the strip stays
+    // put while an outline follows the pointer, and changes when the button is released.
+    property bool moving: false
+    property bool resizing: false
+    readonly property bool dragging: moving || resizing
     property point pressOrigin
-    property point initialPosition
-    property point dragPosition
+    property real grabY
+    property real outlineY
+    property bool outlineRight
+    property real outlineLength
+    readonly property real topLimit: screenRect.y + 27
     // The edge comes from the saved position, so a strip saved on the right stays there when the
     // screen changes size; free positions saved by older versions go to the nearer edge.
-    readonly property bool rightEdge: dragging ? dragFromRight
-        : settings.controlStripX + width / 2 > screenRect.width / 2
+    readonly property bool rightEdge: settings.controlStripX + width / 2 > screenRect.width / 2
     readonly property int viewportWidth: visibleModules * moduleWidth
     // Parts are placed from the screen edge outwards, mirrored on the right edge. Bindings rather
     // than a Row keep hit-testing correct before the next frame's polish.
     function place(offset, partWidth) { return rightEdge ? width - offset - partWidth : offset }
-    width: collapsed ? endWidth : 2*endWidth + 2*arrowWidth + viewportWidth
+    width: collapsed ? endWidth : fixedWidth + viewportWidth
     height: 28
-    x: dragging ? Math.max(screenRect.x, Math.min(dragPosition.x, screenRect.x + screenRect.width - width))
-                : screenRect.x + (rightEdge ? screenRect.width - width : 0)
-    y: screenRect.y + Math.max(27, Math.min(dragging ? dragPosition.y-screenRect.y
-                     : settings.controlStripY < 0 ? screenRect.height - height : settings.controlStripY,
-                             screenRect.height - height))
+    x: screenRect.x + (rightEdge ? screenRect.width - width : 0)
+    y: screenRect.y + Math.max(27, Math.min(settings.controlStripY < 0 ? screenRect.height - height
+                                                                        : settings.controlStripY,
+                                            screenRect.height - height))
     visible: settings.controlStripVisible
     enabled: !sessionManager.shellModal && !sessionManager.menuOpen
 
@@ -175,7 +186,8 @@ Item {
                     let c = getContext("2d")
                     c.clearRect(0, 0, width, height)
                     const w = width, h = height, r = 7
-                    c.fillStyle = "#ccc"; c.strokeStyle = "#222"; c.lineWidth = 1
+                    // Pressed (darkened) while it is being dragged, as in 9.2.2.
+                    c.fillStyle = strip.dragging ? "#888" : "#ccc"; c.strokeStyle = "#222"; c.lineWidth = 1
                     c.beginPath()
                     c.moveTo(0, 0.5); c.lineTo(w - r - 0.5, 0.5)
                     c.arcTo(w - 0.5, 0.5, w - 0.5, r + 0.5, r)
@@ -185,45 +197,114 @@ Item {
                     if (strip.collapsed) c.lineTo(0.5, h - 0.5), c.lineTo(0.5, 0.5)
                     c.fill(); c.stroke()
                     for (const x of [3, 6, 9]) {
-                        c.fillStyle = "#777"; c.fillRect(x, 8, 1, h - 16)
-                        c.fillStyle = "white"; c.fillRect(x + 1, 8, 1, h - 16)
+                        c.fillStyle = strip.dragging ? "#555" : "#777"; c.fillRect(x, 8, 1, h - 16)
+                        c.fillStyle = strip.dragging ? "#aaa" : "white"; c.fillRect(x + 1, 8, 1, h - 16)
                     }
                 }
-                Connections {target: strip; function onCollapsedChanged() {tab.requestPaint()}}
+                Connections {
+                    target: strip
+                    function onCollapsedChanged() {tab.requestPaint()}
+                    function onDraggingChanged() {tab.requestPaint()}
+                }
                 // A canvas created while hidden paints nothing until asked again.
                 onAvailableChanged: if (available) requestPaint()
                 onVisibleChanged: if (visible) requestPaint()
             }
             MouseArea {
                 id: tabMouse; anchors.fill: parent; hoverEnabled: true
+                property bool optionDrag: false
+                // What the drag does, decided as it starts: "move" (Option-drag as in 9.2.2, or a
+                // plain drag that starts up or down), else "resize" (a sideways drag, as in 9.2.2).
+                property string mode: ""
                 onPressed: function(mouse) {
+                    mode = ""
                     strip.pressOrigin = mapToItem(strip.parent, mouse.x, mouse.y)
-                    strip.initialPosition = Qt.point(strip.x, strip.y)
-                    strip.dragPosition = strip.initialPosition
-                    strip.dragFromRight = strip.rightEdge
+                    optionDrag = Boolean(mouse.modifiers & Qt.AltModifier)
+                    strip.grabY = strip.pressOrigin.y - strip.y
                 }
                 onPositionChanged: function(mouse) {
                     if (!pressed) return
                     let point = mapToItem(strip.parent, mouse.x, mouse.y)
                     let dx = point.x - strip.pressOrigin.x, dy = point.y - strip.pressOrigin.y
-                    if (!strip.dragging && Math.abs(dx) + Math.abs(dy) < 5) return
-                    strip.dragging = true
-                    strip.dragPosition = Qt.point(strip.initialPosition.x + dx, strip.initialPosition.y + dy)
+                    if (!strip.dragging && Math.abs(dx) + Math.abs(dy) < 4) return
+                    if (mode === "") mode = optionDrag || Math.abs(dy) > Math.abs(dx) ? "move" : "resize"
+                    const screen = strip.screenRect
+                    if (mode === "move") {
+                        strip.outlineRight = point.x >= screen.x + screen.width / 2
+                        strip.outlineY = Math.max(strip.topLimit, Math.min(point.y - strip.grabY,
+                                                  screen.y + screen.height - strip.height))
+                        strip.moving = true
+                    } else {
+                        // Only the length follows the pointer; the height stays.
+                        strip.outlineLength = Math.max(strip.endWidth, Math.min(
+                            strip.width + (strip.rightEdge ? -dx : dx), strip.fixedWidth + strip.fittingModules * strip.moduleWidth))
+                        strip.resizing = true
+                    }
                 }
                 onReleased: {
-                    if (!strip.dragging) {strip.settings.setControlStripCollapsed(!strip.collapsed); return}
-                    // Dropping attaches the strip to whichever side edge is nearer.
-                    let right = strip.x-strip.screenRect.x + strip.width / 2 > strip.screenRect.width / 2
-                    let y = Math.round(strip.y-strip.screenRect.y)
-                    strip.settings.setControlStripPosition(right ? Math.round(strip.screenRect.width - strip.width) : 0, y)
-                    strip.dragging = false
+                    const screen = strip.screenRect
+                    if (strip.moving) {
+                        strip.settings.setControlStripPosition(strip.outlineRight ? screen.width - strip.endWidth : 0,
+                                                               Math.round(strip.outlineY - screen.y))
+                    } else if (strip.resizing) {
+                        // Pulled back to the edge, the strip collapses to its tab; otherwise it
+                        // keeps as many whole modules as the outline nearly covers.
+                        if (strip.outlineLength < 2 * strip.endWidth) {
+                            strip.settings.setControlStripCollapsed(true)
+                        } else {
+                            const count = Math.max(1, Math.min(strip.fittingModules,
+                                Math.round((strip.outlineLength - strip.fixedWidth) / strip.moduleWidth)))
+                            strip.settings.setControlStripModules(count >= strip.modules.length ? 0 : count)
+                        }
+                    } else {
+                        strip.settings.setControlStripCollapsed(!strip.collapsed)
+                    }
+                    strip.moving = false; strip.resizing = false
                 }
-                onCanceled: strip.dragging = false
+                onCanceled: {strip.moving = false; strip.resizing = false}
             }
             ToolTip.visible: tabMouse.containsMouse && !strip.dragging
             ToolTip.delay: 600
-            ToolTip.text: strip.collapsed ? "Click to show the Control Strip; drag to move it."
-                                          : "Click to collapse the Control Strip; drag it to either side edge."
+            ToolTip.text: strip.collapsed ? "Click or drag out to show the Control Strip; drag up or down to move it."
+                                          : "Click to collapse; drag sideways to change the length; drag up or down to move it."
+        }
+    }
+
+    // The drag outline: the strip's silhouette as a two-pixel band one pixel outside its edge.
+    // 9.2.2 inverts the screen under it; black and white keep it visible on any background.
+    Item {
+        id: outline
+        objectName: "control-strip-outline"
+        parent: strip.parent
+        z: strip.z + 1
+        visible: strip.dragging
+        readonly property bool onRight: strip.moving ? strip.outlineRight : strip.rightEdge
+        readonly property real span: strip.moving ? strip.width : strip.outlineLength
+        x: (onRight ? strip.screenRect.x + strip.screenRect.width - span : strip.screenRect.x) - 1
+        y: (strip.moving ? strip.outlineY : strip.y) - 1
+        width: span + 2; height: strip.height + 2
+        Canvas {
+            id: outlineShape
+            anchors.fill: parent
+            transform: Scale {origin.x: outlineShape.width / 2; xScale: outline.onRight ? -1 : 1}
+            onPaint: {
+                let c = getContext("2d")
+                c.clearRect(0, 0, width, height)
+                const trace = function(inset, colour) {
+                    const w = width - inset, h = height - inset, r = 8 - inset
+                    c.strokeStyle = colour; c.lineWidth = 1
+                    c.beginPath()
+                    c.moveTo(inset, inset); c.lineTo(w - r, inset)
+                    c.arcTo(w, inset, w, inset + r, r)
+                    c.lineTo(w, h - r)
+                    c.arcTo(w, h, w - r, h, r)
+                    c.lineTo(inset, h); c.closePath(); c.stroke()
+                }
+                trace(0.5, "black"); trace(1.5, "white")
+            }
+            onWidthChanged: requestPaint()
+            onVisibleChanged: if (visible) requestPaint()
+            onAvailableChanged: if (available) requestPaint()
         }
     }
 

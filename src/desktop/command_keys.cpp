@@ -1,5 +1,7 @@
 #include "command_keys.hpp"
+#include <QCoreApplication>
 #include <QKeyEvent>
+#include <QScopedValueRollback>
 #include <QSet>
 #include <QWindow>
 
@@ -59,7 +61,7 @@ bool isTerminalApplication(const QString &appId)
 
 bool ShellTextCommands::eventFilter(QObject *watched, QEvent *event)
 {
-    if (event->type() != QEvent::KeyPress && event->type() != QEvent::ShortcutOverride)
+    if (m_forwarding || (event->type() != QEvent::KeyPress && event->type() != QEvent::ShortcutOverride))
         return false;
     auto *key = static_cast<QKeyEvent *>(event);
     const auto modifiers = key->modifiers() & ~Qt::KeypadModifier;
@@ -79,8 +81,25 @@ bool ShellTextCommands::eventFilter(QObject *watched, QEvent *event)
     auto *window = qobject_cast<QWindow *>(watched);
     auto *focus = window ? window->focusObject() : nullptr;
     // Text inputs and editors (QML TextInput/TextEdit and their controls).
-    if (!command || !focus || focus->metaObject()->indexOfMethod("paste()") < 0)
+    if (!focus || focus->metaObject()->indexOfMethod("paste()") < 0)
         return false;
+    if (!command) {
+        // Do not claim ShortcutOverride: shortcuts must keep their normal first
+        // chance. On KeyPress, preserve the key for QML's Keys handlers while
+        // removing the printable text that Qt otherwise inserts for Meta+N.
+        // Dropping the whole press here would break Sticky Notes' N/W and the
+        // Control Panels W handler before either item ever saw the event.
+        if (event->type()!=QEvent::KeyPress || key->text().isEmpty() || !key->text().front().isPrint())
+            return false;
+        QKeyEvent withoutText(key->type(),key->key(),key->modifiers(),key->nativeScanCode(),
+                              key->nativeVirtualKey(),key->nativeModifiers(),QString{},
+                              key->isAutoRepeat(),key->count(),key->device());
+        withoutText.setTimestamp(key->timestamp());
+        QScopedValueRollback<bool> forwarding(m_forwarding,true);
+        QCoreApplication::sendEvent(watched,&withoutText);
+        event->setAccepted(withoutText.isAccepted());
+        return true;
+    }
     // Claim the chord before any shortcut sees it, then run it on the press.
     event->accept();
     if (event->type() == QEvent::KeyPress)

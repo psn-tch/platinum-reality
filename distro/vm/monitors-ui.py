@@ -1,4 +1,4 @@
-"""Actual Apple-menu -> Monitors interaction in a reviewed owned VM geometry.
+"""Actual Apple-menu -> Control Panels window -> Monitors in an owned VM.
 
 Opens the panel only; never changes a display setting or claims persistence.
 """
@@ -72,6 +72,30 @@ def wait(guest,stem,phrase):
         time.sleep(.25)
 
 
+def control_window(words):
+    """Recognize update30's container/list/heading, never a legacy dialog.
+
+    Both the sidebar and selected-panel heading say Monitors. They must be
+    spatially distinct under exactly one window title. Do not wait for an
+    OK/Cancel footer: these settings now apply immediately (with Keep).
+    """
+    titles=gui.matches(words,'Control Panels')
+    monitors=gui.matches(words,'Monitors')
+    if len(titles)!=1 or len(monitors)!=2:
+        raise RuntimeError('Expected one Control Panels window with Monitors in its list and heading')
+    sidebar,heading=sorted(monitors,key=lambda p:p['x'])
+    if not (heading['left']-sidebar['left']>=100 and
+            titles[0]['y']<heading['y']<sidebar['y']):
+        raise RuntimeError('Unrecognized Control Panels title/list/heading arrangement')
+    for label in ('Keyboard','Energy Saver','Network'):
+        points=gui.matches(words,label)
+        if len(points)!=1 or abs(points[0]['left']-sidebar['left'])>8:
+            raise RuntimeError('Actual Control Panels sidebar was not recognized: '+label)
+    if gui.matches(words,'OK') or gui.matches(words,'Cancel'):
+        raise RuntimeError('Legacy/modal controls obscure the immediate-apply Monitors panel')
+    return {'container':'Control Panels','panel':'Monitors','mode':'immediate-apply-with-Keep'}
+
+
 def open_panel(guest,observed):
     size,words=capture(guest,'monitors-00-desktop')
     if not all(gui.matches(words,s) for s in ('File','Edit','View')):
@@ -80,10 +104,14 @@ def open_panel(guest,observed):
     tap(guest,13,11,canvas)
     _,_,point=wait(guest,'monitors-01-apple','Control Panels');tap(guest,point['x'],point['y'],canvas)
     _,_,point=wait(guest,'monitors-02-controls','Monitors');tap(guest,point['x'],point['y'],canvas)
-    _,words,_=wait(guest,'monitors-03-panel','Mirror displays')
+    _,words,_=wait(guest,'monitors-03-panel','Control Panels')
+    container=control_window(words)
+    if not gui.matches(words,'Mirror displays'):
+        raise RuntimeError('Actual Monitors page did not show its mirror control')
     if not gui.matches(words,'Show the desktop on'):
         raise RuntimeError('Opened panel did not show actual managed display controls')
-    return {'opened':True,'route':'Actual Apple menu -> Control Panels -> Monitors through QMP pointer events',
+    return {'opened':True,'route':'Actual Apple menu -> Control Panels submenu -> Monitors in Control Panels window through QMP pointer events',
+            'window':container,
             'screenshot':'monitors-03-panel.ppm','input_canvas':list(canvas),
             'scope':'Panel opening/visible controls only; settings, mirroring and persistence NOT TESTED',
             'visual_review':'REQUIRED'}
@@ -129,6 +157,7 @@ def enable_second(guest,observed,recollect):
             not isinstance(off[0].get('label'),str) or not off[0]['label'].strip()):
         raise ValueError('Need exactly one actual connected/off monitor and one active monitor')
     size,words=capture(guest,'monitors-04-before-enable')
+    control_window(words)
     canvas=input_canvas(observed,size)
     anchor=gui.matches(words,'Show the desktop on')
     labels=gui.matches(words,off[0]['label'])

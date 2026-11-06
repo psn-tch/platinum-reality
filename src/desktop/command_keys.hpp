@@ -28,7 +28,10 @@ bool isTerminalApplication(const QString &appId);
 // Command-X/C/V/Z (Shift-Z redoes) and Command-A in the shell's own text fields:
 // search, names and dialogs, including inside modal panels where window
 // shortcuts are blocked. Watches one window; application surfaces have no text
-// commands, so their Command keys pass through untouched.
+// commands, so their Command keys pass through untouched. Other printable
+// Command chords retain their key/modifiers for item handlers (note N/W, panel
+// W), but carry no insertion text into Qt's editor. ShortcutOverride for those
+// chords stays unclaimed so window shortcuts still run before KeyPress.
 class ShellTextCommands final : public QObject
 {
   public:
@@ -36,4 +39,7 @@ class ShellTextCommands final : public QObject
 
   protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
+
+  private:
+    bool m_forwarding = false;
 };

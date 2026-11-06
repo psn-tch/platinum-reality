@@ -32,12 +32,25 @@ an emulator: no Apple software runs, and none is included.
   you are typing in has its focus ring, in applications and on the desktop alike.
 - **Help Center** (Help ▸ Help Center, or Command-?), which also opens once on a new account.
 - **Screenshots**: Command-Shift-3 puts a picture of the whole screen on the clipboard,
-  Command-Shift-4 lets you drag across an area for a picture of just that, and Command-Shift-S
+  Command-Shift-4 (or Command-Shift-P) lets you drag across an area for a picture of just that, and Command-Shift-S
   saves one to a file.
 - **The Platinum lock screen**, with fingerprint unlock where your system allows it.
+- **Stickies** (Apple menu ▸ Stickies): colored notes on the desktop, saved as you type and
+  back where you left them at every login; roll them up, resize them, keep one in front.
+- **Calculator** (Apple menu ▸ Calculator): a four-function keypad with keyboard entry,
+  percentages, and Edit ▸ Copy and Paste, laid out as the Mac OS 9.2.2 Calculator.
+- **Note Pad** (Apple menu ▸ Note Pad): eight pages of notes with a turned-up corner to turn them,
+  saved as you type.
+- **Application Switcher**: drag the Application menu down to tear it off as a palette of running
+  applications, as in Mac OS 9.
+- **Labels** (File ▸ Label, in the Finder and on the desktop): seven colours for files and folders,
+  kept with the file (as the extended attribute `user.platinum.label`).
+- **Key Caps** (Apple menu ▸ Key Caps): see what every key types, with Shift and Option.
+- **Scrapbook** (Apple menu ▸ Scrapbook): keep copied text and pictures and paste them out again.
+- **About This Computer**: system version, RAM and swap, plus live application memory bars.
 - **Control Panels** (Apple menu ▸ Control Panels): every panel in one window — Appearance,
   Bluetooth, Date & Time (menu bar clock, calendar), Desktop Picture, Energy Saver (display off
-  and sleep), Keyboard (key repeat), Monitors (on/off, resolution, rotation, size, arrangement,
+  and sleep), Keyboard (keyboard layouts with a menu bar keyboard menu, key repeat), Monitors (on/off, resolution, rotation, size, arrangement,
   mirroring), Mouse & Trackpad, Network (Wi-Fi and addresses) and Sound. Changes apply at once.
 - **X11 applications and games** through a bundled, patched xwayland-satellite.
 - **An optional startup screen**: a gray 1-bit screen with a smiling computer instead of boot text.

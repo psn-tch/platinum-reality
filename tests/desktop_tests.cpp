@@ -4,6 +4,7 @@
 #include "desktop/battery_status.hpp"
 #include "desktop/interface_sounds.hpp"
 #include "desktop/command_keys.hpp"
+#include "desktop/computer_info.hpp"
 #include "desktop/audio_service.hpp"
 #include "desktop/desktop_items.hpp"
 #include "desktop/display_layout.hpp"
@@ -12,9 +13,15 @@
 #include "desktop/energy_settings.hpp"
 #include "desktop/input_settings.hpp"
 #include "desktop/manager.hpp"
+#include "desktop/sticky_notes.hpp"
+#include "desktop/note_pad.hpp"
+#include "desktop/scrapbook.hpp"
+#include "desktop/key_caps.hpp"
 #include "desktop/surface_client.hpp"
 #include "desktop/screenshot_service.hpp"
+#include <QBuffer>
 #include <QMimeData>
+#include <QStyleHints>
 #include <QClipboard>
 #include "desktop/system_controls.hpp"
 #include "finder/file_drag.hpp"
@@ -25,6 +32,7 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QSignalSpy>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QQmlComponent>
@@ -126,6 +134,101 @@ class DesktopTests : public QObject
         QWaylandSurface unattached;
         QVERIFY(!unattached.client());
         QCOMPARE(liveSurfaceClientPid(&unattached), qint64(0));
+    }
+    void unboundCommandLettersNeverEditShellFields_data()
+    {
+        QTest::addColumn<QString>("action");
+        QTest::addColumn<QString>("fieldName");
+        for (auto field : {std::pair{"applications", "application-search"},
+                           {"keyboard", "keyboard-try"}, {"new-folder", "desktop-name-field"},
+                           {"screenshot", "screenshot-path"}, {"desktop-picture", "picture-folder"},
+                           {"desktop-picture", "picture-path"}})
+            QTest::newRow(field.second) << QString(field.first) << QString(field.second);
+    }
+    void unboundCommandLettersNeverEditShellFields()
+    {
+        // Component counterpart to the real-keyboard native audit. Supply the
+        // printable text carried by a real Meta+N event; commandKey() supplies
+        // no text and cannot expose this Qt editor behavior. No layout/seat proof.
+        QFETCH(QString, action);
+        QFETCH(QString, fieldName);
+        QTemporaryDir root;
+        QQuickView view;
+        view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status()!=QQuickView::Error);
+        const auto clearView=qScopeGuard([&]{view.setSource({});});
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(),"dispatchShellCommand",
+            Q_ARG(QVariant,QVariant(action)),Q_ARG(QVariant,QVariant(0))));
+        auto *field=visualItem(view.contentItem(),fieldName);
+        QVERIFY(field);
+        QTRY_VERIFY(field->isVisible());
+        field->setProperty("text",QString("unchanged fixture"));
+        field->forceActiveFocus();
+        QTRY_VERIFY(field->hasActiveFocus());
+        nativeKeyEvent(&view,QEvent::KeyPress,Qt::Key_Meta,Qt::MetaModifier,125);
+        nativeKeyEvent(&view,QEvent::KeyPress,Qt::Key_N,Qt::MetaModifier,49,QString("n"));
+        nativeKeyEvent(&view,QEvent::KeyRelease,Qt::Key_N,Qt::MetaModifier,49);
+        nativeKeyEvent(&view,QEvent::KeyRelease,Qt::Key_Meta,Qt::NoModifier,125);
+        QTest::qWait(50);
+        QCOMPARE(field->property("text").toString(),QString("unchanged fixture"));
+    }
+    void printableCommandEventsKeepNoteAndPanelCommandsWorking()
+    {
+        QTemporaryDir root;
+        QQuickView view;
+        view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        auto *notes=qobject_cast<StickyNotes *>(manager.stickies());
+        QVERIFY(notes);
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status()!=QQuickView::Error);
+        const auto clearView=qScopeGuard([&]{view.setSource({});});
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto dispatch=[&](const char *action){return QMetaObject::invokeMethod(view.rootObject(),"dispatchShellCommand",
+            Q_ARG(QVariant,QVariant(action)),Q_ARG(QVariant,QVariant(0)));};
+        const auto chord=[&](Qt::Key key,uint code,const QString &text){
+            nativeKeyEvent(&view,QEvent::KeyPress,Qt::Key_Meta,Qt::MetaModifier,125);
+            nativeKeyEvent(&view,QEvent::KeyPress,key,Qt::MetaModifier,code,text);
+            nativeKeyEvent(&view,QEvent::KeyRelease,key,Qt::MetaModifier,code);
+            nativeKeyEvent(&view,QEvent::KeyRelease,Qt::Key_Meta,Qt::NoModifier,125);
+        };
+        QVERIFY(dispatch("sticky-new"));
+        QTRY_COMPARE(notes->count(),1);
+        const int first=notes->data(notes->index(0),StickyNotes::IdRole).toInt();
+        auto *edit=visualItem(view.contentItem(),"sticky-text-"+QString::number(first));
+        QVERIFY(edit);
+        QTRY_VERIFY(edit->hasActiveFocus());
+        for(const char c:QByteArray("keep this note"))QTest::keyClick(&view,c);
+        chord(Qt::Key_A,30,"a");
+        QTRY_COMPARE(edit->property("selectedText").toString(),QString("keep this note"));
+        chord(Qt::Key_C,46,"c");
+        QTRY_COMPARE(QGuiApplication::clipboard()->text(),QString("keep this note"));
+        chord(Qt::Key_N,49,"n");
+        QTRY_COMPARE(notes->count(),2);
+        QCOMPARE(edit->property("text").toString(),QString("keep this note"));
+        // W belongs to the new empty note. It must reach QML instead of being
+        // swallowed by the window filter, and must not type into either note.
+        QTest::qWait(50);
+        chord(Qt::Key_W,17,"w");
+        QTRY_COMPARE(notes->count(),1);
+        QCOMPARE(edit->property("text").toString(),QString("keep this note"));
+        QVERIFY(dispatch("keyboard"));
+        auto *panels=visualItem(view.contentItem(),"control-panels-window");
+        auto *field=visualItem(view.contentItem(),"keyboard-try");
+        QVERIFY(panels && field);
+        QTRY_VERIFY(panels->isVisible());
+        field->forceActiveFocus();
+        QTRY_VERIFY(field->hasActiveFocus());
+        chord(Qt::Key_W,17,"w");
+        QTRY_VERIFY(!panels->isVisible());
+        QVERIFY(field->property("text").toString().isEmpty());
     }
     void hardwareVolumeAndBrightnessKeysStepTheControls()
     {
@@ -458,6 +561,314 @@ class DesktopTests : public QObject
         QVERIFY(!mime.reads.contains("text/uri-list"));
         QVERIFY(!mime.reads.contains("application/vnd.portal.filetransfer"));
     }
+    void scrapbookKeepsTextAndPicturesInOrderAndShowsThem()
+    {
+        QTemporaryDir root;
+        const auto profile = root.path() + "/profile";
+        QImage square(40, 30, QImage::Format_ARGB32);
+        square.fill(Qt::red);
+        QByteArray png;
+        {
+            QBuffer buffer(&png);
+            buffer.open(QIODevice::WriteOnly);
+            square.save(&buffer, "PNG");
+        }
+        const QUrl dataUrl("data:image/png;base64," + QString::fromLatin1(png.toBase64()));
+        {
+            Scrapbook book(profile);
+            QCOMPARE(book.count(), 0);
+            QVERIFY(book.addText("second", 0));
+            QVERIFY(book.addPicture(dataUrl, 0)); // In front of the item shown.
+            QVERIFY(book.addText("third", 2));
+            QVERIFY(!book.addText("", 0));
+            QVERIFY(!book.addPicture(QUrl("data:image/png;base64,bm90IGEgcGljdHVyZQ=="), 0));
+            QCOMPARE(book.count(), 3);
+            QCOMPARE(book.item(0).value("kind").toString(), QString("picture"));
+            QCOMPARE(book.item(0).value("width").toInt(), 40);
+            QCOMPARE(book.item(1).value("text").toString(), QString("second"));
+            QVERIFY(book.item(9).isEmpty());
+            QVERIFY(book.addText("fourth", 3));
+        }
+        // A link planted in place of an item is never followed: that item is dropped.
+        {
+            QFile index(profile + "/scrapbook/index.json");
+            QVERIFY(index.open(QIODevice::ReadOnly));
+            const auto items = QJsonDocument::fromJson(index.readAll()).object().value("items").toArray();
+            QCOMPARE(items.size(), 4);
+            const auto planted = profile + "/scrapbook/" + items[3].toObject().value("file").toString();
+            QFile secret(root.path() + "/secret.txt");
+            QVERIFY(secret.open(QIODevice::WriteOnly) && secret.write("private") > 0);
+            secret.close();
+            QVERIFY(QFile::remove(planted));
+            QVERIFY(QFile::link(root.path() + "/secret.txt", planted));
+        }
+        Scrapbook reopened(profile);
+        QCOMPARE(reopened.count(), 3);
+        QCOMPARE(reopened.item(2).value("text").toString(), QString("third"));
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), profile, {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY2(view.status() != QQuickView::Error,
+                 qPrintable(view.errors().isEmpty() ? QString() : view.errors().first().toString()));
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *book = qobject_cast<Scrapbook *>(manager.scrapbook());
+        QVERIFY(book);
+        QCOMPARE(book->count(), 3);
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QVariant("scrapbook")), Q_ARG(QVariant, QVariant(0))));
+        auto *window = visualItem(view.contentItem(), "scrapbook-window");
+        QVERIFY(window);
+        QTRY_VERIFY(window->isVisible() && window->hasActiveFocus());
+        const auto text = [&](const QString &name) { return visualItem(view.contentItem(), name)->property("text").toString(); };
+        QCOMPARE(text("scrapbook-position"), QString("1 of 3"));
+        QCOMPARE(text("scrapbook-type"), QString("picture"));
+        QVERIFY(text("scrapbook-size").contains("40 × 30"));
+        QVERIFY(visualItem(view.contentItem(), "scrapbook-picture")->isVisible());
+        QTest::keyClick(&view, Qt::Key_Right);
+        QTRY_COMPARE(text("scrapbook-position"), QString("2 of 3"));
+        QCOMPARE(text("scrapbook-text"), QString("second"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/scrapbook.png"));
+        QTest::keyClick(&view, Qt::Key_Left);
+        QTest::keyClick(&view, Qt::Key_Left);
+        QTRY_COMPARE(text("scrapbook-position"), QString("3 of 3"));
+        // Clear (Delete) removes the item shown; the next one takes its place.
+        QTest::keyClick(&view, Qt::Key_Delete);
+        QTRY_COMPARE(book->count(), 2);
+        QCOMPARE(text("scrapbook-position"), QString("2 of 2"));
+        QCOMPARE(text("scrapbook-text"), QString("second"));
+        // The desktop's Edit menu acts on the Scrapbook while it is in front: Edit ▸ Clear.
+        auto *edit = visualItem(view.contentItem(), "bar-entry-2");
+        QVERIFY(edit);
+        QTest::mouseClick(&view, Qt::LeftButton, {}, edit->mapToScene(QPointF(edit->width() / 2, 12)).toPoint());
+        QQuickItem *clearRow = nullptr;
+        QTRY_VERIFY((clearRow = visualItem(view.contentItem(), "desktop-command-edit-clear")) && clearRow->isVisible());
+        clearRow->parentItem()->ensurePolished();
+        QTest::mouseClick(&view, Qt::LeftButton, {}, clearRow->mapToScene(QPointF(clearRow->width() / 2, clearRow->height() / 2)).toPoint());
+        QTRY_COMPARE(book->count(), 1);
+        QTRY_VERIFY(window->hasActiveFocus());
+        QTest::keyClick(&view, Qt::Key_W, Qt::MetaModifier);
+        QTRY_VERIFY(!window->isVisible());
+        Scrapbook saved(profile);
+        QCOMPARE(saved.count(), 1);
+    }
+    void keyCapsShowWhatTheLayoutTypesWithShiftAndOption()
+    {
+        KeyCaps caps;
+        QCOMPARE(caps.layout(), QString("us"));
+        QCOMPARE(caps.labels(false, false).value("30").toString(), QString("a"));
+        QCOMPARE(caps.labels(true, false).value("30").toString(), QString("A"));
+        QCOMPARE(caps.labels(true, false).value("2").toString(), QString("!"));
+        caps.setLayout("de");
+        QCOMPARE(caps.layout(), QString("de"));
+        QCOMPARE(caps.labels(false, false).value("21").toString(), QString("z")); // QWERTZ
+        QCOMPARE(caps.labels(false, true).value("16").toString(), QString("@"));  // Option-Q
+        // Dead keys are reported apart, with the accent they put on the next letter.
+        caps.setLayout("us(intl)");
+        QCOMPARE(caps.layout(), QString("us(intl)"));
+        QCOMPARE(caps.deadKeys(false, false).value("40").toString(), QString("´"));
+        QVERIFY(!caps.labels(false, false).contains("40"));
+        caps.setLayout("../etc");
+        QCOMPARE(caps.layout(), QString("us(intl)"));
+        caps.setLayout("us");
+        QTemporaryDir root;
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.path() + "/profile", {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY2(view.status() != QQuickView::Error,
+                 qPrintable(view.errors().isEmpty() ? QString() : view.errors().first().toString()));
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QVariant("key-caps")), Q_ARG(QVariant, QVariant(0))));
+        auto *window = visualItem(view.contentItem(), "key-caps-window");
+        QVERIFY(window);
+        QTRY_VERIFY(window->isVisible() && window->hasActiveFocus());
+        auto *a = visualItem(view.contentItem(), "key-caps-key-30");
+        QVERIFY(a);
+        QCOMPARE(a->property("label").toString(), QString("a"));
+        QTest::keyPress(&view, Qt::Key_Shift, Qt::ShiftModifier);
+        QTRY_COMPARE(a->property("label").toString(), QString("A"));
+        QVERIFY(visualItem(view.contentItem(), "key-caps-key-42")->property("down").toBool());
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/key-caps.png"));
+        QTest::keyRelease(&view, Qt::Key_Shift, Qt::NoModifier);
+        QTRY_COMPARE(a->property("label").toString(), QString("a"));
+        for (const char c : QByteArray("hi")) QTest::keyClick(&view, c);
+        QTRY_COMPARE(visualItem(view.contentItem(), "key-caps-typed")->property("text").toString(), QString("hi"));
+        // Clicking a key types it too.
+        QTest::mouseClick(&view, Qt::LeftButton, {}, a->mapToScene(QPointF(a->width() / 2, a->height() / 2)).toPoint());
+        QTRY_COMPARE(visualItem(view.contentItem(), "key-caps-typed")->property("text").toString(), QString("hia"));
+        QTest::keyClick(&view, Qt::Key_W, Qt::MetaModifier);
+        QTRY_VERIFY(!window->isVisible());
+    }
+    void notePadKeepsEightPagesAndTurnsAtItsCorner()
+    {
+        QTemporaryDir root;
+        {
+            NotePad pad(root.path() + "/profile");
+            QCOMPARE(pad.pageCount(), 8);
+            QCOMPARE(pad.page(), 0);
+            pad.setText(0, "first");
+            pad.setText(7, QString(40000, 'x')); // Bounded to 32,768 characters.
+            pad.setText(8, "nowhere");
+            pad.setPage(3);
+            pad.setPage(9);
+            QCOMPARE(pad.page(), 3);
+            QVERIFY(pad.saveNow());
+        }
+        {
+            NotePad pad(root.path() + "/profile");
+            QCOMPARE(pad.text(0), QString("first"));
+            QCOMPARE(pad.text(7).size(), 32768);
+            QCOMPARE(pad.page(), 3);
+            pad.setPage(0);
+            QVERIFY(pad.saveNow());
+        }
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.path() + "/profile", {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY2(view.status() != QQuickView::Error,
+                 qPrintable(view.errors().isEmpty() ? QString() : view.errors().first().toString()));
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *pad = qobject_cast<NotePad *>(manager.notePad());
+        QVERIFY(pad);
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QVariant("note-pad")), Q_ARG(QVariant, QVariant(0))));
+        auto *window = visualItem(view.contentItem(), "note-pad-window");
+        QVERIFY(window);
+        QTRY_VERIFY(window->isVisible());
+        auto *editor = visualItem(view.contentItem(), "note-pad-text");
+        QVERIFY(editor);
+        QTRY_VERIFY(editor->hasActiveFocus());
+        QCOMPARE(editor->property("text").toString(), QString("first"));
+        auto *number = visualItem(view.contentItem(), "note-pad-page-number");
+        QCOMPARE(number->property("text").toString(), QString("1"));
+        for (const char c : QByteArray(" page")) QTest::keyClick(&view, c);
+        QTRY_COMPARE(pad->text(0), QString("first page"));
+        auto *corner = visualItem(view.contentItem(), "note-pad-corner");
+        QVERIFY(corner);
+        const auto at = [&](qreal x, qreal y) { return corner->mapToScene(QPointF(x, y)).toPoint(); };
+        // The flap, above the fold: the next page. The corner below it: back.
+        QTest::mouseClick(&view, Qt::LeftButton, {}, at(corner->width() - 4, 4));
+        QTRY_COMPARE(pad->page(), 1);
+        QCOMPARE(number->property("text").toString(), QString("2"));
+        QCOMPARE(editor->property("text").toString(), QString());
+        QTest::mouseClick(&view, Qt::LeftButton, {}, at(3, corner->height() - 3));
+        QTRY_COMPARE(pad->page(), 0);
+        QCOMPARE(editor->property("text").toString(), QString("first page"));
+        // Back from the first page is the last.
+        QTest::mouseClick(&view, Qt::LeftButton, {}, at(3, corner->height() - 3));
+        QTRY_COMPARE(pad->page(), 7);
+        QCOMPARE(number->property("text").toString(), QString("8"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/note-pad.png"));
+        // Command-W puts it away; the pages are saved.
+        QTest::keyClick(&view, Qt::Key_W, Qt::MetaModifier);
+        QTRY_VERIFY(!window->isVisible());
+        QVERIFY(pad->saveNow());
+        NotePad saved(root.path() + "/profile");
+        QCOMPARE(saved.text(0), QString("first page"));
+        QCOMPARE(saved.page(), 7);
+    }
+    void generalControlsPersistBlinkMenusAndSetTheInsertionPoint()
+    {
+        // General Controls (9.2.2): show the desktop in the background, menu blinking Off-3 and the
+        // insertion point's speed. Defaults are 9.2.2's: shown, three blinks, medium.
+        QTemporaryDir root;
+        {
+            AppearanceSettings settings(root.path() + "/profile");
+            QCOMPARE(settings.general().value("showDesktop").toBool(), true);
+            QCOMPARE(settings.general().value("menuBlinks").toInt(), 3);
+            QCOMPARE(settings.general().value("caretBlink").toInt(), 1);
+            QSignalSpy errors(&settings, &AppearanceSettings::errorOccurred);
+            QVERIFY(!settings.setGeneralOption("menuBlinks", 4));
+            QVERIFY(!settings.setGeneralOption("caretBlink", -1));
+            QVERIFY(!settings.setGeneralOption("showDesktop", 1));
+            QVERIFY(!settings.setGeneralOption("documents", true));
+            QCOMPARE(errors.count(), 4);
+            QVERIFY(settings.setGeneralOption("showDesktop", false));
+            QVERIFY(settings.setGeneralOption("caretBlink", 2));
+            QCOMPARE(QGuiApplication::styleHints()->cursorFlashTime(), 500);
+            AppearanceSettings restored(root.path() + "/profile");
+            QCOMPARE(restored.general().value("showDesktop").toBool(), false);
+            QCOMPARE(restored.general().value("caretBlink").toInt(), 2);
+            QVERIFY(settings.setGeneralOption("showDesktop", true));
+            QVERIFY(settings.setGeneralOption("caretBlink", 1));
+            QCOMPARE(QGuiApplication::styleHints()->cursorFlashTime(), 1000);
+        }
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.path() + "/profile", {});
+        auto *settings = qobject_cast<AppearanceSettings *>(manager.appearance());
+        QVERIFY(settings);
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY2(view.status() != QQuickView::Error,
+                 qPrintable(view.errors().isEmpty() ? QString() : view.errors().first().toString()));
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto click = [&](const QString &name)
+        {
+            for (int attempt = 0; attempt < 100; ++attempt)
+            {
+                view.grabWindow();
+                auto *item = visualItem(view.contentItem(), name);
+                if (item && item->isVisible() && item->width() > 0)
+                {
+                    QTest::mouseClick(&view, Qt::LeftButton, {},
+                                      item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint());
+                    return true;
+                }
+                QTest::qWait(20);
+            }
+            return false;
+        };
+        auto *appearance = view.rootObject()->findChild<QObject *>("appearance-dialog");
+        QVERIFY(appearance);
+        // Three blinks: the command waits for them, the item going dark and lit again.
+        QVERIFY(click("control-strip-appearance"));
+        QVERIFY(click("desktop-command-appearance"));
+        QVERIFY(!appearance->property("opened").toBool());
+        auto *row = visualItem(view.contentItem(), "desktop-command-appearance");
+        QVERIFY(row);
+        QVERIFY(!row->property("lit").toBool());
+        QTRY_VERIFY(row->property("lit").toBool());
+        QTRY_VERIFY(appearance->property("opened").toBool());
+        // Off: the command runs at once.
+        QVERIFY(settings->setGeneralOption("menuBlinks", 0));
+        auto *panels = view.rootObject()->findChild<QObject *>("control-panels-window");
+        QVERIFY(panels);
+        QMetaObject::invokeMethod(panels, "close");
+        QTRY_VERIFY(!appearance->property("opened").toBool());
+        QVERIFY(click("control-strip-appearance"));
+        QVERIFY(click("desktop-command-appearance"));
+        QVERIFY(appearance->property("opened").toBool());
+        // The panel itself, in the list between Energy Saver and Keyboard.
+        QVERIFY(click("control-panel-general"));
+        auto *general = view.rootObject()->findChild<QObject *>("general-controls-panel");
+        QVERIFY(general);
+        QTRY_VERIFY(general->property("opened").toBool());
+        QVERIFY(click("general-show-desktop"));
+        QTRY_VERIFY(!settings->general().value("showDesktop").toBool());
+        // The Finder is in front here, so the desktop's icons stay.
+        auto *trash = visualItem(view.contentItem(), "desktop-entry-Trash");
+        if (trash)
+            QVERIFY(trash->isVisible());
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() +
+                                       "/artifacts/general-controls.png"));
+        QVERIFY(click("general-show-desktop"));
+        QTRY_VERIFY(settings->general().value("showDesktop").toBool());
+    }
     void appearanceChoicesPersistAndInvalidValuesPreserveTheLastSettings()
     {
         QTemporaryDir root;
@@ -473,14 +884,22 @@ class DesktopTests : public QObject
         QVERIFY(restored.controlStripCollapsed());
         QCOMPARE(restored.controlStripX(), 70);
         QCOMPARE(restored.controlStripY(), 440);
+        QCOMPARE(restored.controlStripModules(), 0);
+        // Choosing a length (the tab drag) also expands the strip.
+        QVERIFY(settings.setControlStripModules(3));
+        AppearanceSettings shortened(root.path());
+        QCOMPARE(shortened.controlStripModules(), 3);
+        QVERIFY(!shortened.controlStripCollapsed());
         QSignalSpy errors(&settings, &AppearanceSettings::errorOccurred);
         QVERIFY(!settings.apply(-1, true));
         QVERIFY(!settings.apply(1201, true));
         QVERIFY(!settings.setControlStripPosition(-1, 30));
-        QCOMPARE(errors.count(), 3);
+        QVERIFY(!settings.setControlStripModules(-1));
+        QCOMPARE(errors.count(), 4);
         AppearanceSettings unchanged(root.path());
         QCOMPARE(unchanged.shadeDuration(), 600);
         QVERIFY(!unchanged.controlStripVisible());
+        QCOMPARE(unchanged.controlStripModules(), 3);
         QFile file(root.path() + "/appearance.json");
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write("{\"version\":1,\"shadeDuration\":999999}");
@@ -2095,8 +2514,24 @@ class DesktopTests : public QObject
         QVERIFY(!shown("appearance-tab-themes")); // One theme only: no Themes tab.
         QVERIFY(shown("appearance-accent-sample"));
         // Each choice applies at once, as in Mac OS 9; there is no OK.
-        QVERIFY(choose("appearance-accent-graphite"));
+        // 9.2.2's three pop-ups: Appearance (Platinum only), Highlight Color, Variation.
+        QVERIFY(choose("appearance-variation"));
+        QVERIFY(choose("appearance-variation-graphite"));
         QTRY_COMPARE(settings->accent(), QString("graphite"));
+        QCOMPARE(settings->highlight(), QString("Purple"));
+        QCOMPARE(settings->highlightColor(), QColor("#ccccff"));
+        QVERIFY(choose("appearance-highlight"));
+        QVERIFY(choose("appearance-highlight-Gold"));
+        QTRY_COMPARE(settings->highlight(), QString("Gold"));
+        QCOMPARE(visualItem(view.contentItem(), "appearance-highlight-sample")->property("color").value<QColor>(), QColor("#ffee88"));
+        QTRY_VERIFY(!shown("appearance-highlight-Gold")); // The pop-up's menu has closed.
+        {
+            // Saved; and an unknown colour is refused (on a separate instance: the panel's would alert).
+            AppearanceSettings saved(root.path() + "/profile");
+            QCOMPARE(saved.highlight(), QString("Gold"));
+            QVERIFY(!saved.setHighlight("Chartreuse"));
+            QCOMPARE(saved.highlight(), QString("Gold"));
+        }
         QCOMPARE(view.rootObject()->property("menuAccent").value<QColor>(), QColor("#656565"));
         QTest::qWait(300); // Evidence only: the tab canvases and wallpaper paint on later frames.
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/appearance-tabs.png"));
@@ -2128,7 +2563,8 @@ class DesktopTests : public QObject
         AppearanceSettings awakeOff(root.path() + "/profile");
         QVERIFY(!awakeOff.keepScreenAwake());
         QVERIFY(open("Appearance"));
-        QVERIFY(choose("appearance-accent-blue"));
+        QVERIFY(choose("appearance-variation"));
+        QVERIFY(choose("appearance-variation-blue"));
         QTRY_COMPARE(settings->accent(), QString("blue"));
 
         // Desktop: Remove Picture applies at once; Place Picture… hands over to the chooser.
@@ -2180,6 +2616,20 @@ class DesktopTests : public QObject
         const auto matches = [](const QString &value, const char *pattern) {
             return QRegularExpression(QString("^") + pattern + "$").match(value).hasMatch();
         };
+        // Fixed times, whatever the hour of the run: 12-hour unless chosen (2 PM is 2, midnight 12).
+        const auto clockAt = [&](const QTime &time, const QVariantMap &options) {
+            QVariant text;
+            QMetaObject::invokeMethod(view.rootObject(), "clockText", Q_RETURN_ARG(QVariant, text),
+                                      Q_ARG(QVariant, QDateTime(QDate(2026, 11, 2), time)),
+                                      Q_ARG(QVariant, options), Q_ARG(QVariant, false));
+            return text.toString();
+        };
+        QCOMPARE(clockAt(QTime(14, 5, 9), {}), QString("2:05 PM"));
+        QCOMPARE(clockAt(QTime(0, 30), {}), QString("12:30 AM"));
+        QCOMPARE(clockAt(QTime(12, 0), {}), QString("12:00 PM"));
+        QCOMPARE(clockAt(QTime(14, 5, 9), {{"seconds", true}}), QString("2:05:09 PM"));
+        QCOMPARE(clockAt(QTime(14, 5, 9), {{"hours24", true}, {"seconds", true}}), QString("14:05:09"));
+        QCOMPARE(clockAt(QTime(9, 5), {{"hours24", true}}), QString("09:05"));
         // The clock as before: 12-hour, minutes, nothing else.
         QVERIFY2(matches(text("menu-bar-clock"), "\\d{1,2}:\\d{2} (AM|PM)"), qPrintable(text("menu-bar-clock")));
         // Only the known options (on a separate copy: the desktop would show the error).
@@ -2325,6 +2775,71 @@ class DesktopTests : public QObject
         QTRY_VERIFY(applies() > applied);
         applied = applies();
 
+        // Keyboard Layouts: U.S. alone, checked and dimmed; no keyboard menu.
+        auto *keyCaps = qobject_cast<KeyCaps *>(manager.keyCaps());
+        QVERIFY(keyCaps);
+        QCOMPARE(input->layout(), QString("us"));
+        QCOMPARE(keyCaps->property("layout").toString(), QString("us"));
+        auto *keyboardMenu = view.rootObject()->findChild<QQuickItem *>("keyboard-menu");
+        QVERIFY(keyboardMenu && !keyboardMenu->isVisible());
+        auto *layoutList = item("keyboard-layouts");
+        QVERIFY(layoutList);
+        const auto showLayout = [&](const QString &id) {
+            const auto choices = input->layoutChoices();
+            const auto at = std::find_if(choices.cbegin(), choices.cend(),
+                                         [&](const QVariant &c) { return c.toMap().value("id") == id; });
+            return QMetaObject::invokeMethod(layoutList, "positionViewAtIndex", Q_ARG(int, int(at - choices.cbegin())),
+                                             Q_ARG(int, 1 /* ListView.Beginning */));
+        };
+        QVERIFY(showLayout("us"));
+        QTRY_VERIFY(item("keyboard-layout-us"));
+        QVERIFY(item("keyboard-layout-us")->property("checked").toBool());
+        QVERIFY(!item("keyboard-layout-us")->isEnabled());
+        QVERIFY(showLayout("de"));
+        QTRY_VERIFY(item("keyboard-layout-de") && item("keyboard-layout-de")->isVisible());
+        QVERIFY(click("keyboard-layout-de"));
+        QTRY_COMPARE(input->layouts(), QStringList({"de", "us"})); // In the list's order.
+        QCOMPARE(input->layout(), QString("us"));
+        QCOMPARE(saved().value("keyboard").toObject().value("layouts").toArray().size(), 2);
+        QTRY_VERIFY(applies() > applied);
+        applied = applies();
+        QTRY_VERIFY(keyboardMenu->isVisible());
+        QCOMPARE(item("keyboard-menu-title")->property("text").toString(), QString("US"));
+        QCOMPARE(item("keyboard-layout-in-use")->property("text").toString(), QString("In use: U.S."));
+        // The keyboard menu lists the checked layouts, the one in use checked; choosing one uses it.
+        QTest::mouseClick(&view, Qt::LeftButton, {}, keyboardMenu->mapToScene(QPointF(keyboardMenu->width() / 2, 12)).toPoint());
+        QTRY_VERIFY(item("desktop-command-keyboard-layout-de"));
+        QVERIFY(item("desktop-command-keyboard-layout-us"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/keyboard-menu.png"));
+        QVERIFY(click("desktop-command-keyboard-layout-de"));
+        QTRY_COMPARE(input->layout(), QString("de"));
+        QCOMPARE(keyCaps->property("layout").toString(), QString("de"));
+        QTRY_COMPARE(item("keyboard-menu-title")->property("text").toString(), QString("DE"));
+        QTRY_VERIFY(applies() > applied);
+        applied = applies();
+        // Command-Option-Space moves to the next one, wrapping.
+        QTest::keyClick(&view, Qt::Key_Space, Qt::MetaModifier | Qt::AltModifier);
+        QTRY_COMPARE(input->layout(), QString("us"));
+        // Unchecking the layout in use moves to the one left; Use Defaults keeps the list.
+        QVERIFY(showLayout("us"));
+        QTRY_VERIFY(item("keyboard-layout-us") && item("keyboard-layout-us")->isVisible());
+        QVERIFY(click("keyboard-layout-us"));
+        QTRY_COMPARE(input->layouts(), QStringList{"de"});
+        QCOMPARE(input->layout(), QString("de"));
+        QTRY_VERIFY(!keyboardMenu->isVisible());
+        QVERIFY(click("keyboard-defaults"));
+        QCOMPARE(input->layout(), QString("de"));
+        // Refused on a second reader, whose errors raise no alert on this desktop.
+        InputSettings other(profile);
+        QCOMPARE(other.layout(), QString("de"));
+        QVERIFY(!other.set("keyboard", "layout", "us")); // Not checked.
+        QVERIFY(!other.set("keyboard", "layouts", QVariantList{"de", "xx"}));
+        QVERIFY(!other.set("keyboard", "layouts", QVariantList{}));
+        QVERIFY(input->set("keyboard", "layouts", QVariantList{"us"}));
+        QCOMPARE(input->layout(), QString("us"));
+        QTRY_VERIFY(applies() > applied);
+        applied = applies();
+
         // Mouse & Trackpad: each box applies at once.
         QVERIFY(dispatch("mouse"));
         auto *mouse = view.rootObject()->findChild<QObject *>("mouse-panel");
@@ -2355,7 +2870,9 @@ class DesktopTests : public QObject
         QVERIFY(click("mouse-defaults"));
         QTRY_VERIFY(input->touchpad().value("tap").toBool());
         QVERIFY(!input->pointer().value("natural").toBool());
-        QTRY_COMPARE(saved().keys(), QStringList{"version"});
+        // Only the checked Keyboard Layouts (U.S. checked above) are left.
+        QTRY_COMPARE(saved().keys(), QStringList({"keyboard", "version"}));
+        QCOMPARE(saved().value("keyboard").toObject().keys(), QStringList({"layout", "layouts"}));
         QTest::keyClick(&view, Qt::Key_Escape);
         QTRY_VERIFY(!mouse->property("opened").toBool());
 
@@ -2368,7 +2885,7 @@ class DesktopTests : public QObject
         auto *energyPanel = view.rootObject()->findChild<QObject *>("energy-panel");
         QTRY_VERIFY(energyPanel && energyPanel->property("opened").toBool());
         QCOMPARE(item("energy-sleep-label")->property("text").toString(),
-                 QString("Put the computer to sleep when inactive for: Never"));
+                 QString("Put the computer to sleep whenever it’s inactive for: Never"));
         QVERIFY(!item("energy-sleep-now")->isEnabled()); // No power control outside the session.
         auto *sleep = item("energy-sleep");
         sleep->forceActiveFocus();
@@ -2376,7 +2893,7 @@ class DesktopTests : public QObject
         QTRY_COMPARE(energy->sleep(), 240);
         QTRY_VERIFY(commands.contains("energy apply\n"));
         QCOMPARE(item("energy-sleep-label")->property("text").toString(),
-                 QString("Put the computer to sleep when inactive for: 4 hours"));
+                 QString("Put the computer to sleep whenever it’s inactive for: 4 hours"));
         auto *display = item("energy-display");
         display->forceActiveFocus();
         for (int step = 0; step < 4; ++step)
@@ -2398,6 +2915,136 @@ class DesktopTests : public QObject
         // Command-W closes the window, as any window.
         QTest::keyClick(&view, Qt::Key_W, Qt::MetaModifier);
         QTRY_VERIFY(!energyPanel->property("opened").toBool());
+    }
+    void stickyNotesAreMadeTypedInSavedRolledUpAndDeleted()
+    {
+        QTemporaryDir root;
+        QQuickView view;
+        view.resize(1120, 760);
+        const auto profile = root.path() + "/profile";
+        NativeManager manager(nullptr, &view, root.path(), profile, {});
+        auto *notes = qobject_cast<StickyNotes *>(manager.stickies());
+        QVERIFY(notes);
+        QCOMPARE(notes->count(), 0);
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto item = [&](const QString &name) {
+            view.grabWindow();
+            return visualItem(view.contentItem(), name);
+        };
+        const auto at = [&](QQuickItem *target, qreal x = -1, qreal y = -1) {
+            return target->mapToScene(QPointF(x < 0 ? target->width() / 2 : x, y < 0 ? target->height() / 2 : y)).toPoint();
+        };
+        const auto dispatch = [&](const QString &action) {
+            return QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                             Q_ARG(QVariant, QVariant(action)), Q_ARG(QVariant, QVariant(0)));
+        };
+        // Apple menu ▸ Stickies ▸ New Note: a yellow note with the keyboard, ready for typing.
+        QVERIFY(dispatch("sticky-new"));
+        QTRY_COMPARE(notes->count(), 1);
+        const auto id = notes->data(notes->index(0), StickyNotes::IdRole).toInt();
+        const auto name = QString::number(id);
+        QQuickItem *note = nullptr;
+        QTRY_VERIFY((note = item("sticky-note-" + name)) && note->isVisible());
+        auto *text = item("sticky-text-" + name);
+        QTRY_VERIFY(text->hasActiveFocus());
+        QVERIFY(!manager.shellModal());
+        for (const char c : QByteArray("buy milk"))
+            QTest::keyClick(&view, c);
+        QTest::keyClick(&view, Qt::Key_Return);
+        for (const char c : QByteArray("call mom"))
+            QTest::keyClick(&view, c);
+        QTRY_COMPARE(notes->text(id), QString("buy milk\ncall mom"));
+        // Saved a moment after typing stops.
+        const auto saved = [&] {
+            QFile file(profile + "/stickies.json");
+            return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
+        };
+        QTRY_COMPARE(saved().value("notes").toArray().at(0).toObject().value("text").toString(), QString("buy milk\ncall mom"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/sticky-note.png"));
+
+        // Right-click for colors and text sizes.
+        QTest::mouseClick(&view, Qt::RightButton, {}, at(text, 20, 10));
+        QQuickItem *blue = nullptr;
+        QTRY_VERIFY((blue = item("sticky-color-blue")) && blue->isVisible());
+        QTest::mouseClick(&view, Qt::LeftButton, {}, at(blue));
+        QTRY_COMPARE(notes->data(notes->index(0), StickyNotes::ColorRole).toString(), QString("blue"));
+        QTest::mouseClick(&view, Qt::RightButton, {}, at(text, 20, 10));
+        QQuickItem *large = nullptr;
+        QTRY_VERIFY((large = item("sticky-size-large")) && large->isVisible());
+        QTest::mouseClick(&view, Qt::LeftButton, {}, at(large));
+        QTRY_COMPARE(notes->data(notes->index(0), StickyNotes::TextSizeRole).toString(), QString("large"));
+
+        // Drag the strip to move; drag the corner to resize; both are saved.
+        auto *strip = item("sticky-strip-" + name);
+        const auto from = at(strip, 60, 7);
+        QTest::mousePress(&view, Qt::LeftButton, {}, from);
+        for (int step = 1; step <= 5; ++step)
+            QTest::mouseMove(&view, from + QPoint(step * 20, step * 10));
+        QTest::mouseRelease(&view, Qt::LeftButton, {}, from + QPoint(100, 50));
+        QTRY_COMPARE(notes->data(notes->index(0), StickyNotes::XRole).toInt(), qRound(note->x()));
+        const auto oldX = qRound(note->x());
+        auto *grow = item("sticky-grow-" + name);
+        const auto corner = at(grow);
+        QTest::mousePress(&view, Qt::LeftButton, {}, corner);
+        for (int step = 1; step <= 4; ++step)
+            QTest::mouseMove(&view, corner + QPoint(step * 20, step * 15));
+        QTest::mouseRelease(&view, Qt::LeftButton, {}, corner + QPoint(80, 60));
+        QTRY_COMPARE(notes->data(notes->index(0), StickyNotes::WidthRole).toInt(), 300);
+        QCOMPARE(notes->data(notes->index(0), StickyNotes::HeightRole).toInt(), 220);
+        QCOMPARE(qRound(note->x()), oldX);
+
+        // Double-clicking the strip rolls the note up to it, its first line showing; again, down.
+        QTest::mouseDClick(&view, Qt::LeftButton, {}, at(strip, 60, 7));
+        QTRY_VERIFY(notes->data(notes->index(0), StickyNotes::CollapsedRole).toBool());
+        QTRY_COMPARE(qRound(note->height()), 16);
+        QVERIFY(item("sticky-title-" + name)->isVisible());
+        QCOMPARE(item("sticky-title-" + name)->property("text").toString(), QString("buy milk"));
+        QTest::mouseClick(&view, Qt::LeftButton, {}, at(item("sticky-shade-" + name)));
+        QTRY_COMPARE(qRound(note->height()), 220);
+
+        // A later session finds the note as it was left.
+        QVERIFY(notes->saveNow());
+        StickyNotes reloaded(profile);
+        QCOMPARE(reloaded.count(), 1);
+        QCOMPARE(reloaded.text(id), QString("buy milk\ncall mom"));
+        QCOMPARE(reloaded.data(reloaded.index(0), StickyNotes::ColorRole).toString(), QString("blue"));
+        QCOMPARE(reloaded.data(reloaded.index(0), StickyNotes::WidthRole).toInt(), 300);
+        QVERIFY(!reloaded.set(id, "color", "plaid"));
+
+        // Hide All Notes keeps them; Show All Notes brings them back.
+        QVERIFY(dispatch("sticky-toggle"));
+        QTRY_VERIFY(!note->isVisible());
+        QVERIFY(dispatch("sticky-toggle"));
+        QTRY_VERIFY(note->isVisible());
+
+        // Only the note in front shows its boxes (9.2.2): bring it forward first.
+        QTest::mouseClick(&view, Qt::LeftButton, {}, at(strip, 60, 7));
+        QTRY_VERIFY(note->property("front").toBool() && item("sticky-close-" + name)->isVisible());
+        // The close box asks first when the note has text; Return is Cancel, OK deletes it.
+        QTest::mouseClick(&view, Qt::LeftButton, {}, at(item("sticky-close-" + name)));
+        auto *confirm = view.rootObject()->findChild<QObject *>("sticky-delete-dialog");
+        QTRY_VERIFY(confirm && confirm->property("opened").toBool());
+        QTest::keyClick(&view, Qt::Key_Return);
+        QTRY_VERIFY(!confirm->property("visible").toBool());
+        QCOMPARE(notes->count(), 1);
+        QTest::mouseClick(&view, Qt::LeftButton, {}, at(item("sticky-close-" + name)));
+        QTRY_VERIFY(confirm->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(confirm, "accept"));
+        QTRY_COMPARE(notes->count(), 0);
+        // An empty note goes without asking.
+        QVERIFY(dispatch("sticky-new"));
+        QTRY_COMPARE(notes->count(), 1);
+        const auto empty = QString::number(notes->data(notes->index(0), StickyNotes::IdRole).toInt());
+        // A new note comes forward, ready for typing, with its boxes.
+        QTRY_VERIFY(item("sticky-close-" + empty) && item("sticky-close-" + empty)->isVisible());
+        QTest::mouseClick(&view, Qt::LeftButton, {}, at(item("sticky-close-" + empty)));
+        QTRY_COMPARE(notes->count(), 0);
+        QVERIFY(!confirm->property("visible").toBool());
     }
     void controlStripAttachesToEdgesFoldsAndOpensPanelsFromModuleMenus()
     {
@@ -2462,38 +3109,110 @@ class DesktopTests : public QObject
         // Every module fits, so both scroll arrows are inactive.
         QVERIFY(!visualItem(view.contentItem(), "control-strip-scroll-back")->property("active").toBool());
         QVERIFY(!visualItem(view.contentItem(), "control-strip-scroll-forward")->property("active").toBool());
-        const auto drag = [&](QPoint offset)
+        const auto drag = [&](QPoint offset, Qt::KeyboardModifiers modifiers = {})
         {
             auto *tab = visualItem(view.contentItem(), "control-strip-tab");
             const auto point = tab->mapToScene(QPointF(8, 14)).toPoint();
-            QTest::mousePress(&view, Qt::LeftButton, {}, point);
+            QTest::mousePress(&view, Qt::LeftButton, modifiers, point);
             QTest::mouseMove(&view, point + offset / 2, 30);
             QTest::mouseMove(&view, point + offset, 30);
-            QTest::mouseRelease(&view, Qt::LeftButton, {}, point + offset, 30);
+            QTest::mouseRelease(&view, Qt::LeftButton, modifiers, point + offset, 30);
         };
-        // A short drag moves the strip vertically and snaps it back to the nearer edge.
+        auto *outline = visualItem(view.contentItem(), "control-strip-outline");
+        QVERIFY(outline && !outline->isVisible());
+        // Option-drag moves it (verified in the 9.2.2 VM): only an outline follows the pointer,
+        // attached to the edge on the pointer's side, and the strip moves on release.
         const auto old = strip->position();
-        drag(QPoint(90, -100));
+        {
+            auto *tab = visualItem(view.contentItem(), "control-strip-tab");
+            const auto point = tab->mapToScene(QPointF(8, 14)).toPoint();
+            QTest::mousePress(&view, Qt::LeftButton, Qt::AltModifier, point);
+            QTest::mouseMove(&view, point + QPoint(40, -50), 30);
+            QTest::mouseMove(&view, point + QPoint(90, -100), 30);
+            QTRY_VERIFY(outline->isVisible());
+            QCOMPARE(strip->position(), old);
+            QCOMPARE(qRound(outline->x()), -1);
+            QCOMPARE(qRound(outline->y()), qRound(old.y() - 100 - 1));
+            QCOMPARE(qRound(outline->width()), qRound(strip->width() + 2));
+            QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() +
+                                           "/artifacts/control-strip-move-outline.png"));
+            QTest::mouseRelease(&view, Qt::LeftButton, Qt::AltModifier, point + QPoint(90, -100), 30);
+        }
         QTRY_COMPARE(strip->position(), QPointF(0, old.y() - 100));
+        QVERIFY(!outline->isVisible());
         AppearanceSettings position(root.path() + "/profile");
         QCOMPARE(position.controlStripX(), 0);
         QCOMPARE(position.controlStripY(), qRound(strip->y()));
-        // Past the middle it attaches to the right edge, mirrored, and stays there when folded.
-        drag(QPoint(800, 0));
+        // A plain drag that starts up or down moves it too (Option is not needed: psn_tch found the
+        // strip impossible to move with a plain drag, which in 9.2.2 only changes the length).
+        const auto beforePlain = strip->position();
+        drag(QPoint(4, -60));
+        QTRY_COMPARE(strip->position(), QPointF(0, beforePlain.y() - 60));
+        QCOMPARE(settings->controlStripModules(), 0); // The length is unchanged.
+        drag(QPoint(-4, 60));
+        QTRY_COMPARE(strip->position(), beforePlain);
+        // It stops just below the menu bar.
+        drag(QPoint(0, -2000), Qt::AltModifier);
+        QTRY_COMPARE(strip->y(), 27);
+        drag(QPoint(0, int(old.y()) - 100 - 27), Qt::AltModifier);
+        QTRY_COMPARE(strip->y(), old.y() - 100);
+        // With the pointer past the middle it attaches to the right edge, mirrored, and stays
+        // there when folded.
+        drag(QPoint(800, 0), Qt::AltModifier);
         QTRY_COMPARE(strip->x(), view.width() - strip->width());
         QCOMPARE(strip->y(), old.y() - 100);
         QVERIFY(sceneX("control-strip-tab") < sceneX("control-strip-sound"));
         QVERIFY(sceneX("control-strip-sound") < sceneX("control-strip-collapse"));
         AppearanceSettings right(root.path() + "/profile");
-        QCOMPARE(right.controlStripX(), qRound(strip->x()));
+        QCOMPARE(right.controlStripX(), view.width() - 16);
         QVERIFY(click("control-strip-tab"));
         QTRY_VERIFY(settings->controlStripCollapsed());
         QCOMPARE(strip->x(), view.width() - 16);
         QVERIFY(click("control-strip-tab"));
         QTRY_VERIFY(!settings->controlStripCollapsed());
         QCOMPARE(strip->x(), view.width() - expandedWidth);
-        drag(QPoint(-800, 0));
+        // A plain drag changes the length instead, in whole modules, mirrored on the right edge,
+        // and never the height.
+        const int moduleCount = strip->property("modules").toList().size();
+        QVERIFY(moduleCount >= 4);
+        drag(QPoint(2 * 36, -60));
+        QTRY_COMPARE(settings->controlStripModules(), moduleCount - 2);
+        QCOMPARE(strip->width(), expandedWidth - 2 * 36);
+        QCOMPARE(strip->x(), view.width() - strip->width());
+        QCOMPARE(strip->y(), old.y() - 100);
+        QVERIFY(visualItem(view.contentItem(), "control-strip-scroll-forward")->property("active").toBool());
+        // The length stays when the strip moves.
+        drag(QPoint(-800, 0), Qt::AltModifier);
         QTRY_COMPARE(strip->x(), 0);
+        QCOMPARE(strip->width(), expandedWidth - 2 * 36);
+        {
+            // While resizing, the strip keeps its length and the outline shows the new one.
+            auto *tab = visualItem(view.contentItem(), "control-strip-tab");
+            const auto point = tab->mapToScene(QPointF(8, 14)).toPoint();
+            QTest::mousePress(&view, Qt::LeftButton, {}, point);
+            QTest::mouseMove(&view, point + QPoint(-20, 0), 30);
+            QTest::mouseMove(&view, point + QPoint(-36, 0), 30);
+            QTRY_VERIFY(outline->isVisible());
+            QCOMPARE(qRound(outline->width()), qRound(strip->width() - 36 + 2));
+            QCOMPARE(strip->width(), expandedWidth - 2 * 36);
+            QTest::mouseRelease(&view, Qt::LeftButton, {}, point + QPoint(-36, 0), 30);
+        }
+        QTRY_COMPARE(settings->controlStripModules(), moduleCount - 3);
+        // Dragged back to the edge it collapses; dragged out again it opens to that length.
+        drag(QPoint(-2000, 0));
+        QTRY_VERIFY(settings->controlStripCollapsed());
+        QCOMPARE(strip->width(), 16);
+        drag(QPoint(114, 40)); // 16 + 114: the fixed parts and two modules.
+        QTRY_VERIFY(!settings->controlStripCollapsed());
+        QCOMPARE(settings->controlStripModules(), 2);
+        QCOMPARE(strip->width(), 16 * 2 + 13 * 2 + 2 * 36);
+        QCOMPARE(strip->x(), 0);
+        // Long enough for every module, it shows them all again.
+        drag(QPoint(2000, 0));
+        QTRY_COMPARE(settings->controlStripModules(), 0);
+        QCOMPARE(strip->width(), expandedWidth);
+        AppearanceSettings length(root.path() + "/profile");
+        QCOMPARE(length.controlStripModules(), 0);
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() +
                                        "/artifacts/control-strip.png"));
         // Modules open pop-up menus above the strip; the first item opens the owning panel.
@@ -3222,6 +3941,36 @@ class DesktopTests : public QObject
         QDir().mkpath(QCoreApplication::applicationDirPath() + "/artifacts");
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() +
                                        "/artifacts/application-menu.png"));
+        // Dragging down past the open menu tears it off as the Application Switcher (9.2.2).
+        QTest::mouseClick(&view, Qt::LeftButton, {}, QPoint(600, 400)); // Close the menu first.
+        QTRY_COMPARE(root->property("openMenu").toInt(), -1);
+        auto *switcher = visualItem(view.contentItem(), "application-switcher");
+        auto *outline = visualItem(view.contentItem(), "application-switcher-outline");
+        QVERIFY(switcher && outline && !switcher->isVisible());
+        const auto start = title->mapToScene(QPointF(title->width() / 2, 13)).toPoint();
+        QTest::mousePress(&view, Qt::LeftButton, {}, start);
+        QTRY_COMPARE(root->property("openMenu").toInt(), root->property("barEntries").toList().size());
+        QTest::mouseMove(&view, start + QPoint(-20, 60), 30);
+        QTest::mouseMove(&view, start + QPoint(-200, 250), 30);
+        QTRY_VERIFY(outline->isVisible());
+        QTest::mouseRelease(&view, Qt::LeftButton, {}, start + QPoint(-200, 250), 30);
+        QTRY_VERIFY(switcher->isVisible());
+        QVERIFY(!outline->isVisible());
+        QTRY_COMPARE(root->property("openMenu").toInt(), -1);
+        QCOMPARE(qRound(switcher->y()), start.y() + 250);
+        auto *settings = qobject_cast<AppearanceSettings *>(manager.appearance());
+        QVERIFY(settings->switcher().value("visible").toBool());
+        AppearanceSettings saved(fixture.path() + "/profile");
+        QCOMPARE(saved.switcher().value("y").toInt(), start.y() + 250);
+        // A row for each running application; the one in front pressed in.
+        auto *finder = visualItem(view.contentItem(), "application-switcher-Finder");
+        QVERIFY(finder && finder->property("down").toBool());
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() +
+                                       "/artifacts/application-switcher.png"));
+        auto *close = visualItem(view.contentItem(), "application-switcher-close");
+        QTest::mouseClick(&view, Qt::LeftButton, {}, close->mapToScene(QPointF(5, 5)).toPoint());
+        QTRY_VERIFY(!switcher->isVisible());
+        QVERIFY(!settings->switcher().value("visible").toBool());
         view.setSource({});
     }
     void desktopMenusFollowMacOS9LayoutAndEmptyTrashConfirms()
@@ -3291,6 +4040,12 @@ class DesktopTests : public QObject
         QTest::keyClick(&view, Qt::Key_Return); // Cancel is the default for a destructive command.
         QTRY_VERIFY(!dialog->property("visible").toBool());
         QVERIFY(QFileInfo::exists(trash + "/files/Old Folder/note.txt"));
+        // Command-Shift-Delete asks the same question.
+        QTest::keyClick(&view, Qt::Key_Backspace, Qt::MetaModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTest::keyClick(&view, Qt::Key_Return);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QVERIFY(QFileInfo::exists(trash + "/files/Old Folder/note.txt"));
         QVERIFY(click("bar-entry-5"));
         QVERIFY(click("desktop-command-empty-trash"));
         QTRY_VERIFY(dialog->property("opened").toBool());
@@ -3305,6 +4060,182 @@ class DesktopTests : public QObject
         QTRY_COMPARE(root->property("statusMessage").toString(), QString("The Trash is empty."));
         QDir().mkpath(QCoreApplication::applicationDirPath() + "/artifacts");
         view.setSource({});
+    }
+    void computerMemorySnapshotKeepsUnknownsAndDeduplicatesProcesses()
+    {
+        QTemporaryDir root;
+        const auto write=[&](const QString &name,const QByteArray &data){
+            const auto path=root.filePath(name);QDir().mkpath(QFileInfo(path).absolutePath());
+            QFile file(path);return file.open(QIODevice::WriteOnly) && file.write(data)==data.size();
+        };
+        QVERIFY(write("meminfo","MemTotal: 8192 kB\nMemAvailable: 4096 kB\nSwapTotal: 2048 kB\nSwapFree: 1024 kB\n"));
+        QVERIFY(write("10/status","VmRSS: 256 kB\n"));
+        QVERIFY(write("11/status","VmRSS: 512 kB\n"));
+        const QList<ComputerApplication> apps{{1,"First",{10,10}},{2,"Second",{11}},{3,"Exited",{12}},{4,"No PID",{}}};
+        auto state=computerInformation(apps,root.path());
+        QCOMPARE(state.value("ramBytes").toLongLong(),8192*1024LL);
+        QCOMPARE(state.value("swapBytes").toLongLong(),2048*1024LL);
+        QCOMPARE(state.value("largestUnusedBlock").toString(),QString("Not reported"));
+        const auto rows=state.value("applications").toList();
+        QCOMPARE(rows[0].toMap().value("rssBytes").toLongLong(),256*1024LL);
+        QCOMPARE(rows[0].toMap().value("fraction").toDouble(),0.5);
+        QCOMPARE(rows[1].toMap().value("fraction").toDouble(),1.0);
+        QVERIFY(!rows[2].toMap().value("known").toBool());
+        QVERIFY(!rows[3].toMap().value("known").toBool());
+        // A later snapshot reads current values, with no cached PID/status data.
+        QVERIFY(write("11/status","VmRSS: 128 kB\n"));
+        state=computerInformation(apps,root.path());
+        QCOMPARE(state.value("applications").toList()[1].toMap().value("rssBytes").toLongLong(),128*1024LL);
+        for(const auto &bad:{QByteArray("MemTotal: -1 kB\n"),QByteArray("MemTotal: 18446744073709551615 kB\n"),
+                            QByteArray("MemTotal: 1 kB\nMemTotal: 2 kB\n"),QByteArray("MemTotal: 8192 bytes\n"),QByteArray(65537,'x')}){
+            QVERIFY(write("meminfo",bad));
+            const auto invalid=computerInformation(apps,root.path());
+            QVERIFY(!invalid.value("ramBytes").isValid());
+            QCOMPARE(invalid.value("ram").toString(),QString("Unavailable"));
+        }
+        QVERIFY(write("meminfo","MemTotal: 8192 kB\nMemAvailable: 9999 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n"));
+        state=computerInformation(apps,root.path());
+        QCOMPARE(state.value("available").toString(),QString("Unavailable"));
+        QCOMPARE(state.value("swap").toString(),QString("Off"));
+    }
+    void aboutComputerIsOneLiveModelessWindowAndStopsSamplingWhenClosed()
+    {
+        QTemporaryDir root;
+        QQuickView view;view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY2(view.status()!=QQuickView::Error,qPrintable(view.errors().isEmpty()?QString():view.errors()[0].toString()));
+        const auto clearView=qScopeGuard([&]{view.setSource({});});
+        view.show();QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto open=[&]{return QMetaObject::invokeMethod(view.rootObject(),"dispatchShellCommand",
+            Q_ARG(QVariant,QVariant("about")),Q_ARG(QVariant,QVariant(0)));};
+        QVERIFY(open());
+        auto *window=visualItem(view.contentItem(),"about-computer-window");
+        QVERIFY(window);QTRY_VERIFY(window->isVisible());
+        QVERIFY(!manager.shellModal());
+        const auto oldPosition=window->position();
+        const auto title=window->mapToScene(QPointF(60,12)).toPoint();
+        QTest::mousePress(&view,Qt::LeftButton,{},title);
+        QTest::mouseMove(&view,title+QPoint(30,15),30);
+        QTest::mouseMove(&view,title+QPoint(60,30),30);
+        QTest::mouseRelease(&view,Qt::LeftButton,{},title+QPoint(60,30),30);
+        QVERIFY(window->x()>oldPosition.x() && window->y()>oldPosition.y());
+        const auto first=window->property("samples").toInt();QVERIFY(first>0);
+        QVERIFY(open());
+        QCOMPARE(visualItem(view.contentItem(),"about-computer-window"),window);
+        QTRY_VERIFY_WITH_TIMEOUT(window->property("samples").toInt()>first,1600);
+        const auto property=window->property("snapshot");
+        const auto snapshot=property.metaType()==QMetaType::fromType<QJSValue>()
+            ? property.value<QJSValue>().toVariant().toMap() : property.toMap();
+        QVERIFY(!snapshot.value("system").toString().isEmpty());
+        QVERIFY(!snapshot.value("applications").toList().isEmpty());
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath()+"/artifacts/about-computer.png"));
+        commandKey(&view,Qt::Key_W,17);
+        QTRY_VERIFY(!window->isVisible());
+        const auto stopped=window->property("samples").toInt();
+        QTest::qWait(1100);QCOMPARE(window->property("samples").toInt(),stopped);
+        QVERIFY(open());
+        QTest::keyClick(&view,Qt::Key_Escape);QTRY_VERIFY(!window->isVisible());
+    }
+    void calculatorUsesImmediateArithmeticAndBoundsInput_data()
+    {
+        QTest::addColumn<QStringList>("keys");
+        QTest::addColumn<QString>("answer");
+        QTest::newRow("addition")<<QStringList{"2","+","3","="}<<QString("5");
+        QTest::newRow("repeat-equals")<<QStringList{"2","+","3","=","="}<<QString("8");
+        QTest::newRow("immediate-chain")<<QStringList{"2","+","3","*","4","="}<<QString("20");
+        QTest::newRow("replace-operator")<<QStringList{"8","+","*","2","="}<<QString("16");
+        QTest::newRow("decimal")<<QStringList{".","1","+",".","2","="}<<QString("0.3");
+        QTest::newRow("divide")<<QStringList{"9","/","2","="}<<QString("4.5");
+        QTest::newRow("zero-divisor")<<QStringList{"7","/","0","="}<<QString("Error");
+        QTest::newRow("recover-error")<<QStringList{"7","/","0","=","8"}<<QString("8");
+        QTest::newRow("sign")<<QStringList{"5","sign","*","2","="}<<QString("-10");
+        QTest::newRow("percent-add")<<QStringList{"2","0","0","+","1","0","%","="}<<QString("220");
+        QTest::newRow("percent-multiply")<<QStringList{"2","0","0","*","1","0","%","="}<<QString("20");
+        QTest::newRow("backspace")<<QStringList{"1","2","3","backspace"}<<QString("12");
+        QTest::newRow("implied-operand")<<QStringList{"4","+","="}<<QString("8");
+        QTest::newRow("new-entry")<<QStringList{"2","+","3","=","9"}<<QString("9");
+        QTest::newRow("ignored-text")<<QStringList{"2","1+2","process.exit()"}<<QString("2");
+        QStringList bounded;for(int i=0;i<40;++i)bounded<<QString("9");
+        QTest::newRow("input-limit")<<bounded<<QString("999999999999999");
+        QStringList overflow=bounded;overflow<<QString("*");overflow+=bounded;overflow<<QString("=");
+        for(int i=0;i<30;++i)overflow<<QString("=");
+        QTest::newRow("overflow")<<overflow<<QString("Error");
+    }
+    void calculatorUsesImmediateArithmeticAndBoundsInput()
+    {
+        QFETCH(QStringList,keys);QFETCH(QString,answer);
+        QQuickView view;
+        view.setSource(QUrl("qrc:/desktop/src/desktop/CalculatorWindow.qml"));
+        QVERIFY2(view.status()!=QQuickView::Error,qPrintable(view.errors().isEmpty()?QString():view.errors()[0].toString()));
+        auto *calculator=view.rootObject();QVERIFY(calculator);
+        for(const auto &key:keys)
+            QVERIFY(QMetaObject::invokeMethod(calculator,"press",Q_ARG(QVariant,key)));
+        QCOMPARE(calculator->property("display").toString(),answer);
+    }
+    void calculatorOpensOnceTakesKeyboardAndCopiesItsResult()
+    {
+        QTemporaryDir root;
+        QQuickView view;view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        auto *items=qobject_cast<DesktopItems *>(manager.desktopItems());QVERIFY(items);
+        QFile document(items->directory()+"/Selected document.txt");
+        QVERIFY(document.open(QIODevice::WriteOnly));document.write("Leave this document in place.");document.close();
+        items->refresh();
+        for(int row=0;row<items->rowCount();++row)
+            if(items->data(items->index(row),DesktopItems::NameRole)=="Selected document.txt")
+                items->select(items->data(items->index(row),DesktopItems::KeyRole).toString());
+        QCOMPARE(items->selectionCount(),1);
+        QSignalSpy operations(items,&DesktopItems::operationFinished);
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status()!=QQuickView::Error);
+        const auto clearView=qScopeGuard([&]{view.setSource({});});
+        view.show();QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto dispatch=[&](const QString &action){return QMetaObject::invokeMethod(view.rootObject(),"dispatchShellCommand",
+            Q_ARG(QVariant,action),Q_ARG(QVariant,QVariant(0)));};
+        QVERIFY(dispatch("calculator"));
+        auto *calculator=visualItem(view.contentItem(),"calculator-window");QVERIFY(calculator);
+        QSignalSpy closed(calculator,SIGNAL(closed()));
+        QTRY_VERIFY(calculator->isVisible() && calculator->hasActiveFocus());
+        QVERIFY(!manager.shellModal());
+        const auto click=[&](const QString &name){
+            auto *item=visualItem(calculator,name);if(!item)return false;
+            QTest::mouseClick(&view,Qt::LeftButton,{},item->mapToScene(QPointF(item->width()/2,item->height()/2)).toPoint());return true;
+        };
+        QVERIFY(click("calculator-key-7"));QTest::keyClick(&view,Qt::Key_Plus);
+        QTest::keyClick(&view,Qt::Key_5);QTest::keyClick(&view,Qt::Key_Return);
+        QCOMPARE(calculator->property("display").toString(),QString("12"));
+        QSignalSpy copied(calculator,SIGNAL(copyRequested(QString)));
+        commandKey(&view,Qt::Key_C,46);
+        QCOMPARE(copied.count(),1);QCOMPARE(copied[0][0].toString(),QString("12"));
+        // Edit ▸ Copy (the desktop's Edit menu acts on the Calculator in front, as in 9.2.2).
+        QVERIFY(QMetaObject::invokeMethod(calculator,"edit",Q_ARG(QVariant,QVariant("copy"))));QCOMPARE(copied.count(),2);
+        // Keyboard entry must still work after the mouse uses a key.
+        QVERIFY(click("calculator-key-enter"));
+        QTest::keyClick(&view,Qt::Key_1);QTest::keyClick(&view,Qt::Key_Plus);
+        QTest::keyClick(&view,Qt::Key_1);QTest::keyClick(&view,Qt::Key_Return);
+        QCOMPARE(calculator->property("display").toString(),QString("2"));
+        commandKey(&view,Qt::Key_C,46);QCOMPARE(copied.last()[0].toString(),QString("2"));
+        commandKey(&view,Qt::Key_D,32);commandKey(&view,Qt::Key_Backspace,14);
+        QTest::keyClick(&view,Qt::Key_F2);QTest::qWait(100);
+        QVERIFY(!items->busy());QCOMPARE(operations.count(),0);QVERIFY(QFileInfo::exists(document.fileName()));
+        QVERIFY(!view.rootObject()->findChild<QObject *>("desktop-name-dialog")->property("visible").toBool());
+        QVERIFY(dispatch("calculator"));QCOMPARE(visualItem(view.contentItem(),"calculator-window"),calculator);
+        QTest::keyClick(&view,Qt::Key_C);QCOMPARE(calculator->property("display").toString(),QString("0"));
+        QTest::keyClick(&view,Qt::Key_2);
+        QTest::keyClick(&view,Qt::Key_Escape);QVERIFY(calculator->isVisible());
+        QCOMPARE(calculator->property("display").toString(),QString("0"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath()+"/artifacts/calculator.png"));
+        commandKey(&view,Qt::Key_W,17);QTRY_VERIFY(!calculator->isVisible());
+        QCOMPARE(closed.count(),1);
+        QVERIFY(dispatch("control-panels-window"));
+        auto *panels=visualItem(view.contentItem(),"control-panels-window");QVERIFY(panels);
+        QTRY_VERIFY(panels->hasActiveFocus());
+        QVERIFY(dispatch("calculator"));QTRY_VERIFY(calculator->hasActiveFocus());
+        commandKey(&view,Qt::Key_W,17);QTRY_VERIFY(panels->hasActiveFocus());
+        QCOMPARE(closed.count(),2);
     }
     void aboutThisComputerShowsTheBuiltInMemory()
     {

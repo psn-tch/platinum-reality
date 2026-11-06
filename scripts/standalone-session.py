@@ -493,6 +493,11 @@ INPUT_RANGES = {
     ("touchpad", "tap"): (bool, None, None),
     ("touchpad", "disableWhileTyping"): (bool, None, None),
 }
+# The Keyboard panel's layouts as xkb layout(variant), as src/desktop/input_settings.cpp's table.
+KEYBOARD_LAYOUTS = frozenset((
+    "au", "at", "be", "br", "gb", "bg", "ca(multix)", "ca", "hr", "cz", "dk", "nl", "us(dvorak)", "fi",
+    "fr", "de", "gr", "hu", "is", "ie", "it", "jp", "latam", "lt", "no", "pl", "pt", "ro", "ru", "sk",
+    "si", "es", "se", "ch(fr)", "ch", "tr", "us", "us(intl)"))
 
 
 def saved_input_settings(profile):
@@ -519,6 +524,13 @@ def saved_input_settings(profile):
         elif type(value) not in (int, float) or not math.isfinite(value) or not low <= value <= high:
             continue
         settings.setdefault(section, {})[key] = float(value) if kind is float else value
+    # The layout in use: the chosen one while it is checked, else the first checked one.
+    keyboard = data.get("keyboard") if isinstance(data.get("keyboard"), dict) else {}
+    layouts = keyboard.get("layouts")
+    if (isinstance(layouts, list) and 1 <= len(layouts) <= 8 and len(set(map(str, layouts))) == len(layouts)
+            and all(type(name) is str and name in KEYBOARD_LAYOUTS for name in layouts)):
+        layout = keyboard.get("layout")
+        settings.setdefault("keyboard", {})["layout"] = layout if layout in layouts else layouts[0]
     return settings
 
 
@@ -533,6 +545,13 @@ def input_commands(settings):
         commands.append(f"input type:keyboard repeat_delay {keyboard['repeatDelay']}")
     if "repeatRate" in keyboard:
         commands.append(f"input type:keyboard repeat_rate {keyboard['repeatRate']}")
+    if "layout" in keyboard:
+        # Sway compiles each change: the old variant is cleared before the new layout is set.
+        layout, _, variant = keyboard["layout"].rstrip(")").partition("(")
+        commands.append('input type:keyboard xkb_variant ""')
+        commands.append(f"input type:keyboard xkb_layout {layout}")
+        if variant:
+            commands.append(f"input type:keyboard xkb_variant {variant}")
     pointer, touchpad = settings.get("pointer", {}), settings.get("touchpad", {})
     for kind, group in (("pointer", pointer), ("touchpad", touchpad)):
         if "speed" in group:

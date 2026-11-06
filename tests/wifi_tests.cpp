@@ -376,8 +376,13 @@ class WifiTests final : public QObject
 
         // Forget asks first; Cancel is the default.
         QVERIFY(click("control-strip-wifi"));
-        QVERIFY(click("desktop-command-wifi-network-Home"));  // Already joined: nothing happens.
-        QVERIFY(!f.fake.calls.contains("Connect " + find(service.networks(), "Home").value("path").toString()));
+        // Nothing is joined now (Neighbour was disconnected above), so choosing Home joins it. Until
+        // 2026-11-04 this asserted that nothing happened, which only held because it was checked
+        // before the asynchronous call arrived; the item's blink made the check wait.
+        QVERIFY(!find(service.networks(), "Home").value("connected").toBool());
+        QVERIFY(click("desktop-command-wifi-network-Home"));
+        QTRY_VERIFY(!manager.menuOpen());
+        QTRY_VERIFY(f.fake.calls.contains("Connect " + find(service.networks(), "Home").value("path").toString()));
         QVERIFY(click("control-strip-wifi"));
         QVERIFY(click("desktop-command-wifi-forget"));
         auto *forget = view.rootObject()->findChild<QObject *>("wifi-forget-dialog");

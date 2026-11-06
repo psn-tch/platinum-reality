@@ -39,9 +39,11 @@ Rectangle {
         let c=options||({})
         if(showDate)return Qt.formatDate(time,"dddd, MMMM d, yyyy")
         let separator=c.flash && time.getSeconds()%2?"<font color=\"#dddddd\">:</font>":":"
-        let parts=[Qt.formatTime(time,c.hours24?"HH":"h"),Qt.formatTime(time,"mm")]
+        // The hour by hand: Qt's "h" alone is a 24-hour hour; only a format with AP makes it 12-hour.
+        let hours=time.getHours()
+        let parts=[c.hours24?(hours<10?"0":"")+hours:String(hours%12||12),Qt.formatTime(time,"mm")]
         if(c.seconds)parts.push(Qt.formatTime(time,"ss"))
-        let text=parts.join(separator)+(c.hours24?"":" "+Qt.formatTime(time,"AP"))
+        let text=parts.join(separator)+(c.hours24?"":(hours<12?" AM":" PM"))
         let day=(c.weekday?Qt.formatDate(time,"ddd")+" ":"")+(c.date?Qt.formatDate(time,"MMM d")+" ":"")
         return (day?day+" ":"")+text
     }
@@ -136,6 +138,7 @@ Rectangle {
         else if(action==="hide-others")manager.hideOtherApplications()
         else if(action==="show-all")manager.showAllApplications()
         else if(action==="app")manager.activateApplication(applicationId)
+        else if(action==="keyboard-layout")manager.input.set("keyboard","layout",applicationId)
         else if(action==="window")manager.activate(applicationId,true)
         else if(action==="launch")manager.launchApplication(applicationId)
         else if(action==="control-strip")desktop.appearance.apply(desktop.appearance.shadeDuration,!desktop.appearance.controlStripVisible)
@@ -154,6 +157,7 @@ Rectangle {
         else if(action==="new-folder")promptName("create")
         else if(action==="rename")promptName("rename")
         else if(action==="duplicate")desktopFiles.duplicateSelected()
+        else if(action==="label")desktopFiles.labelSelected(applicationId)
         else if(action==="trash")desktopFiles.trashSelected()
         else if(action==="get-info")showInfo()
         else if(action==="open")manager.launchFinder()
@@ -170,6 +174,12 @@ Rectangle {
         else if(action==="energy")energyPanel.edit()
         else if(action==="mouse")mousePanel.edit()
         else if(action==="control-panels-window")controlPanels.show("")
+        else if(action==="calculator")calculator.open()
+        else if(action==="note-pad")notePadWindow.open()
+        else if(action==="scrapbook")scrapbookWindow.open()
+        else if(action==="key-caps")keyCapsWindow.open()
+        else if(action==="sticky-new")newStickyNote()
+        else if(action==="sticky-toggle")manager.stickies.setHidden(!manager.stickies.hidden)
         else if(action==="sound")soundPanel.edit()
         else if(action==="bluetooth")bluetoothPanel.edit()
         else if(action==="bluetooth-add")bluetoothPanel.addDevice()
@@ -183,13 +193,14 @@ Rectangle {
         else if(action==="edit"){let active=manager.windowMenu().find(function(w){return w.active});if(active)desktop.editCommand(active.id,applicationId)}
         else if(action==="show-clipboard")showClipboard()
         else if(action==="copy-names")copySelectedNames()
+        else if(action==="accessory-edit"){let w=desktop.editAccessory();if(w){w.edit(applicationId);w.forceActiveFocus()}}
         else if(action==="quit")manager.quitSession()
         else if(action==="eject")manager.removableMedia.eject(desktopFiles.selectedDrive)
         else if(action==="handheld-set")manager.handheld.set(applicationId.key,applicationId.value)
         else if(action==="sleep")manager.sleepComputer()
         else if(action==="restart")manager.restartComputer()
         else if(action==="shut-down")manager.shutDownComputer()
-        else if(action==="about")statusMessage=manager.aboutThisComputer()
+        else if(action==="about")aboutComputer.open()
         else if(action==="help")showHelp("welcome")
     }
     // Get Info windows, one per item (FS-G01): above the desktop icons, below application windows
@@ -248,6 +259,13 @@ Rectangle {
         infoOrder=Math.min(0.999,infoOrder+0.0001)
         window.z=infoOrder
     }
+    // File ▸ Label: None and the seven colours, the selection's own ticked.
+    function labelEntries() {
+        const current=desktopFiles.selectionLabel()
+        return [{text:"None",action:"label",id:0,name:"label-0",checked:current===0},{separator:true,action:"separator"}]
+            .concat(desktopFiles.labelChoices().map(function(l){
+                return {text:l.name,action:"label",id:l.index,name:"label-"+l.index,checked:current===l.index,swatch:l.color}}))
+    }
     function showInfo() {
         let details=desktopFiles.selectedDetails()
         if(!details.key)return
@@ -298,9 +316,30 @@ Rectangle {
         manager.activateApplication(next.id)
     }
     Shortcut {sequence:"Meta+Tab";enabled:!manager.shellModal && !manager.nativeDragging;onActivated:desktop.switchApplication(1)}
-    Shortcut {sequences:["Meta+Shift+Tab","Meta+Shift+Backtab","Meta+Backtab"];enabled:!manager.shellModal && !manager.nativeDragging;onActivated:desktop.switchApplication(-1)}
+    // Several spellings: a real keyboard's layout makes more than one match (see the screenshot keys).
+    Shortcut {sequences:["Meta+Shift+Tab","Meta+Shift+Backtab","Meta+Backtab"];enabled:!manager.shellModal && !manager.nativeDragging
+              onActivated:desktop.switchApplication(-1);onActivatedAmbiguously:activated()}
+    // The keyboard menu, as 9.2.2's: in the menu bar while more than one Keyboard Layout is
+    // checked (Keyboard control panel), listing them with the one in use checked; Command-Option-
+    // Space moves to the next. It is the menu after the Application menu (keyboardMenuIndex).
+    readonly property int keyboardMenuIndex:barEntries.length+1
+    readonly property var keyboardLayouts:manager.input.keyboard.layouts
+    readonly property bool keyboardMenuShown:keyboardLayouts.length>1
+    // The menu's title: no flags here, the layout's short name ("DE", "CH-FR").
+    function keyboardShortName(id) {
+        const named={"ca(multix)":"CSA","us(dvorak)":"DV","us(intl)":"US-INTL","ch(fr)":"CH-FR"}
+        return named[id] || String(id).toUpperCase()
+    }
+    function nextKeyboardLayout() {
+        const layouts=keyboardLayouts
+        if(layouts.length<2)return
+        manager.input.set("keyboard","layout",layouts[(layouts.indexOf(manager.input.keyboard.layout)+1)%layouts.length])
+    }
+    Shortcut {sequences:["Meta+Alt+Space"];enabled:desktop.keyboardMenuShown && !manager.shellModal;onActivated:desktop.nextKeyboardLayout();onActivatedAmbiguously:activated()}
     // Shell menus in the 9.2.2 Finder layout (docs/historical-fidelity-review.md F07/F08).
     function shellMenuEntries(index) {
+        if(index===keyboardMenuIndex)return keyboardLayouts.map(function(id){
+            return {text:manager.input.layoutName(id),name:"keyboard-layout-"+id,action:"keyboard-layout",id:id,checked:id===manager.input.keyboard.layout}})
         if(index===barEntries.length)return [
             {text:"Hide "+manager.activeApplication,action:"hide",enabled:manager.applications.some(function(a){return !a.active && !a.hidden})},
             {text:"Hide Others",action:"hide-others",enabled:manager.applications.some(function(a){return !a.active && !a.hidden})},
@@ -312,6 +351,7 @@ Rectangle {
                 {text:"About This Computer",action:"about"},
                 {separator:true,action:"separator"},
                 {text:"Applications…",action:"applications",glyph:"application"},
+                {text:"Calculator",action:"calculator",glyph:"application"},
                 {text:"Control Panels",action:"control-panels",glyph:"application",children:[
                     {text:"All Control Panels…",action:"control-panels-window"},
                     {separator:true,action:"separator"},
@@ -327,7 +367,14 @@ Rectangle {
                     {text:"Network…",action:"network"},
                     {text:"Quick Controls…",action:"quick-controls"},
                     {text:"Sound…",action:"sound"}]},
+                {text:"Key Caps",action:"key-caps",glyph:"application"},
+                {text:"Note Pad",action:"note-pad",glyph:"application"},
                 {text:"Puzzle",action:"puzzle",glyph:"application"},
+                {text:"Scrapbook",action:"scrapbook",glyph:"application"},
+                {text:"Stickies",action:"sticky-notes",glyph:"application",children:[
+                    {text:"New Note",action:"sticky-new"},
+                    {separator:true,action:"separator"},
+                    {text:manager.stickies.hidden?"Show All Notes":"Hide All Notes",action:"sticky-toggle",enabled:manager.stickies.count>0}]},
                 {text:"Recent Applications",action:"recent-applications",glyph:"application",
                  children:recent.length?recent:[{text:"No Recent Applications",action:"none",enabled:false}]},
                 {text:"Terminal",action:"terminal",glyph:"application"}]
@@ -342,6 +389,7 @@ Rectangle {
             {text:"Close Window",action:"close-window",enabled:false},
             {separator:true,action:"separator"},
             {text:"Get Info",action:"get-info",enabled:desktopFiles.selectionCount===1},
+            {text:"Label",action:"label-menu",enabled:desktopFiles.canModifySelection && ready,children:desktop.labelEntries()},
             {text:"Duplicate",action:"duplicate",enabled:desktopFiles.canModifySelection && ready},
             {text:"Rename…",action:"rename",enabled:Boolean(desktopFiles.renameTarget.key) && ready},
             {separator:true,action:"separator"},
@@ -350,6 +398,17 @@ Rectangle {
         // Copy with icons selected copies their names as text, one per line, as the Finder does.
         // For an application without menus of its own, each command is that application's shortcut,
         // sent as Command and the key shown (command_keys.hpp); Clear sends Delete.
+        // A desk accessory in front that has edit commands (Scrapbook) takes Cut, Copy, Paste and Clear.
+        let accessory=desktop.editAccessory()
+        if(kind==="desktop-edit" && accessory)return [
+            {text:"Undo",key:"⌘Z",action:"none",enabled:false},
+            {separator:true,action:"separator"},
+            {text:"Cut",key:"⌘X",action:"accessory-edit",id:"cut",name:"edit-cut",enabled:accessory.editCommands.cut===true},
+            {text:"Copy",key:"⌘C",action:"accessory-edit",id:"copy",name:"edit-copy",enabled:accessory.editCommands.copy===true},
+            {text:"Paste",key:"⌘V",action:"accessory-edit",id:"paste",name:"edit-paste",enabled:accessory.editCommands.paste===true},
+            {text:"Clear",action:"accessory-edit",id:"clear",name:"edit-clear",enabled:accessory.editCommands.clear===true},
+            {text:"Select All",key:"⌘A",action:"none",enabled:false},
+            {text:"Show Clipboard",action:"show-clipboard",name:"show-clipboard",enabled:Boolean(manager.clipboard)}]
         if(kind==="desktop-edit")return [
             {text:"Undo",key:"⌘Z",action:"none",enabled:false},
             {separator:true,action:"separator"},
@@ -375,7 +434,9 @@ Rectangle {
         }
         // As in 9.2.2 (Eject and Erase Disk aside): Sleep, Restart and Shut Down only in a whole session.
         if(kind==="special")return [
-            {text:"Empty Trash…",action:"empty-trash",enabled:ready},
+            // As the 9.2.2 Finder's (reference VM, 2026-11-04): Empty Trash, a line, Eject, a line, power.
+            {text:"Empty Trash…",key:"⇧⌘⌫",action:"empty-trash",name:"empty-trash",enabled:ready},
+            {separator:true,action:"separator"},
             {text:"Eject",key:"⌘E",action:"eject",enabled:desktopFiles.selectedDrive!=="" && manager.removableMedia.canEject(desktopFiles.selectedDrive)},
             {separator:true,action:"separator"}].concat(manager.powerAvailable ? [
             {text:"Sleep",action:"sleep"},
@@ -600,8 +661,8 @@ Rectangle {
     function openShellSubmenu(index, entries, sceneY) {
         submenuEntries=entries;submenuY=sceneY;openSubmenu=index
     }
-    // Command-Shift-3 puts the whole desktop on the clipboard; Command-Shift-4 shows a crosshair,
-    // and the area dragged across goes on the clipboard (Mac OS's picture-to-clipboard keys).
+    // Command-Shift-3 puts the whole desktop on the clipboard; Command-Shift-4 (or Command-Shift-P)
+    // shows a crosshair, and the area dragged across goes on the clipboard (Mac OS's picture-to-clipboard keys).
     // The desktop is captured first, so the crosshair is never in the picture.
     function copyScreenshot(area) {
         if(manager.shellModal || manager.nativeDragging || screenshotArea.visible)return
@@ -694,7 +755,13 @@ Rectangle {
     Connections {target:manager;function onShellMenuKeyPressed(){desktop.closeMenu()}}
     Shortcut {sequence:"Meta+H";enabled:!manager.shellModal;onActivated:manager.hideApplication()}
     // Command-? opens the Help Center, as on a Mac (? is Shift-/ on most layouts).
-    Shortcut {sequences:["Meta+?","Meta+Shift+?","Meta+Shift+/"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging;onActivated:{desktop.closeMenu();desktop.showHelp("welcome")}}
+    // A shifted chord has several spellings (Command-Shift-3 is also Command-#). A real keyboard's
+    // layout offers Qt all of them, so more than one listed sequence matches and Qt reports the
+    // match as ambiguous instead of activating it: both signals do the same (psn_tch, 2026-11-02:
+    // the screenshot keys did nothing; the tests' synthetic keys carry no layout and matched once).
+    Shortcut {sequences:["Meta+?","Meta+Shift+?","Meta+Shift+/"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging
+              onActivated:{desktop.closeMenu();desktop.showHelp("welcome")}
+              onActivatedAmbiguously:activated()}
     // Frees a pointer that a game locked or confined. Only bound while one is captured, so the
     // chord otherwise reaches the application. See docs/relative-pointer-plan.md.
     Shortcut {sequence:"Ctrl+Alt+Escape";autoRepeat:false;enabled:manager.pointerCaptured;onActivated:manager.releasePointerCapture()}
@@ -704,9 +771,17 @@ Rectangle {
     Shortcut {sequences:["Meta+Q","Alt+Q"];autoRepeat:false;enabled:!manager.shellModal && !manager.menuOpen && !manager.nativeDragging;onActivated:manager.requestQuitActiveApplication()}
     Shortcut {sequences:["Meta+Shift+S","Alt+Shift+S"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging;onActivated:desktop.takeScreenshot()}
     // Shift-3 and Shift-4 arrive as # and $ on most layouts.
-    Shortcut {sequences:["Meta+Shift+3","Meta+Shift+#","Meta+#"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging;onActivated:desktop.copyScreenshot(false)}
-    Shortcut {sequences:["Meta+Shift+4","Meta+Shift+$","Meta+$"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging;onActivated:desktop.copyScreenshot(true)}
+    Shortcut {sequences:["Meta+Shift+3","Meta+Shift+#","Meta+#"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging
+              onActivated:desktop.copyScreenshot(false);onActivatedAmbiguously:activated()}
+    Shortcut {sequences:["Meta+Shift+4","Meta+Shift+$","Meta+$"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging
+              onActivated:desktop.copyScreenshot(true);onActivatedAmbiguously:activated()}
+    // Command-Shift-P does the same as Command-Shift-4 (psn_tch, 2026-11-04). Command-P stays Print.
+    Shortcut {sequence:"Meta+Shift+P";autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging
+              onActivated:desktop.copyScreenshot(true);onActivatedAmbiguously:activated()}
     Shortcut {sequence:"Escape";enabled:manager.desktopActive && !manager.shellModal && (desktopFiles.dragging || desktopFiles.selecting);onActivated:desktopFiles.selecting ? desktopFiles.cancelSelection() : desktopFiles.cancelDrag()}
+    // Special ▸ Empty Trash… (Command-Shift-Delete), asking first as the menu item does.
+    Shortcut {sequence:"Meta+Shift+Backspace";autoRepeat:false;enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && !desktopFiles.busy
+              onActivated:desktop.confirmEmptyTrash();onActivatedAmbiguously:activated()}
     Shortcut {sequences:["Meta+I","Ctrl+I"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && desktopFiles.selectionCount===1;onActivated:desktop.showInfo()}
     Shortcut {sequences:["Meta+O","Ctrl+O"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && !desktopFiles.busy;onActivated:desktopFiles.openSelected()}
     // Typing on the active desktop selects an icon by name (DesktopItems::typeSelect); letters
@@ -734,7 +809,10 @@ Rectangle {
         function onErrorOccurred(message) { desktop.statusMessage = message }
         function onOpenWithRequested(document) {applicationBrowser.browse(document)}
         function onControlPanelRequested(action) {desktop.dispatchShellCommand(action,0)}
-        function onFocusDesktop() { if(controlPanels.visible && controlPanels.front)controlPanels.forceActiveFocus();else desktop.forceActiveFocus() }
+        function onFocusDesktop() {
+            let w=desktop.frontShellWindow
+            if(w && w.visible && w.front)w.forceActiveFocus();else desktop.forceActiveFocus()
+        }
         function onContextChanged() { if(!manager.menuOpen && (desktop.openMenu>=0 || desktop.exportPopup || desktop.stripModule!==""))desktop.closeMenu(false) }
     }
     // While a menu bar or Control Strip menu is open, a click anywhere else (a window included)
@@ -773,10 +851,14 @@ Rectangle {
             required property int itemX
             required property int itemY
             required property bool isSelected
+            required property string labelColor
             objectName:"desktop-entry-"+entryName
+            // General Controls ▸ Show Desktop when in background: off, the icons go while another
+            // application is in front, and come back with the Finder.
+            visible:desktop.appearance.general.showDesktop || manager.desktopActive || manager.activeApplication==="Finder"
             z:desktopFiles.dragging && desktopEntry.isSelected ? 10000 : 0
             x:itemX;y:itemY;width:100;height:76
-            DesktopIcon {anchors.horizontalCenter:parent.horizontalCenter;y:3;kind:desktopEntry.entryKind;selected:desktopEntry.isSelected && manager.desktopActive;personalFolder:manager.personalAssets;full:desktopEntry.entryKind==="trash" && desktopFiles.trashFull}
+            DesktopIcon {anchors.horizontalCenter:parent.horizontalCenter;y:3;kind:desktopEntry.entryKind;selected:desktopEntry.isSelected && manager.desktopActive;labelColor:desktopEntry.labelColor;personalFolder:manager.personalAssets;full:desktopEntry.entryKind==="trash" && desktopFiles.trashFull}
             Rectangle {x:29;y:0;width:42;height:42;color:"transparent";border.color:"#111";border.width:2;visible:desktopFiles.dropTarget===desktopEntry.entryKey}
             Rectangle {
                 objectName:"desktop-label-"+desktopEntry.entryName
@@ -995,10 +1077,23 @@ Rectangle {
         }
         Text {
             id:menuClock;objectName:"menu-bar-clock"
-            anchors.right:appDivider.left;anchors.rightMargin:7;anchors.verticalCenter:parent.verticalCenter
+            anchors.right:keyboardMenu.visible?keyboardMenu.left:appDivider.left;anchors.rightMargin:7;anchors.verticalCenter:parent.verticalCenter
             visible:desktop.appearance.clock.visible!==false
             text:desktop.clockText(desktop.clockTime,desktop.appearance.clock,desktop.clockShowsDate);textFormat:Text.StyledText;font.pixelSize:12
             MouseArea {anchors.fill:parent;anchors.margins:-4;onClicked:{desktop.clockShowsDate=!desktop.clockShowsDate;if(desktop.clockShowsDate)clockDate.restart()}}
+        }
+        Rectangle {
+            id:keyboardMenu;objectName:"keyboard-menu";visible:desktop.keyboardMenuShown
+            anchors.right:appDivider.left;anchors.rightMargin:2;width:keyboardTitle.implicitWidth+14;height:26
+            color:desktop.openMenu===desktop.keyboardMenuIndex?desktop.menuAccent:"transparent"
+            Rectangle {
+                anchors.centerIn:parent;width:keyboardTitle.implicitWidth+6;height:15
+                color:"transparent";border.color:desktop.openMenu===desktop.keyboardMenuIndex?"white":"black"
+                Text {id:keyboardTitle;objectName:"keyboard-menu-title";anchors.centerIn:parent;text:desktop.keyboardShortName(manager.input.keyboard.layout)
+                      textFormat:Text.PlainText;font.pixelSize:10;font.bold:true;color:parent.border.color}
+            }
+            MouseArea {anchors.fill:parent;hoverEnabled:true;onPressed:desktop.showMenu(desktop.keyboardMenuIndex)
+                onEntered:if(desktop.openMenu>=0 && desktop.openMenu!==desktop.keyboardMenuIndex)desktop.showMenu(desktop.keyboardMenuIndex)}
         }
         // The application menu's etched strip, as in 9.2.2 (psn_tch's About This Computer capture):
         // a solid white line, four grip dots, then a solid grey line through the top highlight.
@@ -1024,9 +1119,50 @@ Rectangle {
                 MenuGlyph {objectName:"application-menu-glyph";kind:(appTitle.showWaiting?appMenu.waiting.name:manager.activeApplication)==="Finder"?"disk":"application";anchors.verticalCenter:parent.verticalCenter}
                 Text{id:appLabel;visible:!appTitle.showWaiting;text:manager.activeApplication;textFormat:Text.PlainText;color:desktop.openMenu===desktop.barEntries.length?"white":"black";font.bold:false;font.pixelSize:12;anchors.verticalCenter:parent.verticalCenter}
             }
-            MouseArea{anchors.fill:parent;onClicked:desktop.showMenu(desktop.barEntries.length)}
+            // Pressing opens the menu; dragging down past the open menu tears it off as the
+            // Application Switcher, dropped where the button is released (9.2.2).
+            MouseArea{
+                objectName:"application-menu-area";anchors.fill:parent;preventStealing:true
+                onPressed:{desktop.tearingSwitcher=false;desktop.showMenu(desktop.barEntries.length)}
+                onPositionChanged:function(mouse){
+                    if(!pressed || desktop.openMenu!==desktop.barEntries.length)return
+                    let at=mapToItem(desktop,mouse.x,mouse.y)
+                    desktop.tearPoint=at
+                    desktop.tearingSwitcher=at.y>popup.y+popup.height+6
+                }
+                onReleased:{
+                    if(!desktop.tearingSwitcher)return
+                    desktop.tearingSwitcher=false
+                    desktop.closeMenu()
+                    let area=manager.primaryDisplayRect
+                    desktop.appearance.setSwitcher(true,Math.max(0,Math.round(desktop.tearPoint.x-area.x-applicationSwitcher.width/2)),
+                                                   Math.max(0,Math.round(desktop.tearPoint.y-area.y)))
+                }
+                onCanceled:desktop.tearingSwitcher=false
+            }
         }
     }
+    // A chosen menu item blinks before its command runs, as many times as General Controls says
+    // (9.2.2: Off, 1, 2 or 3). The desktop keeps the count, since a menu can rebuild its rows
+    // while it is open (the Control Strip's refresh as they open).
+    property string blinkRow:""
+    property int blinkFlashes:0
+    property var blinkCommand:null
+    function chooseShellEntry(name, action, id) {
+        if(blinkFlashes>0)return
+        const blinks=desktop.appearance.general.menuBlinks
+        if(!(blinks>0)){dispatchShellCommand(action,id);return}
+        blinkRow=name;blinkCommand={action:action,id:id};blinkFlashes=2*blinks;menuBlink.start()
+    }
+    Timer {id:menuBlink;interval:45;repeat:true
+        onTriggered:{
+            desktop.blinkFlashes-=1
+            if(desktop.blinkFlashes>0)return
+            stop()
+            const command=desktop.blinkCommand
+            desktop.blinkRow="";desktop.blinkCommand=null
+            desktop.dispatchShellCommand(command.action,command.id)
+        }}
     Component {
         id: shellMenuRow
         Rectangle {
@@ -1035,16 +1171,20 @@ Rectangle {
             required property int index
             property bool submenuRow: false
             width:parent?parent.width:200;height:modelData.separator?9:25
-            readonly property bool lit:!modelData.separator && (entryMouse.containsMouse ||
-                (!submenuRow && Boolean(modelData.children) && desktop.openSubmenu===index))
+            readonly property bool blinking:desktop.blinkFlashes>0 && desktop.blinkRow===objectName
+            readonly property bool lit:!modelData.separator && (blinking ? desktop.blinkFlashes%2===1 : (entryMouse.containsMouse ||
+                (!submenuRow && Boolean(modelData.children) && desktop.openSubmenu===index)))
             color:lit?desktop.menuAccent:"transparent"
             objectName:"desktop-command-"+(modelData.name?modelData.name:modelData.action)
             Rectangle{visible:Boolean(modelData.separator);x:2;y:4;width:parent.width-4;height:1;color:"#888"}
             Text{visible:Boolean(modelData.checked);anchors.verticalCenter:parent.verticalCenter;x:4;text:"✓";font.pixelSize:12;color:row.lit?"white":"black"}
             // ◆: this application asks for attention (Mac OS 9's Notification Manager mark).
             Text{visible:Boolean(modelData.marked);objectName:"attention-mark-"+(modelData.text?modelData.text:"");anchors.verticalCenter:parent.verticalCenter;x:4;text:"◆";font.pixelSize:10;color:row.lit?"white":"black"}
+            // A label's colour swatch (File ▸ Label).
+            Rectangle {visible:Boolean(modelData.swatch);x:17;width:12;height:12;anchors.verticalCenter:parent.verticalCenter
+                color:modelData.swatch?modelData.swatch:"transparent";border.color:"#222"}
             MenuGlyph {objectName:"menu-glyph-"+(modelData.text?modelData.text:"");visible:Boolean(modelData.glyph);x:17;anchors.verticalCenter:parent.verticalCenter;kind:modelData.glyph?modelData.glyph:"application"}
-            Text{visible:!modelData.separator;anchors.verticalCenter:parent.verticalCenter;x:modelData.glyph?39:15;width:parent.width-x-20;elide:Text.ElideRight
+            Text{visible:!modelData.separator;anchors.verticalCenter:parent.verticalCenter;x:modelData.glyph || modelData.swatch?39:15;width:parent.width-x-20;elide:Text.ElideRight
                 text:modelData.text?modelData.text:"";textFormat:Text.PlainText;color:modelData.enabled===false?"#888":row.lit?"white":"black";font.pixelSize:12}
             Text{visible:Boolean(modelData.children);anchors.right:parent.right;anchors.rightMargin:6;anchors.verticalCenter:parent.verticalCenter;text:"▶";font.pixelSize:9;color:row.lit?"white":"black"}
             // A Wi-Fi network: its lock (secured) and four signal bars, at the right.
@@ -1065,13 +1205,14 @@ Rectangle {
                 text:modelData.key?modelData.key:"";textFormat:Text.PlainText;font.pixelSize:12;color:modelData.enabled===false?"#888":row.lit?"white":"black"}
             MouseArea{id:entryMouse;anchors.fill:parent;enabled:!modelData.separator && modelData.enabled!==false;hoverEnabled:true
                 onEntered:if(!row.submenuRow){if(modelData.children)desktop.openShellSubmenu(index,modelData.children,row.mapToItem(desktop,0,0).y);else desktop.openSubmenu=-1}
-                onClicked:if(modelData.children)desktop.openShellSubmenu(index,modelData.children,row.mapToItem(desktop,0,0).y);else desktop.dispatchShellCommand(modelData.action,modelData.id)}
+                onClicked:if(modelData.children)desktop.openShellSubmenu(index,modelData.children,row.mapToItem(desktop,0,0).y);else desktop.chooseShellEntry(row.objectName,modelData.action,modelData.id)}
         }
     }
     Rectangle {visible:popup.visible;z:10000.5;x:popup.x+3;y:popup.y+3;width:popup.width;height:popup.height;color:"#50000000"}
     Rectangle {
-        id: popup; z: 10001; visible:desktop.openMenu>=0 && desktop.exportedRoot<0
-        x:Math.max(menuBar.x,Math.min(desktop.openMenu===desktop.barEntries.length?menuBar.x+menuBar.width-width-2:desktop.menuX(desktop.openMenu),menuBar.x+menuBar.width-width))
+        id: popup; objectName: "desktop-menu-popup"; z: 10001; visible:desktop.openMenu>=0 && desktop.exportedRoot<0
+        x:Math.max(menuBar.x,Math.min(desktop.openMenu===desktop.barEntries.length?menuBar.x+menuBar.width-width-2
+              :desktop.openMenu===desktop.keyboardMenuIndex?keyboardMenu.mapToItem(desktop,0,0).x:desktop.menuX(desktop.openMenu),menuBar.x+menuBar.width-width))
         y:menuBar.y+25
         width:240;height:items.height+6;color:"#ddd";border.color:"#222"
         Column {
@@ -1123,8 +1264,10 @@ Rectangle {
         property point end:Qt.point(0,0)
         property bool dragging:false
         property var token:0
+        // What had the keyboard (an application's surface, a note, the desktop) gets it back.
+        property Item returnFocus:null
         function clamp(x,y){return Qt.point(Math.max(0,Math.min(width,x)),Math.max(0,Math.min(height,y)))}
-        function begin(){dragging=false;token=manager.beginShellModal();visible=true;forceActiveFocus()}
+        function begin(){dragging=false;returnFocus=desktop.Window.activeFocusItem;token=manager.beginShellModal();visible=true;forceActiveFocus()}
         function finish(copy){
             visible=false;dragging=false
             if(token){manager.endShellModal(token);token=0}
@@ -1136,7 +1279,9 @@ Rectangle {
             if(copy && w>0 && h>0 && manager.screenshots.select(x,y,w,h) && !manager.screenshots.copy())
                 statusMessage=manager.screenshots.error
             manager.screenshots.discard()
-            desktop.forceActiveFocus()
+            if(returnFocus && returnFocus.visible)returnFocus.forceActiveFocus()
+            else desktop.forceActiveFocus()
+            returnFocus=null
         }
         Keys.onPressed:function(event){event.accepted=true;if(event.key===Qt.Key_Escape)finish(false)}
         MouseArea {
@@ -1166,26 +1311,201 @@ Rectangle {
     // In front it is above every application window; behind, it sits below them, above the icons.
     // It belongs to the desktop (the Finder): bringing it forward makes the desktop the active
     // application, so the manager hands it the keyboard (onFocusDesktop) and not an application.
+    // Sticky Notes (StickyNotes, StickyNote.qml): a new note cascades from the primary display's
+    // upper middle and comes forward with the keyboard, ready for typing.
+    function newStickyNote() {
+        let area=manager.primaryDisplayRect, step=(manager.stickies.count%8)*24
+        let id=manager.stickies.create(area.x+Math.round(area.width/2)-110+step,area.y+60+step,"yellow")
+        if(id)Qt.callLater(function(){let n=stickyNote(id);if(n){n.bringForward();n.forceActiveFocus()}})
+    }
+    function stickyNote(id) {
+        for(let i=0;i<stickyRepeater.count;++i){let n=stickyRepeater.itemAt(i);if(n && n.noteId===id)return n}
+        return null
+    }
+    Repeater {
+        id:stickyRepeater
+        model:manager.stickies
+        delegate:StickyNote {
+            id:stickyItem
+            notes:manager.stickies
+            visible:!manager.stickies.hidden
+            // In front: above every application window and the Control Panels behind it. Kept in
+            // front: above applications even behind. Otherwise below them, above the icons.
+            z:front?3995+noteOrder*0.001:noteFloating?3000+noteOrder*0.001:0.6+noteOrder*0.001
+            onRaised:desktop.bringShellWindowForward(stickyItem)
+            onNewNoteRequested:desktop.newStickyNote()
+            onDeleteRequested:function(id,empty){
+                // Removing the row destroys this note: give the keyboard back first, remove after.
+                if(empty){desktop.forceActiveFocus();Qt.callLater(function(){manager.stickies.remove(id)});return}
+                deleteStickyDialog.noteId=id;deleteStickyDialog.open()
+            }
+        }
+    }
+    // Deleting a note with text asks first; Cancel is the default (Return keeps the note).
+    ShellDialog {
+        id:deleteStickyDialog;objectName:"sticky-delete-dialog";sessionManager:manager;width:400;title:"Stickies"
+        alertSound:true
+        cancelIsDefault:true
+        property int noteId:0
+        standardButtons:Dialog.Ok | Dialog.Cancel
+        contentItem:Text {text:"Delete this note? Its text will be lost.";textFormat:Text.PlainText;wrapMode:Text.WordWrap;font.pixelSize:12}
+        onAccepted:{manager.stickies.remove(noteId);noteId=0}
+        onRejected:{let n=desktop.stickyNote(noteId);noteId=0;if(n)n.forceActiveFocus()}
+    }
     // Opened from an application, closing it goes back to that application, as when a Mac OS 9
     // control panel quit; unless something else was brought forward in between.
-    property var controlPanelsReturnTo:0
-    property bool controlPanelsPending:false
-    function bringControlPanelsForward() {
-        // An alert or the Applications browser still has the input: come forward after it.
-        if(manager.shellModal){controlPanelsPending=true;return}
-        controlPanelsPending=false
-        if(!manager.desktopActive){let a=manager.applications.find(function(x){return x.active});controlPanelsReturnTo=a?a.id:0}
-        manager.activateDesktop()
-        if(controlPanels.visible)controlPanels.forceActiveFocus()
+    // The desktop-owned window that had the keyboard last (ShellWindowFocus): Control Panels or a note.
+    property var frontShellWindow:null
+    property bool tearingSwitcher:false
+    property point tearPoint
+    // The desk accessory in front, when it takes the Edit menu's commands (editCommands, edit()).
+    function editAccessory() {
+        let w=frontShellWindow
+        return w && w.visible && w.front && w.editCommands!==undefined ? w : null
     }
-    Connections {target:manager;function onContextChanged(){if(desktop.controlPanelsPending && !manager.shellModal)Qt.callLater(desktop.bringControlPanelsForward)}}
+    property var controlPanelsReturnTo:0
+    // A desktop-owned window waiting for an alert or the Applications browser to finish.
+    property var shellWindowPending:null
+    function bringShellWindowForward(window) {
+        // An alert or the Applications browser still has the input: come forward after it.
+        if(manager.shellModal){shellWindowPending=window;return}
+        shellWindowPending=null
+        if(window===controlPanels && !manager.desktopActive){let a=manager.applications.find(function(x){return x.active});controlPanelsReturnTo=a?a.id:0}
+        manager.activateDesktop()
+        if(window.visible)window.forceActiveFocus()
+    }
+    Connections {target:manager;function onContextChanged(){
+        let w=desktop.shellWindowPending
+        if(w && !manager.shellModal)Qt.callLater(function(){desktop.bringShellWindowForward(w)})
+    }}
+    property var aboutReturnTo:0
+    property var aboutReturnWindow:null
+    AboutComputerWindow {
+        id:aboutComputer
+        sessionManager:manager
+        z:front?3991:0.76
+        x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
+        y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
+        onRaised:{
+            if(!manager.desktopActive){let a=manager.applications.find(function(a){return a.active});desktop.aboutReturnTo=a?a.id:0}
+            let previous=desktop.frontShellWindow
+            if(previous && previous!==aboutComputer && previous.visible)desktop.aboutReturnWindow=previous
+            desktop.bringShellWindowForward(aboutComputer)
+        }
+        onFrontChanged:if(!front && visible){desktop.aboutReturnTo=0;desktop.aboutReturnWindow=null}
+        onClosed:{
+            let id=desktop.aboutReturnTo, previous=desktop.aboutReturnWindow
+            desktop.aboutReturnTo=0;desktop.aboutReturnWindow=null
+            if(desktop.shellWindowPending===aboutComputer)desktop.shellWindowPending=null
+            if(id && manager.desktopActive && manager.applications.some(function(a){return a.id===id && !a.hidden}))manager.activateApplication(id)
+            else if(previous && previous.visible)desktop.bringShellWindowForward(previous)
+            else desktop.forceActiveFocus()
+        }
+    }
+    property var calculatorReturnTo:0
+    property var calculatorReturnWindow:null
+    CalculatorWindow {
+        id:calculator
+        z:front?3992:0.77
+        x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
+        y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
+        onRaised:{
+            if(!manager.desktopActive){let a=manager.applications.find(function(a){return a.active});desktop.calculatorReturnTo=a?a.id:0}
+            let previous=desktop.frontShellWindow
+            if(previous && previous!==calculator && previous.visible)desktop.calculatorReturnWindow=previous
+            desktop.bringShellWindowForward(calculator)
+        }
+        onFrontChanged:if(!front && visible){desktop.calculatorReturnTo=0;desktop.calculatorReturnWindow=null}
+        onCopyRequested:function(text){if(manager.clipboard)manager.clipboard.copyText(text)}
+        onClosed:{
+            let id=desktop.calculatorReturnTo, previous=desktop.calculatorReturnWindow
+            desktop.calculatorReturnTo=0;desktop.calculatorReturnWindow=null
+            if(desktop.shellWindowPending===calculator)desktop.shellWindowPending=null
+            if(id && manager.desktopActive && manager.applications.some(function(a){return a.id===id && !a.hidden}))manager.activateApplication(id)
+            else if(previous && previous.visible)desktop.bringShellWindowForward(previous)
+            else desktop.forceActiveFocus()
+        }
+    }
+    property var notePadReturnTo:0
+    property var notePadReturnWindow:null
+    NotePadWindow {
+        id:notePadWindow
+        store:manager.notePad
+        z:front?3993:0.78
+        x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
+        y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
+        onRaised:{
+            if(!manager.desktopActive){let a=manager.applications.find(function(a){return a.active});desktop.notePadReturnTo=a?a.id:0}
+            let previous=desktop.frontShellWindow
+            if(previous && previous!==notePadWindow && previous.visible)desktop.notePadReturnWindow=previous
+            desktop.bringShellWindowForward(notePadWindow)
+        }
+        onFrontChanged:if(!front && visible){desktop.notePadReturnTo=0;desktop.notePadReturnWindow=null}
+        onClosed:{
+            let id=desktop.notePadReturnTo, previous=desktop.notePadReturnWindow
+            desktop.notePadReturnTo=0;desktop.notePadReturnWindow=null
+            if(desktop.shellWindowPending===notePadWindow)desktop.shellWindowPending=null
+            if(id && manager.desktopActive && manager.applications.some(function(a){return a.id===id && !a.hidden}))manager.activateApplication(id)
+            else if(previous && previous.visible)desktop.bringShellWindowForward(previous)
+            else desktop.forceActiveFocus()
+        }
+    }
+    property var keyCapsReturnTo:0
+    property var keyCapsReturnWindow:null
+    KeyCapsWindow {
+        id:keyCapsWindow
+        caps:manager.keyCaps
+        z:front?3993.5:0.785
+        x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
+        y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
+        onRaised:{
+            if(!manager.desktopActive){let a=manager.applications.find(function(a){return a.active});desktop.keyCapsReturnTo=a?a.id:0}
+            let previous=desktop.frontShellWindow
+            if(previous && previous!==keyCapsWindow && previous.visible)desktop.keyCapsReturnWindow=previous
+            desktop.bringShellWindowForward(keyCapsWindow)
+        }
+        onFrontChanged:if(!front && visible){desktop.keyCapsReturnTo=0;desktop.keyCapsReturnWindow=null}
+        onClosed:{
+            let id=desktop.keyCapsReturnTo, previous=desktop.keyCapsReturnWindow
+            desktop.keyCapsReturnTo=0;desktop.keyCapsReturnWindow=null
+            if(desktop.shellWindowPending===keyCapsWindow)desktop.shellWindowPending=null
+            if(id && manager.desktopActive && manager.applications.some(function(a){return a.id===id && !a.hidden}))manager.activateApplication(id)
+            else if(previous && previous.visible)desktop.bringShellWindowForward(previous)
+            else desktop.forceActiveFocus()
+        }
+    }
+    property var scrapbookReturnTo:0
+    property var scrapbookReturnWindow:null
+    ScrapbookWindow {
+        id:scrapbookWindow
+        store:manager.scrapbook
+        clipboard:manager.clipboard
+        z:front?3994:0.79
+        x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
+        y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
+        onRaised:{
+            if(!manager.desktopActive){let a=manager.applications.find(function(a){return a.active});desktop.scrapbookReturnTo=a?a.id:0}
+            let previous=desktop.frontShellWindow
+            if(previous && previous!==scrapbookWindow && previous.visible)desktop.scrapbookReturnWindow=previous
+            desktop.bringShellWindowForward(scrapbookWindow)
+        }
+        onFrontChanged:if(!front && visible){desktop.scrapbookReturnTo=0;desktop.scrapbookReturnWindow=null}
+        onClosed:{
+            let id=desktop.scrapbookReturnTo, previous=desktop.scrapbookReturnWindow
+            desktop.scrapbookReturnTo=0;desktop.scrapbookReturnWindow=null
+            if(desktop.shellWindowPending===scrapbookWindow)desktop.shellWindowPending=null
+            if(id && manager.desktopActive && manager.applications.some(function(a){return a.id===id && !a.hidden}))manager.activateApplication(id)
+            else if(previous && previous.visible)desktop.bringShellWindowForward(previous)
+            else desktop.forceActiveFocus()
+        }
+    }
     ControlPanelsWindow {
         id:controlPanels;z:front?3990:0.75
-        onRaised:desktop.bringControlPanelsForward()
+        onRaised:desktop.bringShellWindowForward(controlPanels)
         onFrontChanged:if(!front && visible)desktop.controlPanelsReturnTo=0
         onClosed:{
             let id=desktop.controlPanelsReturnTo
-            desktop.controlPanelsReturnTo=0;desktop.controlPanelsPending=false
+            desktop.controlPanelsReturnTo=0;if(desktop.shellWindowPending===controlPanels)desktop.shellWindowPending=null
             if(id && manager.desktopActive && manager.applications.some(function(a){return a.id===id && !a.hidden}))manager.activateApplication(id)
         }
         x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
@@ -1199,6 +1519,7 @@ Rectangle {
         DateTimePanel {id:dateTimePanel;settings:desktop.appearance}
         DesktopPictureDialog {id:desktopPictureDialog;settings:desktop.appearance}
         EnergySaverPanel {id:energyPanel;settings:manager.energy;sessionManager:manager}
+        GeneralControlsPanel {id:generalPanel;settings:desktop.appearance}
         KeyboardPanel {id:keyboardPanel;settings:manager.input}
         MonitorsPanel {id:monitorsPanel;sessionManager:manager}
         MousePanel {id:mousePanel;settings:manager.input}
@@ -1258,6 +1579,29 @@ Rectangle {
             else if(!manager.displayChangePending && displayKeepDialog.visible)displayKeepDialog.close()
         }
     }
+    // Spring-loaded folders: a drag held a second over a desktop folder, disk or Trash opens it, so
+    // the drop can go into its window (Mac OS 9).
+    Timer {
+        id:springTimer;interval:1000
+        property string target:desktopFiles?desktopFiles.dropTarget:""
+        onTargetChanged:if(target!=="")restart();else stop()
+        onTriggered:if(desktopFiles.dropTarget===target)desktopFiles.springOpen(target)
+    }
+    ApplicationSwitcher {
+        id:applicationSwitcher;z:7990;sessionManager:manager;settings:desktop.appearance
+        applications:desktop.applicationsByName()
+        onChosen:function(id){desktop.dispatchShellCommand("app",id)}
+    }
+    // The palette's outline, dotted, following the pointer while it is torn off the menu.
+    Canvas {
+        id:tearOutline;objectName:"application-switcher-outline";z:10002
+        visible:desktop.tearingSwitcher
+        x:desktop.tearPoint.x-width/2;y:desktop.tearPoint.y;width:applicationSwitcher.width;height:applicationSwitcher.height
+        onVisibleChanged:if(visible)requestPaint()
+        onPaint:{let c=getContext("2d");c.clearRect(0,0,width,height);c.fillStyle="#333"
+            for(let x=0;x<width;x+=2){c.fillRect(x,0,1,1);c.fillRect(x,height-1,1,1)}
+            for(let y=0;y<height;y+=2){c.fillRect(0,y,1,1);c.fillRect(width-1,y,1,1)}}
+    }
     ControlStrip {id:desktopControlStrip;z:8000;sessionManager:manager;settings:desktop.appearance;openModule:desktop.stripModule
         extraModules:manager.statusItems ? manager.statusItems.items.map(function(i){return {command:"status:"+i.key,name:i.title,icon:i.icon,statusId:i.id}}) : []
         onModuleRequested:function(module,anchor){desktop.openStripModule(module,anchor)}}
@@ -1314,7 +1658,7 @@ Rectangle {
             Text {text:"Name:";textFormat:Text.PlainText;font.pixelSize:12}
             TextField {
                 id:nameField;objectName:"desktop-name-field";width:parent.width;selectByMouse:true;font.pixelSize:12
-                color:"black";selectionColor:"#202050";selectedTextColor:"white"
+                color:"black";selectionColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightColor : "#ccccff"; selectedTextColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightTextColor : "black"
                 background:FieldBackground{}
                 onAccepted:nameDialog.accept()
                 Keys.onPressed:function(event){if(event.key===Qt.Key_A && (event.modifiers & Qt.MetaModifier)){selectAll();event.accepted=true}}

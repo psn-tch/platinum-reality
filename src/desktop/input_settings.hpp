@@ -9,12 +9,15 @@
 class InputSettings final : public QObject
 {
     Q_OBJECT
-    // {repeatDelay (ms, 150-1500), repeatRate (per second, 1-60)}
+    // {repeatDelay (ms, 150-1500), repeatRate (per second, 1-60), layouts (the checked Keyboard
+    // Layouts), layout (the one in use)}
     Q_PROPERTY(QVariantMap keyboard READ keyboard NOTIFY changed)
     // {speed (-1 to 1), natural, leftHanded}
     Q_PROPERTY(QVariantMap pointer READ pointer NOTIFY changed)
     // {speed (-1 to 1), natural, tap, disableWhileTyping}
     Q_PROPERTY(QVariantMap touchpad READ touchpad NOTIFY changed)
+    // Every layout the Keyboard panel offers: [{id ("de", "ch(fr)"), name ("German")}], by name.
+    Q_PROPERTY(QVariantList layoutChoices READ layoutChoices CONSTANT)
   public:
     explicit InputSettings(QString profile, QObject *parent = nullptr);
     QVariantMap keyboard() const { return section("keyboard"); }
@@ -25,6 +28,10 @@ class InputSettings final : public QObject
     Q_INVOKABLE bool reset(const QString &section);
     int repeatDelay() const { return m_values.value("keyboard/repeatDelay").toInt(); }
     int repeatRate() const { return m_values.value("keyboard/repeatRate").toInt(); }
+    QStringList layouts() const { return m_values.value("keyboard/layouts").toStringList(); }
+    QString layout() const { return m_values.value("keyboard/layout").toString(); }
+    QVariantList layoutChoices() const;
+    Q_INVOKABLE QString layoutName(const QString &id) const;
 
   signals:
     void changed();

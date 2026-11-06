@@ -8,6 +8,11 @@ and the shared Platinum controls, without original Apple executable or artwork
 files. It recalls the classic Puzzle desk accessory; exact IIsi-era geometry and
 version-specific rules have not been historically authenticated.
 
+**Command-Shift-3** puts a picture of the whole desktop on the clipboard.
+**Command-Shift-4** or **Command-Shift-P** shows a crosshair: drag across an
+area and a picture of just that goes on the clipboard (Escape cancels). The
+keyboard then goes back to whatever had it, the application included.
+
 **Alt+Shift+S** captures the Platinum Reality desktop and opens Screenshot. The
 snapshot is taken before the tool opens. Drag on its preview to crop, or choose
 **Entire Desktop**. Enter a PNG filename and choose **Save**; **Cancel** discards

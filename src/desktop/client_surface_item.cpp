@@ -5,6 +5,7 @@
 #include <QPointer>
 #include <QQuickWindow>
 #include <QWaylandXdgSurface>
+#include <QSet>
 #include <QWaylandXdgShell>
 #include <QtMath>
 #include <QtQuick/private/qquickitem_p.h>
@@ -202,13 +203,32 @@ static void forgetChildBounds(QQuickItem *item)
         QQuickItemPrivate::get(item)->eventHandlingChildrenWithinBoundsSet = false;
 }
 
+namespace
+{
+QSet<const QObject *> &livePopups()
+{
+    static QSet<const QObject *> popups;
+    return popups;
+}
+} // namespace
+
+void ClientSurfaceItem::trackPopup(QWaylandXdgPopup *popup)
+{
+    if (!popup || livePopups().contains(popup))
+        return;
+    livePopups().insert(popup);
+    QObject::connect(popup, &QObject::destroyed, [popup] { livePopups().remove(popup); });
+}
+
 void ClientSurfaceItem::constrainPopups(QQuickItem *parent)
 {
     for (auto *child : parent->childItems())
     {
         auto *item = qobject_cast<QWaylandQuickShellSurfaceItem *>(child);
         auto *xdg = item ? qobject_cast<QWaylandXdgSurface *>(item->shellSurface()) : nullptr;
-        if (xdg && xdg->popup() && !item->property("platinumPopupConstrained").toBool())
+        // Compared by address only: a freed popup is never dereferenced.
+        if (xdg && xdg->popup() && livePopups().contains(xdg->popup()) &&
+            !item->property("platinumPopupConstrained").toBool())
         {
             item->setProperty("platinumPopupConstrained", true);
             constrainPopup(item, xdg->popup());

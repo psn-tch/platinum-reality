@@ -23,6 +23,7 @@
 #include "gtk_shell.hpp"
 #include "primary_selection.hpp"
 #include "command_keys.hpp"
+#include "computer_info.hpp"
 #include "client_cursors.hpp"
 #include "session_control.hpp"
 #include "icon_store.hpp"
@@ -33,6 +34,9 @@
 #include "host_pointer.hpp"
 #include "pointer_constraints.hpp"
 #include "screenshot_service.hpp"
+#include "note_pad.hpp"
+#include "scrapbook.hpp"
+#include "key_caps.hpp"
 #include "finder/file_drag.hpp"
 #include "menu_broker.hpp"
 #include "surface_client.hpp"
@@ -61,6 +65,7 @@
 #include <QTimer>
 #include <QWaylandClient>
 #include <QWaylandDrag>
+#include <QWaylandKeymap>
 #include <QWaylandPointer>
 #include <QWaylandQuickItem>
 #include <QWaylandQuickOutput>
@@ -102,6 +107,11 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     m_appearance = new AppearanceSettings(m_profile, this);
     m_input = new InputSettings(m_profile, this);
     m_energy = new EnergySettings(m_profile, this);
+    m_stickies = new StickyNotes(m_profile, this);
+    m_notePad = new NotePad(m_profile, this);
+    m_scrapbook = new Scrapbook(m_profile, this);
+    m_keyCaps = new KeyCaps(this);
+    m_keyCaps->setLayout(m_input->layout());
     m_screenshots = new ScreenshotService(m_view, this);
     m_systemControls = new SystemControls(QCoreApplication::applicationDirPath()+"/system_controls.py", this);
     m_audio = new AudioService(QCoreApplication::applicationDirPath()+"/audio_controls.py", this);
@@ -228,8 +238,14 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     connect(m_input, &InputSettings::errorOccurred, this, &NativeManager::errorOccurred);
     connect(m_input, &InputSettings::saved, this, [this] { requestSupervisor("input apply\n"); });
     connect(m_energy, &EnergySettings::errorOccurred, this, &NativeManager::errorOccurred);
+    connect(m_stickies, &StickyNotes::errorOccurred, this, &NativeManager::errorOccurred);
+    // Typing is saved a moment later; quitting the desktop saves at once (~StickyNotes).
+    connect(qApp, &QCoreApplication::aboutToQuit, m_stickies, &StickyNotes::saveNow);
+    connect(m_notePad, &NotePad::errorOccurred, this, &NativeManager::errorOccurred);
+    connect(m_scrapbook, &Scrapbook::errorOccurred, this, &NativeManager::errorOccurred);
+    connect(qApp, &QCoreApplication::aboutToQuit, m_notePad, &NotePad::saveNow);
     connect(m_energy, &EnergySettings::saved, this, [this] { requestSupervisor("energy apply\n"); });
-    connect(m_input, &InputSettings::changed, this, &NativeManager::applyKeyboardRepeat);
+    connect(m_input, &InputSettings::changed, this, &NativeManager::applyKeyboard);
     // Flash drives: mounted as they are plugged in only in the whole session (a desktop in a window
     // leaves that to the desktop around it), and, like Bluetooth, never from a test's host bus.
     m_removableMedia = new RemovableMedia(hostBluetooth ? QDBusConnection::systemBus() : QDBusConnection(QString()),
@@ -252,7 +268,7 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
             if (auto *sounds = qobject_cast<AlertSounds *>(m_alertSounds)) sounds->play();
         });
         new KeyboardBroadcast(m_compositor, this);
-        applyKeyboardRepeat();
+        applyKeyboard();
         auto *clipboard = new Clipboard(m_compositor, this);
         m_clipboard = clipboard;
         new DataControl(m_compositor, clipboard, this);
@@ -792,6 +808,22 @@ QObject *NativeManager::energy() const
 {
     return m_energy;
 }
+QObject *NativeManager::stickies() const
+{
+    return m_stickies;
+}
+QObject *NativeManager::notePad() const
+{
+    return m_notePad;
+}
+QObject *NativeManager::scrapbook() const
+{
+    return m_scrapbook;
+}
+QObject *NativeManager::keyCaps() const
+{
+    return m_keyCaps;
+}
 void NativeManager::requestSupervisor(const QByteArray &command)
 {
     // Outside the managed session (tests, a desktop in a window) there is no supervisor: the
@@ -813,15 +845,25 @@ void NativeManager::sendPendingSupervisorRequest()
     if (!m_sessionControl->request(command))
         m_supervisorPending.prepend(command);
 }
-void NativeManager::applyKeyboardRepeat()
+void NativeManager::applyKeyboard()
 {
-    // Wayland applications repeat keys themselves, at the rate and delay the compositor gives.
+    if (m_input && m_keyCaps)
+        m_keyCaps->setLayout(m_input->layout());
+    // Wayland applications repeat keys themselves, at the rate and delay the compositor gives, and
+    // turn key codes into text with its keymap: the layout in use ("ch(fr)": layout ch, variant fr).
     auto *seat = m_compositor ? m_compositor->defaultSeat() : nullptr;
     auto *keyboard = seat ? seat->keyboard() : nullptr;
     if (!keyboard || !m_input)
         return;
     keyboard->setRepeatDelay(quint32(m_input->repeatDelay()));
     keyboard->setRepeatRate(quint32(m_input->repeatRate()));
+    const auto layout = m_input->layout();
+    const auto open = layout.indexOf('(');
+    if (auto *keymap = seat->keymap())
+    {
+        keymap->setLayout(open > 0 ? layout.left(open) : layout);
+        keymap->setVariant(open > 0 ? layout.mid(open + 1, layout.size() - open - 2) : QString());
+    }
 }
 QObject *NativeManager::appearance() const
 {
@@ -1047,6 +1089,8 @@ ManagedWindow *NativeManager::windowForSurface(QWaylandSurface *surface) const
 void NativeManager::attachShell(QWaylandXdgShell *shell)
 {
     connect(shell, &QWaylandXdgShell::toplevelCreated, this, &NativeManager::createWindow);
+    connect(shell, &QWaylandXdgShell::popupCreated, this,
+            [](QWaylandXdgPopup *popup, QWaylandXdgSurface *) { ClientSurfaceItem::trackPopup(popup); });
 }
 void NativeManager::updateWindowRelationship(ManagedWindow *record)
 {
@@ -2474,6 +2518,29 @@ bool NativeManager::takeWelcome()
     if (!QDir::isAbsolutePath(config))
         config = QDir::home().filePath(".config");
     return QFile::remove(config + "/platinum-reality/welcome-pending");
+}
+
+QVariantMap NativeManager::computerInformation() const
+{
+    QList<ComputerApplication> applications;
+    for (auto id : m_state.applications_back_to_front) {
+        ComputerApplication app{id.value,m_applicationNames.value(id.value),{}};
+        if (id == m_desktopApplication) app.processes.append(QCoreApplication::applicationPid());
+        for (auto *window : m_windows) {
+            const auto state = m_state.windows.find(window->identity);
+            if (state == m_state.windows.end() || state->second.application != id) continue;
+            // The X11 bridge owns the Wayland connection, not the X11 program's
+            // memory. Do not present bridge RSS as an application's measurement.
+            if (window->viaX11Bridge || !window->xdg) { app.processes.append(0); continue; }
+            const auto pid = liveSurfaceClientPid(window->xdg->surface());
+            if (!app.processes.contains(pid)) app.processes.append(pid);
+        }
+        applications.append(app);
+    }
+    std::sort(applications.begin(),applications.end(),[](const auto &a,const auto &b){
+        return QString::localeAwareCompare(a.name,b.name)<0;
+    });
+    return ::computerInformation(applications);
 }
 
 QString NativeManager::aboutThisComputer() const

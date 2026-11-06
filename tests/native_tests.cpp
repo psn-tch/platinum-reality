@@ -5,6 +5,8 @@
 #include "desktop/appearance_settings.hpp"
 #include "desktop/desktop_items.hpp"
 #include "desktop/manager.hpp"
+#include "desktop/sticky_notes.hpp"
+#include "desktop/input_settings.hpp"
 #include "desktop/alert_sounds.hpp"
 #include "desktop/attention.hpp"
 #include "desktop/clipboard.hpp"
@@ -14,6 +16,7 @@
 #include "desktop/x11_bridge.hpp"
 #include "desktop/surface_client.hpp"
 #include "desktop/screenshot_service.hpp"
+#include "desktop/system_controls.hpp"
 #include "desktop/view_lifecycle.hpp"
 #include "desktop/graphics_integration.hpp"
 #include "desktop/host_pointer.hpp"
@@ -1175,26 +1178,62 @@ class NativeTests : public QObject
                 wire.print();
         });
         QElapsedTimer clock;
-        clock.start();
-        browser.start(plan.program,plan.arguments);
-        QVERIFY(browser.waitForStarted());
         qulonglong id=0;
-        QVERIFY2(QTest::qWaitFor([&]{
-            for(const auto &value:manager.snapshot().value("windows").toList())
-                if(value.toMap().value("title").toString().startsWith("Menu fixture ready"))
-                    {id=value.toMap().value("id").toULongLong();return true;}
-            return false;
-        },20000),"The browser did not load the context-menu fixture.");
+        QWaylandQuickShellSurfaceItem *client=nullptr;
         const auto title=[&] {
             for(const auto &value:manager.snapshot().value("windows").toList())
                 if(value.toMap().value("id").toULongLong()==id) return value.toMap().value("title").toString();
             return QString();
         };
-        auto *client=qobject_cast<QWaylandQuickShellSurfaceItem *>(visualItem(scene.view.contentItem(),"client-"+QString::number(id)));
-        QVERIFY(client);
-        QVERIFY2(QFileInfo(QString("/proc/%1/exe").arg(liveSurfaceClientPid(client->surface()))).canonicalFilePath()
-                     .endsWith(chromium ? "/chromium" : "/firefox"),
-                 "The context-menu browser unexpectedly used the X11 bridge rather than native Wayland");
+        // Firefox 158 hangs while creating the FIRST context-menu popup of a process, about 2.5% of
+        // launches, also under plain Sway without this compositor (HANDOFF, 2026-10-20). Rocky's
+        // warm-up menu takes that first popup; the 200-run measurement (2026-11-02) failed only
+        // there (5/200), never on the asserted menus after it. A hung Firefox never recovers, so a
+        // hung warm-up gets one fresh Firefox, said in the log. Every menu after it stays asserted.
+        for (int launch=0; ; ++launch) {
+            clock.start();
+            browser.start(plan.program,plan.arguments);
+            QVERIFY(browser.waitForStarted());
+            id=0;
+            QVERIFY2(QTest::qWaitFor([&]{
+                for(const auto &value:manager.snapshot().value("windows").toList())
+                    if(value.toMap().value("title").toString().startsWith("Menu fixture ready"))
+                        {id=value.toMap().value("id").toULongLong();return true;}
+                return false;
+            },20000),"The browser did not load the context-menu fixture.");
+            client=qobject_cast<QWaylandQuickShellSurfaceItem *>(visualItem(scene.view.contentItem(),"client-"+QString::number(id)));
+            QVERIFY(client);
+            QVERIFY2(QFileInfo(QString("/proc/%1/exe").arg(liveSurfaceClientPid(client->surface()))).canonicalFilePath()
+                         .endsWith(chromium ? "/chromium" : "/firefox"),
+                     "The context-menu browser unexpectedly used the X11 bridge rather than native Wayland");
+            if (chromium)
+                break;
+            manager.activate(id);
+            QTRY_VERIFY(client->hasActiveFocus());
+            const auto point=client->mapToScene(client->mapFromSurface(QPointF(240,260))).toPoint();
+            QTest::mouseMove(&scene.view,point);
+            QTest::qWait(50);
+            QTest::mouseClick(&scene.view,Qt::RightButton,{},point);
+            const bool mapped=QTest::qWaitFor([&]{return title().startsWith("Context menu requested") &&
+                popupItems(client).size()==1 && popupItems(client).first()->boundingRect().height()>100;},5000);
+            if (!mapped && launch==0) {
+                qInfo("Firefox's first context-menu popup hung (the known Firefox bug); starting a fresh Firefox once.");
+                capture(scene.view,"native-firefox-context-warmup-hung.png");
+                if (browser.state()==QProcess::Running) printThreadWaits(browser.processId());
+                browser.kill();
+                QVERIFY(browser.waitForFinished(5000));
+                const auto gone=id;
+                QTRY_VERIFY_WITH_TIMEOUT(!visualItem(scene.view.contentItem(),"client-"+QString::number(gone)),5000);
+                continue;
+            }
+            QVERIFY2(mapped,"Firefox's warm-up context menu did not map in a fresh Firefox either.");
+            QVERIFY(capture(scene.view,"native-firefox-context-warmup.png"));
+            nativeKeyEvent(&scene.view,QEvent::KeyPress,Qt::Key_Escape,{},1);
+            nativeKeyEvent(&scene.view,QEvent::KeyRelease,Qt::Key_Escape,{},1);
+            QTRY_VERIFY(popupItems(client).isEmpty());
+            QTRY_VERIFY(client->hasActiveFocus());
+            break;
+        }
         manager.moveWindow(id,130,80);
         manager.resizeWindow(id,800,500);
         const auto sizeReady=[&] {
@@ -3235,7 +3274,12 @@ class NativeTests : public QObject
         QVERIFY(moved(340, -50));
         QVERIFY(manager.pointerCaptured());
         QVERIFY(capture(scene.view, "native-sdl-relative-" + driver + ".png"));
-        pointerReleaseChord(&scene.view);
+        LineProcess keyboard;
+        keyboard.process.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
+        keyboard.process.start(QCoreApplication::applicationDirPath()+"/virtual-keyboard-driver");
+        QCOMPARE(keyboard.next("driver-ready"), QString("driver-ready"));
+        QTest::qWait(500);
+        QVERIFY(keyboard.send("chord ctrl+alt+escape", "ok"));
         QTRY_VERIFY(!manager.pointerCaptured());
         QVERIFY(game.send("relative 0", "relative-mode 0"));
         game.process.write("quit\n");
@@ -4411,7 +4455,8 @@ class NativeTests : public QObject
         const auto editMenu=[&](const QString &command) {
             if(!clickItem("bar-entry-1"))return false;
             QTest::qWait(150); // The menu's rows are laid out after it opens.
-            return clickItem("desktop-command-"+command);
+            // The chosen item blinks first (General Controls), then the menu closes.
+            return clickItem("desktop-command-"+command) && QTest::qWaitFor([&]{return !manager.menuOpen();},3000);
         };
         // The bottom of each window is page content in both browsers.
         wire.mark("click source");
@@ -6002,7 +6047,15 @@ class NativeTests : public QObject
         QVERIFY(apple);
         QTest::mouseClick(&scene.view, Qt::LeftButton, {}, apple->mapToScene(QPointF(10, 10)).toPoint());
         QTRY_VERIFY(scene.manager->menuOpen());
-        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, inside);
+        // A point of the window clear of the open menu: the Apple menu grew with Stickies and
+        // reached down over the window's corner, where a click is a menu choice, not a dismissal.
+        auto *popup = visualItem(scene.view.contentItem(), "desktop-menu-popup");
+        QVERIFY(popup);
+        QTRY_VERIFY(popup->height() > 100); // Laid out.
+        const QPoint clear(window().value("x").toInt() + window().value("width").toInt() - 30, inside.y());
+        QVERIFY2(!QRectF(popup->mapToScene(QPointF(0, 0)), popup->size()).contains(clear),
+                 "The test's click point lies on the open menu");
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, clear);
         QTRY_VERIFY(!scene.manager->menuOpen());
         QDBusInterface("org.frankenstein.NativeProbeDismiss", "/Probe", "org.frankenstein.NativeProbe").call("Finish");
     }
@@ -6717,6 +6770,612 @@ class NativeTests : public QObject
             QSKIP("This browser workflow needs the installed Chromium.");
         contextMenuSaves(true);
     }
+    void applicationSwitcherSwitchesBetweenRealApplications()
+    {
+        // The palette torn off the Application menu: a row for each application; a click brings
+        // that application forward, the Finder's row the desktop.
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager = *scene.manager;
+        auto *settings = qobject_cast<AppearanceSettings *>(manager.appearance());
+        QVERIFY(settings);
+        const auto restore = qScopeGuard([&] { settings->setSwitcher(false, 0, 0); });
+        QVERIFY(settings->setSwitcher(true, 700, 300));
+        QProcess app;
+        app.setProcessEnvironment(scene.childEnvironment());
+        app.start(QCoreApplication::applicationDirPath() + "/native-probe", {"Switcher"});
+        const auto stop = qScopeGuard([&] {
+            if (app.state() != QProcess::NotRunning) { app.kill(); app.waitForFinished(3000); }
+        });
+        QTRY_VERIFY(!first(manager, "Native Probe Switcher").isEmpty());
+        QTRY_VERIFY(!manager.desktopActive());
+        auto *palette = visualItem(scene.view.contentItem(), "application-switcher");
+        QVERIFY(palette && palette->isVisible());
+        const auto clickRow = [&](const QString &name) {
+            for (int attempt = 0; attempt < 100; ++attempt) {
+                auto *row = visualItem(scene.view.contentItem(), "application-switcher-" + name);
+                if (row && row->isVisible() && row->width() > 0) {
+                    QTest::mouseClick(&scene.view, Qt::LeftButton, {},
+                                      row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint());
+                    return true;
+                }
+                QTest::qWait(30);
+            }
+            return false;
+        };
+        const auto probeName = manager.activeApplication();
+        QVERIFY(probeName != "Finder");
+        QVERIFY(clickRow("Finder"));
+        QTRY_VERIFY(manager.desktopActive());
+        QVERIFY(clickRow(probeName));
+        QTRY_VERIFY(!manager.desktopActive());
+        QTRY_COMPARE(manager.activeApplication(), probeName);
+        QVERIFY(capture(scene.view, "native-application-switcher.png"));
+        QDBusInterface probe("org.frankenstein.NativeProbeSwitcher", "/Probe", "org.frankenstein.NativeProbe");
+        if (probe.isValid())
+            probe.asyncCall("Finish");
+    }
+    void desktopIconsHideBehindApplicationsWhenGeneralControlsSaysSo()
+    {
+        // General Controls ▸ Show Desktop when in background, off: the desktop's icons go while an
+        // application is in front and come back with the Finder (9.2.2).
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager = *scene.manager;
+        auto *settings = qobject_cast<AppearanceSettings *>(manager.appearance());
+        QVERIFY(settings);
+        const auto restore = qScopeGuard([&] { settings->setGeneralOption("showDesktop", true); });
+        QVERIFY(settings->setGeneralOption("showDesktop", false));
+        QProcess app;
+        app.setProcessEnvironment(scene.childEnvironment());
+        app.start(QCoreApplication::applicationDirPath() + "/native-probe", {"Background"});
+        const auto stop = qScopeGuard([&] {
+            if (app.state() != QProcess::NotRunning) { app.kill(); app.waitForFinished(3000); }
+        });
+        auto *trash = visualItem(scene.view.contentItem(), "desktop-entry-Trash");
+        QVERIFY(trash);
+        QTRY_VERIFY(!first(manager, "Native Probe Background").isEmpty());
+        QTRY_VERIFY(!manager.desktopActive());
+        QTRY_VERIFY(!trash->isVisible());
+        QVERIFY(manager.activateDesktop());
+        QTRY_VERIFY(trash->isVisible());
+        // With the setting on, they stay while the application is in front.
+        QVERIFY(settings->setGeneralOption("showDesktop", true));
+        const auto id = first(manager, "Native Probe Background").value("id").toULongLong();
+        manager.activate(id);
+        QTRY_VERIFY(!manager.desktopActive());
+        QVERIFY(trash->isVisible());
+        QDBusInterface probe("org.frankenstein.NativeProbeBackground", "/Probe", "org.frankenstein.NativeProbe");
+        if (probe.isValid())
+            probe.asyncCall("Finish");
+    }
+    void screenshotKeysWorkWhileAnApplicationHasTheKeyboard()
+    {
+        // psn_tch, 2026-11-02: the screenshot keys did nothing in daily use, where an application
+        // (Firefox, Konsole) has the keyboard; the gate pressed them only on the desktop.
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager = *scene.manager;
+        QProcess app;
+        app.setProcessEnvironment(scene.childEnvironment());
+        app.start(QCoreApplication::applicationDirPath() + "/native-probe", {"Shots"});
+        const auto stop = qScopeGuard([&] {
+            if (app.state() != QProcess::NotRunning) { app.kill(); app.waitForFinished(3000); }
+        });
+        QTRY_VERIFY(!first(manager, "Native Probe Shots").isEmpty());
+        const auto id = first(manager, "Native Probe Shots").value("id").toULongLong();
+        auto *client = visualItem(scene.view.contentItem(), "client-" + QString::number(id));
+        QVERIFY(client);
+        QTRY_VERIFY(client->hasActiveFocus());
+        QDBusInterface probe("org.frankenstein.NativeProbeShots", "/Probe", "org.frankenstein.NativeProbe");
+        QTRY_VERIFY(probe.isValid());
+        QTRY_VERIFY(probeAcceptsTextInput(probe));
+        const auto pictureOnClipboard = [] {
+            const auto *data = QGuiApplication::clipboard()->mimeData();
+            return data && data->hasFormat("image/png") ? QImage::fromData(data->data("image/png"), "PNG") : QImage();
+        };
+        // An earlier test's picture may still be on the clipboard.
+        QGuiApplication::clipboard()->clear();
+        QTRY_VERIFY(pictureOnClipboard().isNull());
+        commandShiftKey(&scene.view, Qt::Key_NumberSign, 4);
+        QTRY_VERIFY_WITH_TIMEOUT(!pictureOnClipboard().isNull(), 3000);
+        QCOMPARE(pictureOnClipboard().size(), scene.view.size() * scene.view.devicePixelRatio());
+        // The application received nothing, and still has the keyboard.
+        QCOMPARE(QDBusReply<QString>(probe.call("Text")).value(), QString());
+        QVERIFY(client->hasActiveFocus());
+        auto *area = scene.view.rootObject()->findChild<QQuickItem *>("screenshot-area");
+        commandShiftKey(&scene.view, Qt::Key_Dollar, 5);
+        QTRY_VERIFY(area->isVisible());
+        nativeKeyEvent(&scene.view, QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier, 1);
+        nativeKeyEvent(&scene.view, QEvent::KeyRelease, Qt::Key_Escape, Qt::NoModifier, 1);
+        QTRY_VERIFY(!area->isVisible());
+        // Command-Shift-P shows the same crosshair (psn_tch, 2026-11-04), and the application
+        // gets neither the letter nor the chord.
+        commandShiftKey(&scene.view, Qt::Key_P, 25);
+        QTRY_VERIFY(area->isVisible());
+        QCOMPARE(QDBusReply<QString>(probe.call("Text")).value(), QString());
+        nativeKeyEvent(&scene.view, QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier, 1);
+        nativeKeyEvent(&scene.view, QEvent::KeyRelease, Qt::Key_Escape, Qt::NoModifier, 1);
+        QTRY_VERIFY(!area->isVisible());
+        // The keyboard goes back to the application, not the desktop.
+        QTRY_VERIFY(client->hasActiveFocus());
+        QVERIFY(typeAscii(&scene.view, "ok"));
+        QTRY_COMPARE(QDBusReply<QString>(probe.call("Text")).value(), QString("ok"));
+        probe.asyncCall("Finish");
+        QTRY_COMPARE(app.state(), QProcess::NotRunning);
+    }
+    void aboutComputerOpensFromTheAppleMenuAndReturnsKeyboardToItsApplication()
+    {
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager=*scene.manager;
+        QProcess app;
+        app.setProcessEnvironment(scene.childEnvironment());
+        app.start(QCoreApplication::applicationDirPath()+"/native-probe",{"About"});
+        const auto stop=qScopeGuard([&]{if(app.state()!=QProcess::NotRunning){app.kill();app.waitForFinished(3000);}});
+        QTRY_VERIFY(!first(manager,"Native Probe About").isEmpty());
+        QDBusInterface probe("org.frankenstein.NativeProbeAbout","/Probe","org.frankenstein.NativeProbe");
+        QTRY_VERIFY(probeAcceptsTextInput(probe));
+        const auto application=manager.activeApplication();
+        auto *apple=visualItem(scene.view.contentItem(),"bar-entry-0");
+        QVERIFY(apple);
+        QTest::mouseClick(&scene.view,Qt::LeftButton,{},apple->mapToScene(QPointF(apple->width()/2,13)).toPoint());
+        auto *command=visualItem(scene.view.contentItem(),"desktop-command-about");
+        QTRY_VERIFY(command && command->isVisible());
+        command->parentItem()->ensurePolished();
+        QTest::mouseClick(&scene.view,Qt::LeftButton,{},command->mapToScene(QPointF(command->width()/2,command->height()/2)).toPoint());
+        auto *window=visualItem(scene.view.contentItem(),"about-computer-window");
+        QVERIFY(window);QTRY_VERIFY(window->isVisible() && window->hasActiveFocus());
+        QVERIFY(!manager.shellModal());
+        const auto snapshot=manager.computerInformation();
+        bool measured=false;
+        for(const auto &value:snapshot.value("applications").toList()){
+            const auto row=value.toMap();
+            if(row.value("name").toString()==application)
+                measured=row.value("known").toBool() && row.value("rssBytes").toLongLong()>0;
+        }
+        QVERIFY2(measured,"The live native application's resident memory was not measured");
+        QVERIFY(capture(scene.view,"about-computer-native.png"));
+        LineProcess keyboard;
+        keyboard.process.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
+        keyboard.process.start(QCoreApplication::applicationDirPath()+"/virtual-keyboard-driver");
+        QCOMPARE(keyboard.next("driver-ready"),QString("driver-ready"));
+        QTest::qWait(500);
+        QVERIFY(keyboard.send("chord super+w","ok"));
+        QTRY_VERIFY(!window->isVisible());
+        QTRY_VERIFY(probeAcceptsTextInput(probe));
+        QVERIFY(keyboard.send("type back to app","ok"));
+        QTRY_COMPARE(QDBusReply<QString>(probe.call("Text")).value(),QString("back to app"));
+        keyboard.process.write("quit\n");QVERIFY(keyboard.process.waitForFinished(3000));
+        probe.asyncCall("Finish");QTRY_COMPARE(app.state(),QProcess::NotRunning);
+    }
+    void calculatorTakesRealKeyboardAndCopiesAResultToItsApplication()
+    {
+        NativeScene scene;QVERIFY(scene.show());
+        auto &manager=*scene.manager;
+        QProcess app;app.setProcessEnvironment(scene.childEnvironment());
+        app.start(QCoreApplication::applicationDirPath()+"/native-probe",{"Calculator"});
+        const auto stop=qScopeGuard([&]{if(app.state()!=QProcess::NotRunning){app.kill();app.waitForFinished(3000);}});
+        QTRY_VERIFY(!first(manager,"Native Probe Calculator").isEmpty());
+        QDBusInterface probe("org.frankenstein.NativeProbeCalculator","/Probe","org.frankenstein.NativeProbe");
+        QTRY_VERIFY(probeAcceptsTextInput(probe));
+        auto *apple=visualItem(scene.view.contentItem(),"bar-entry-0");QVERIFY(apple);
+        QTest::mouseClick(&scene.view,Qt::LeftButton,{},apple->mapToScene(QPointF(apple->width()/2,13)).toPoint());
+        auto *command=visualItem(scene.view.contentItem(),"desktop-command-calculator");
+        QTRY_VERIFY(command && command->isVisible());
+        command->parentItem()->ensurePolished();
+        QTest::mouseClick(&scene.view,Qt::LeftButton,{},command->mapToScene(QPointF(command->width()/2,command->height()/2)).toPoint());
+        auto *calculator=visualItem(scene.view.contentItem(),"calculator-window");QVERIFY(calculator);
+        QTRY_VERIFY(calculator->isVisible() && calculator->hasActiveFocus());
+        QVERIFY(!manager.shellModal());
+        LineProcess keyboard;keyboard.process.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
+        keyboard.process.start(QCoreApplication::applicationDirPath()+"/virtual-keyboard-driver");
+        QCOMPARE(keyboard.next("driver-ready"),QString("driver-ready"));QTest::qWait(500);
+        QVERIFY(keyboard.send("type 12","ok"));
+        QVERIFY(keyboard.send("chord shift+8","ok")); // US-layout multiply key through the host.
+        QVERIFY(keyboard.send("type 3","ok"));QVERIFY(keyboard.send("key return","ok"));
+        QTRY_COMPARE(calculator->property("display").toString(),QString("36"));
+        QVERIFY(capture(scene.view,"calculator-native.png"));
+        QVERIFY(keyboard.send("chord super+c","ok"));
+        auto *clipboard=qobject_cast<Clipboard *>(manager.clipboard());QVERIFY(clipboard);
+        QTRY_COMPARE(clipboard->text(),QString("36"));
+        QVERIFY(keyboard.send("chord super+w","ok"));QTRY_VERIFY(!calculator->isVisible());
+        // The application has the keyboard again: its surface, not just its text input from before
+        // the calculator opened (a paste sent earlier went nowhere, Sammy 2026-11-04).
+        const auto id=first(manager,"Native Probe Calculator").value("id").toULongLong();
+        auto *client=visualItem(scene.view.contentItem(),"client-"+QString::number(id));QVERIFY(client);
+        QTRY_VERIFY(client->hasActiveFocus());
+        QTRY_VERIFY(probeAcceptsTextInput(probe));
+        QVERIFY(keyboard.send("chord super+v","ok"));
+        // Asked without blocking: this process is the compositor, and the probe's paste reads the
+        // desktop's copy from it. A blocking call froze that transfer until the probe gave up after
+        // a second and pasted nothing (Sammy 2026-11-04, from the probe's Wayland log).
+        const auto probeText=[&]{
+            QDBusPendingCall call=probe.asyncCall("Text");
+            QDBusPendingCallWatcher watcher(call);
+            (void)QTest::qWaitFor([&]{return watcher.isFinished();},5000);
+            return QDBusReply<QString>(call).value();
+        };
+        QTRY_COMPARE(probeText(),QString("36"));
+        keyboard.process.write("quit\n");QVERIFY(keyboard.process.waitForFinished(3000));
+        probe.asyncCall("Finish");QTRY_COMPARE(app.state(),QProcess::NotRunning);
+    }
+    void realKeyboardDesktopShortcuts_data()
+    {
+        QTest::addColumn<QByteArray>("chord");
+        QTest::addColumn<QString>("action");
+        for (const auto &modifier : {QByteArray("super"), QByteArray("ctrl")})
+            for (const auto &pair : {std::pair{"i", "info"}, {"o", "open"}, {"c", "copy"},
+                                     {"a", "select-all"}, {"shift+n", "new-folder"},
+                                     {"d", "duplicate"}, {"backspace", "trash"}, {"e", "eject-guard"}})
+                QTest::newRow((modifier+"+"+pair.first).constData()) << modifier+"+"+pair.first << QString(pair.second);
+        QTest::newRow("F2") << QByteArray("f2") << QString("rename");
+        QTest::newRow("Escape-drag") << QByteArray("escape") << QString("cancel-drag");
+        QTest::newRow("Escape-selection") << QByteArray("escape") << QString("cancel-selection");
+    }
+    void realKeyboardDesktopShortcuts()
+    {
+        QFETCH(QByteArray, chord);
+        QFETCH(QString, action);
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager = *scene.manager;
+        QTRY_VERIFY(scene.view.isActive() && manager.desktopActive());
+        auto *items = qobject_cast<DesktopItems *>(manager.desktopItems());
+        QVERIFY(items && QDir().mkpath(items->directory()+"/Keyboard fixture"));
+        items->refresh();
+        QString key;
+        for (int row=0; row<items->rowCount(); ++row)
+            if (items->data(items->index(row), DesktopItems::NameRole)=="Keyboard fixture")
+                key=items->data(items->index(row), DesktopItems::KeyRole).toString();
+        QVERIFY(!key.isEmpty());
+        items->select(key);
+        QCOMPARE(items->selectionCount(), 1);
+        const auto count=items->rowCount();
+        if (action=="cancel-drag") { items->beginDrag(); QVERIFY(items->dragging()); }
+        if (action=="cancel-selection") { QVERIFY(items->beginSelection(300,300)); QVERIFY(items->selecting()); }
+        LineProcess keyboard;
+        keyboard.process.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
+        keyboard.process.start(QCoreApplication::applicationDirPath()+"/virtual-keyboard-driver");
+        QCOMPARE(keyboard.next("driver-ready"), QString("driver-ready"));
+        QTest::qWait(500); // The owned Sway must apply the new virtual device's US keymap.
+        if (action=="copy") { QGuiApplication::clipboard()->clear(); QTRY_VERIFY(QGuiApplication::clipboard()->text().isEmpty()); }
+        QVERIFY2(keyboard.send("chord "+QString::fromLatin1(chord), "ok"), qPrintable(keyboard.lines.join(" | ")));
+        if (action=="info") QTRY_VERIFY(visualItem(scene.view.contentItem(), "info-"+key));
+        else if (action=="open") QTRY_COMPARE(manager.rowCount(), 1);
+        else if (action=="copy") QTRY_COMPARE(QGuiApplication::clipboard()->text(), QString("Keyboard fixture"));
+        else if (action=="select-all") QTRY_COMPARE(items->selectionCount(), count);
+        else if (action=="new-folder" || action=="rename") {
+            auto *dialog=scene.view.rootObject()->findChild<QObject *>("desktop-name-dialog");
+            QVERIFY(dialog);
+            QTRY_VERIFY(dialog->property("opened").toBool());
+            QCOMPARE(dialog->property("operation").toString(), action=="rename" ? QString("rename") : QString("create"));
+            auto *field=visualItem(scene.view.contentItem(),"desktop-name-field");
+            QVERIFY(field);
+            QTRY_VERIFY(field->hasActiveFocus());
+            QVERIFY(keyboard.send("chord super+a", "ok"));
+            QVERIFY(keyboard.send("type keyboard field", "ok"));
+            QTRY_COMPARE(field->property("text").toString(),QString("keyboard field"));
+            QVERIFY(keyboard.send("chord super+a", "ok"));
+            QVERIFY(keyboard.send("chord super+c", "ok"));
+            QTRY_COMPARE(QGuiApplication::clipboard()->text(),QString("keyboard field"));
+            QVERIFY(keyboard.send("type replaced", "ok"));
+            QTRY_COMPARE(field->property("text").toString(),QString("replaced"));
+            QVERIFY(keyboard.send("chord super+a", "ok"));
+            QVERIFY(keyboard.send("chord super+v", "ok"));
+            QTRY_COMPARE(field->property("text").toString(),QString("keyboard field"));
+            QVERIFY(keyboard.send("chord super+.", "ok"));
+            QTRY_VERIFY(!dialog->property("visible").toBool());
+            QCOMPARE(items->rowCount(), count); // Command-period cancelled without writing.
+        }
+        else if (action=="duplicate") QTRY_COMPARE(items->rowCount(), count+1);
+        else if (action=="trash") QTRY_VERIFY(!QFileInfo::exists(items->directory()+"/Keyboard fixture"));
+        else if (action=="cancel-drag") QTRY_VERIFY(!items->dragging());
+        else if (action=="cancel-selection") QTRY_VERIFY(!items->selecting());
+        else if (action=="eject-guard") {
+            // No physical drives are present in this fixture. This tests only
+            // the disabled shortcut; an actual mounted-drive case is separate.
+            QVERIFY(items->selectedDrive().isEmpty());
+            QTest::qWait(150);
+            QVERIFY(QFileInfo::exists(items->directory()+"/Keyboard fixture"));
+            QCOMPARE(items->selectionCount(), 1);
+        }
+        QVERIFY(capture(scene.view,"real-keyboard-desktop-"+QString::fromLatin1(chord).replace('+','-')+".png"));
+        keyboard.process.write("quit\n");
+        QVERIFY(keyboard.process.waitForFinished(3000));
+    }
+    void realKeyboardUnboundCommandLettersNeverTypeIntoShellFields_data()
+    {
+        QTest::addColumn<QString>("action");
+        QTest::addColumn<QString>("fieldName");
+        QTest::addColumn<QByteArray>("letter");
+        for (auto field : {std::pair{"applications", "application-search"},
+                           {"keyboard", "keyboard-try"}, {"new-folder", "desktop-name-field"},
+                           {"screenshot", "screenshot-path"}, {"desktop-picture", "picture-folder"},
+                           {"desktop-picture", "picture-path"}})
+            for (const auto *letter : {"n", "b", "g"})
+                QTest::newRow((QByteArray(field.second)+"-Command-"+letter).constData())
+                    << QString(field.first) << QString(field.second) << QByteArray(letter);
+    }
+    void realKeyboardUnboundCommandLettersNeverTypeIntoShellFields()
+    {
+        // Sammy's Sticky Notes audit found that Qt text controls insert a Meta chord's
+        // letter unless the shell handles it before the editor. Audit the other fields
+        // through the same real US-keymap path; report failures without changing src/.
+        QFETCH(QString, action);
+        QFETCH(QString, fieldName);
+        QFETCH(QByteArray, letter);
+        NativeScene scene;
+        QVERIFY(scene.show());
+        QTRY_VERIFY(scene.view.isActive() && scene.manager->desktopActive());
+        LineProcess keyboard;
+        keyboard.process.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
+        keyboard.process.start(QCoreApplication::applicationDirPath()+"/virtual-keyboard-driver");
+        QCOMPARE(keyboard.next("driver-ready"), QString("driver-ready"));
+        QTest::qWait(500);
+        QVERIFY(QMetaObject::invokeMethod(scene.view.rootObject(),"dispatchShellCommand",
+            Q_ARG(QVariant,QVariant(action)),Q_ARG(QVariant,QVariant(0))));
+        auto *field=visualItem(scene.view.contentItem(),fieldName);
+        QVERIFY(field);
+        QTRY_VERIFY(field->isVisible());
+        // Selecting a field is fixture setup; all text and audited chords enter via
+        // the owned host keyboard, not a property setter or a synthetic QTest key.
+        field->forceActiveFocus();
+        QTRY_VERIFY(field->hasActiveFocus());
+        QVERIFY(keyboard.send("chord ctrl+a","ok"));
+        QVERIFY(keyboard.send("type unchanged fixture","ok"));
+        QTRY_COMPARE(field->property("text").toString(),QString("unchanged fixture"));
+        const auto failure=qScopeGuard([&]{if(QTest::currentTestFailed())
+            capture(scene.view,"unbound-command-"+fieldName+"-"+QString::fromLatin1(letter)+".png");});
+        QVERIFY(keyboard.send("chord super+"+QString::fromLatin1(letter),"ok"));
+        QTest::qWait(100); // Let both key delivery and queued editor work finish.
+        QCOMPARE(field->property("text").toString(),QString("unchanged fixture"));
+        QVERIFY(field->hasActiveFocus());
+        QVERIFY(keyboard.send("type n","ok"));
+        QTRY_COMPARE(field->property("text").toString(),QString("unchanged fixturen"));
+        keyboard.process.write("quit\n");
+        QVERIFY(keyboard.process.waitForFinished(3000));
+    }
+    void realKeyboardHardwareShortcuts()
+    {
+        NativeScene scene;
+        QVERIFY(scene.show());
+        const auto helper=scene.files.path()+"/keyboard-controls.py";
+        QFile script(helper);
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write("import json,sys\nfrom pathlib import Path\n"
+                     "p=Path(__file__).with_suffix('.state')\n"
+                     "s=json.loads(p.read_text()) if p.exists() else {'volume':{'available':True,'value':70,'muted':False},'brightness':{'available':True,'value':40}}\n"
+                     "if sys.argv[1]=='set':\n"
+                     " c,v=sys.argv[2],int(sys.argv[3])\n"
+                     " if c=='mute': s['volume']['muted']=bool(v)\n"
+                     " else: s[c]['value']=v\n"
+                     " p.write_text(json.dumps(s))\n"
+                     "print(json.dumps({'error':'','state':s}))\n");
+        script.close();
+        SystemControls controls(helper);
+        auto *panel=scene.view.rootObject()->findChild<QObject *>("quick-controls");
+        QVERIFY(panel && panel->setProperty("service", QVariant::fromValue(static_cast<QObject *>(&controls))));
+        // Destroy the QML binding before the stack-owned service disappears.
+        const auto unbind=qScopeGuard([&]{panel->setProperty("service", QVariant::fromValue(scene.manager->systemControls()));});
+        QTRY_VERIFY(scene.view.isActive());
+        LineProcess keyboard;
+        keyboard.process.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
+        keyboard.process.start(QCoreApplication::applicationDirPath()+"/virtual-keyboard-driver");
+        QCOMPARE(keyboard.next("driver-ready"), QString("driver-ready"));
+        QTest::qWait(500);
+        const auto level=[&](const char *name){return controls.state().value(name).toMap().value("value").toInt();};
+        QVERIFY(keyboard.send("key volume-up", "ok"));
+        QTRY_COMPARE(level("volume"),75); QTRY_VERIFY(!controls.busy());
+        QVERIFY(keyboard.send("key volume-down", "ok"));
+        QTRY_COMPARE(level("volume"),70); QTRY_VERIFY(!controls.busy());
+        QVERIFY(keyboard.send("key volume-mute", "ok"));
+        QTRY_VERIFY(controls.state().value("volume").toMap().value("muted").toBool());
+        QTRY_VERIFY(!controls.busy());
+        QVERIFY(keyboard.send("key brightness-up", "ok"));
+        QTRY_COMPARE(level("brightness"),45); QTRY_VERIFY(!controls.busy());
+        QVERIFY(keyboard.send("key brightness-down", "ok"));
+        QTRY_COMPARE(level("brightness"),40); QTRY_VERIFY(!controls.busy());
+        keyboard.process.write("quit\n");
+        QVERIFY(keyboard.process.waitForFinished(3000));
+    }
+    void realKeyboardApplicationAndShellChords()
+    {
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager=*scene.manager;
+        QProcess a,b;
+        const auto stop=qScopeGuard([&]{for(auto *p:{&a,&b}) if(p->state()!=QProcess::NotRunning){p->kill();p->waitForFinished(3000);}});
+        for (auto pair:{std::pair{&a,"KeyboardA"},std::pair{&b,"KeyboardB"}}) {
+            pair.first->setProcessEnvironment(scene.childEnvironment());
+            pair.first->start(QCoreApplication::applicationDirPath()+"/native-probe", {pair.second});
+            QVERIFY(pair.first->waitForStarted());
+            QTRY_VERIFY(!first(manager,"Native Probe "+QString(pair.second)).isEmpty());
+        }
+        QDBusInterface api("org.frankenstein.NativeProbeKeyboardA","/Probe","org.frankenstein.NativeProbe");
+        QVERIFY(api.isValid());
+        const auto id=first(manager,"Native Probe KeyboardA").value("id").toULongLong();
+        manager.activate(id);
+        QTRY_VERIFY(first(manager,"Native Probe KeyboardA").value("active").toBool());
+        LineProcess keyboard;
+        keyboard.process.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
+        keyboard.process.start(QCoreApplication::applicationDirPath()+"/virtual-keyboard-driver");
+        QCOMPARE(keyboard.next("driver-ready"), QString("driver-ready"));
+        QTest::qWait(500);
+        QVERIFY(keyboard.send("chord super+tab", "ok"));
+        QTRY_VERIFY(first(manager,"Native Probe KeyboardB").value("active").toBool());
+        QVERIFY(keyboard.send("chord super+shift+tab", "ok"));
+        QTRY_VERIFY(first(manager,"Native Probe KeyboardA").value("active").toBool());
+        QVERIFY(keyboard.send("chord super+h", "ok"));
+        QTRY_VERIFY(!first(manager,"Native Probe KeyboardA").value("visible").toBool());
+        manager.activate(id,true);
+        QTRY_VERIFY(probeAcceptsTextInput(api));
+        QVERIFY(QMetaObject::invokeMethod(scene.view.rootObject(),"dispatchShellCommand",
+            Q_ARG(QVariant,QVariant("keyboard")),Q_ARG(QVariant,QVariant(0))));
+        auto *panels=visualItem(scene.view.contentItem(),"control-panels-window");
+        QVERIFY(panels);
+        QTRY_VERIFY(panels->isVisible() && panels->hasActiveFocus());
+        QVERIFY(keyboard.send("chord super+w", "ok"));
+        QTRY_VERIFY(!panels->isVisible());
+        QTRY_VERIFY(probeAcceptsTextInput(api));
+        QVERIFY(keyboard.send("chord alt+d", "ok"));
+        auto *search=visualItem(scene.view.contentItem(),"application-search");
+        QVERIFY(search);
+        QTRY_VERIFY(search->hasActiveFocus());
+        QVERIFY(keyboard.send("type keyboard fixture", "ok"));
+        QTRY_COMPARE(search->property("text").toString(), QString("keyboard fixture"));
+        QVERIFY(keyboard.send("chord super+a", "ok"));
+        QTRY_COMPARE(search->property("selectedText").toString(), QString("keyboard fixture"));
+        QVERIFY(keyboard.send("chord super+c", "ok"));
+        QTRY_COMPARE(QGuiApplication::clipboard()->text(), QString("keyboard fixture"));
+        QVERIFY(keyboard.send("type replaced", "ok"));
+        QTRY_COMPARE(search->property("text").toString(), QString("replaced"));
+        QVERIFY(keyboard.send("chord super+a", "ok"));
+        QVERIFY(keyboard.send("chord super+v", "ok"));
+        QTRY_COMPARE(search->property("text").toString(), QString("keyboard fixture"));
+        QVERIFY(keyboard.send("key escape", "ok"));
+        QTRY_VERIFY(probeAcceptsTextInput(api));
+        QVERIFY(keyboard.send("chord super+q", "ok"));
+        QTRY_COMPARE(a.state(), QProcess::NotRunning);
+        // The most recently used application comes forward: the Finder, because Control Panels
+        // (the desktop's own window) was used after KeyboardB (Sammy, reviewing Rocky's audit).
+        QTRY_VERIFY(manager.desktopActive());
+        QVERIFY(!first(manager,"Native Probe KeyboardB").value("active").toBool());
+        manager.activate(first(manager,"Native Probe KeyboardB").value("id").toULongLong());
+        QTRY_VERIFY(first(manager,"Native Probe KeyboardB").value("active").toBool());
+        QDBusInterface apiB("org.frankenstein.NativeProbeKeyboardB","/Probe","org.frankenstein.NativeProbe");
+        QTRY_VERIFY(probeAcceptsTextInput(apiB));
+        QVERIFY(keyboard.send("chord alt+q", "ok"));
+        QTRY_COMPARE(b.state(), QProcess::NotRunning);
+        keyboard.process.write("quit\n");
+        QVERIFY(keyboard.process.waitForFinished(3000));
+    }
+    void shiftedCommandChordsFromARealKeyboardReachTheDesktop_data()
+    {
+        QTest::addColumn<bool>("applicationFocused");
+        QTest::newRow("desktop") << false;
+        QTest::newRow("application") << true;
+    }
+    void shiftedCommandChordsFromARealKeyboardReachTheDesktop()
+    {
+        // psn_tch, 2026-11-02: Command-Shift-3/4 did nothing on her keyboard. Real key events carry
+        // the layout, so Qt offers every spelling (Command-Shift-3 and Command-#); two of a
+        // Shortcut's sequences matched and Qt reported it as ambiguous instead of activating it.
+        // QTest's keys have no layout and matched once, so this types through the owned host Sway's
+        // virtual keyboard, as hardware does.
+        QFETCH(bool, applicationFocused);
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager = *scene.manager;
+        QTRY_VERIFY(scene.view.isActive() && manager.desktopActive());
+        QProcess keyboard;
+        keyboard.setProcessEnvironment(QProcessEnvironment::systemEnvironment()); // The host Sway.
+        keyboard.start(QCoreApplication::applicationDirPath() + "/virtual-keyboard-driver");
+        const auto stop = qScopeGuard([&] {
+            if (keyboard.state() != QProcess::NotRunning) { keyboard.kill(); keyboard.waitForFinished(3000); }
+        });
+        QVERIFY(keyboard.waitForStarted());
+        QVERIFY(keyboard.waitForReadyRead(5000));
+        QCOMPARE(keyboard.readLine().trimmed(), QByteArray("driver-ready"));
+        const auto send = [&](const QByteArray &command) {
+            keyboard.write(command + "\n");
+            return keyboard.waitForReadyRead(5000) && keyboard.readLine().trimmed() == "ok";
+        };
+        // A new virtual keyboard's first keys can arrive before Sway has applied its keymap.
+        QTest::qWait(500);
+        QVERIFY(send("type a"));
+        QTest::qWait(500);
+        QProcess app;
+        const auto stopApp=qScopeGuard([&]{if(app.state()!=QProcess::NotRunning){app.kill();app.waitForFinished(3000);}});
+        if (applicationFocused) {
+            app.setProcessEnvironment(scene.childEnvironment());
+            app.start(QCoreApplication::applicationDirPath()+"/native-probe", {"RealShots"});
+            QTRY_VERIFY(!first(manager,"Native Probe RealShots").isEmpty());
+            QDBusInterface probe("org.frankenstein.NativeProbeRealShots","/Probe","org.frankenstein.NativeProbe");
+            QTRY_VERIFY(probeAcceptsTextInput(probe));
+        }
+        const auto pictureOnClipboard = [] {
+            const auto *data = QGuiApplication::clipboard()->mimeData();
+            return data && data->hasFormat("image/png") ? QImage::fromData(data->data("image/png"), "PNG") : QImage();
+        };
+        QGuiApplication::clipboard()->clear();
+        QTRY_VERIFY(pictureOnClipboard().isNull());
+        QVERIFY(send("chord super+shift+3"));
+        QTRY_VERIFY_WITH_TIMEOUT(!pictureOnClipboard().isNull(), 3000);
+        QCOMPARE(pictureOnClipboard().size(), scene.view.size()*scene.view.devicePixelRatio());
+        auto *area = scene.view.rootObject()->findChild<QQuickItem *>("screenshot-area");
+        QVERIFY(area && !area->isVisible());
+        QVERIFY(send("chord super+shift+4"));
+        QTRY_VERIFY(area->isVisible());
+        QVERIFY(send("key escape"));
+        QTRY_VERIFY(!area->isVisible());
+        auto *tool=scene.view.rootObject()->findChild<QObject *>("screenshot-dialog");
+        QVERIFY(tool);
+        for (const auto *chord : {"chord super+shift+s", "chord alt+shift+s"}) {
+            QVERIFY(send(chord));
+            QTRY_VERIFY(tool->property("opened").toBool());
+            QVERIFY(send("key escape"));
+            QTRY_VERIFY(!tool->property("visible").toBool());
+        }
+        // Command-? (Command-Shift-/) opens the Help Center the same way.
+        QVERIFY(send("chord super+shift+/"));
+        QTRY_VERIFY(visualItem(scene.view.contentItem(), "help-window") &&
+                    visualItem(scene.view.contentItem(), "help-window")->isVisible());
+        keyboard.write("quit\n");
+        QVERIFY(keyboard.waitForFinished(5000));
+    }
+    void stickyNotesTakeTheRealKeyboardFromAnApplication()
+    {
+        // A note made while an application is in front gets the typing, through the owned host
+        // Sway's virtual keyboard as hardware does; Command-N and Command-W work in it.
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager = *scene.manager;
+        auto *notes = qobject_cast<StickyNotes *>(manager.stickies());
+        QVERIFY(notes);
+        QProcess app;
+        app.setProcessEnvironment(scene.childEnvironment());
+        app.start(QCoreApplication::applicationDirPath() + "/native-probe", {"Notes"});
+        const auto stop = qScopeGuard([&] {
+            if (app.state() != QProcess::NotRunning) { app.kill(); app.waitForFinished(3000); }
+        });
+        QTRY_VERIFY(!first(manager, "Native Probe Notes").isEmpty());
+        QDBusInterface probe("org.frankenstein.NativeProbeNotes", "/Probe", "org.frankenstein.NativeProbe");
+        QTRY_VERIFY(probe.isValid());
+        QTRY_VERIFY(probeAcceptsTextInput(probe));
+        LineProcess keyboard;
+        keyboard.process.setProcessEnvironment(QProcessEnvironment::systemEnvironment()); // The host Sway.
+        keyboard.process.start(QCoreApplication::applicationDirPath() + "/virtual-keyboard-driver");
+        QCOMPARE(keyboard.next("driver-ready"), QString("driver-ready"));
+        QTest::qWait(500);
+        QVERIFY(QMetaObject::invokeMethod(scene.view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QVariant(QString("sticky-new"))), Q_ARG(QVariant, QVariant(0))));
+        QTRY_COMPARE(notes->count(), 1);
+        const auto firstNote = notes->data(notes->index(0), StickyNotes::IdRole).toInt();
+        QQuickItem *text = nullptr;
+        QTRY_VERIFY((text = visualItem(scene.view.contentItem(), "sticky-text-" + QString::number(firstNote))) &&
+                    text->hasActiveFocus());
+        QTRY_VERIFY(manager.desktopActive());
+        QVERIFY(keyboard.send("type note one", "ok"));
+        QTRY_COMPARE(notes->text(firstNote), QString("note one"));
+        QCOMPARE(QDBusReply<QString>(probe.call("Text")).value(), QString());
+        QVERIFY(capture(scene.view, "native-sticky-note.png"));
+        // Command-N: another note, with the keyboard; Command-W on it (empty) closes it at once.
+        QVERIFY(keyboard.send("chord super+n", "ok"));
+        QTRY_COMPARE(notes->count(), 2);
+        QVERIFY(keyboard.send("chord super+w", "ok"));
+        QTRY_COMPARE(notes->count(), 1);
+        QCOMPARE(notes->text(firstNote), QString("note one"));
+        // Back to the application: its typing goes to it again.
+        manager.activate(first(manager, "Native Probe Notes").value("id").toULongLong());
+        QTRY_VERIFY(probeAcceptsTextInput(probe));
+        QVERIFY(keyboard.send("type app", "ok"));
+        QTRY_COMPARE(QDBusReply<QString>(probe.call("Text")).value(), QString("app"));
+        QCOMPARE(notes->text(firstNote), QString("note one"));
+        keyboard.process.write("quit\n");
+        probe.asyncCall("Finish");
+        QTRY_COMPARE(app.state(), QProcess::NotRunning);
+    }
     void screenshotsGoStraightToTheClipboard()
     {
         // Command-Shift-3: the whole desktop; Command-Shift-4: drag across an area. Both put a PNG
@@ -6911,12 +7570,56 @@ class NativeTests : public QObject
         QDBusInterface probe("org.frankenstein.NativeProbeBluetooth", "/Probe",
                              "org.frankenstein.NativeProbe");
         QTRY_VERIFY(probe.isValid());
+        // The item has focus before the probe's window is active again; keys typed sooner are lost.
+        QTRY_VERIFY_WITH_TIMEOUT(probeAcceptsTextInput(probe), 3000);
         QVERIFY(typeAscii(&scene.view, "bluetooth works"));
         QTRY_COMPARE(QDBusReply<QString>(probe.call("Text")).value(), QString("bluetooth works"));
         QCOMPARE(errors.count(), 0);
         probe.asyncCall("Finish");
         QTRY_COMPARE(app.state(), QProcess::NotRunning);
         QCOMPARE(app.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(app.exitCode(), 0);
+    }
+    void applicationsTypeWithTheKeyboardLayoutInUse()
+    {
+        // The Keyboard panel's layout is the keymap applications are given: with German in use,
+        // the keys marked Y and Z on a U.S. keyboard type z and y; back on U.S., y and z.
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager = *scene.manager;
+        auto *input = qobject_cast<InputSettings *>(manager.input());
+        QVERIFY(input);
+        QProcess app;
+        app.setProcessEnvironment(scene.childEnvironment());
+        app.start(QCoreApplication::applicationDirPath() + "/native-probe", {"Layout"});
+        const auto stop = qScopeGuard([&] {
+            if (app.state() != QProcess::NotRunning) { app.kill(); app.waitForFinished(3000); }
+        });
+        QTRY_VERIFY(!first(manager, "Native Probe Layout").isEmpty());
+        const auto id = first(manager, "Native Probe Layout").value("id").toULongLong();
+        auto *client = visualItem(scene.view.contentItem(), "client-" + QString::number(id));
+        QVERIFY(client);
+        QTRY_VERIFY(client->hasActiveFocus());
+        QDBusInterface probe("org.frankenstein.NativeProbeLayout", "/Probe", "org.frankenstein.NativeProbe");
+        QTRY_VERIFY(probe.isValid());
+        QTRY_VERIFY_WITH_TIMEOUT(probeAcceptsTextInput(probe), 3000);
+        QVERIFY(input->set("keyboard", "layouts", QVariantList{"de", "us"}));
+        QVERIFY(input->set("keyboard", "layout", "de"));
+        QVERIFY(typeAscii(&scene.view, "yz"));
+        QTRY_COMPARE(QDBusReply<QString>(probe.call("Text")).value(), QString("zy"));
+        // Command-Option-Space, as from the keyboard, moves to the next checked layout: U.S.
+        const auto both = Qt::MetaModifier | Qt::AltModifier;
+        nativeKeyEvent(&scene.view, QEvent::KeyPress, Qt::Key_Meta, Qt::MetaModifier, 125);
+        nativeKeyEvent(&scene.view, QEvent::KeyPress, Qt::Key_Alt, both, 56);
+        nativeKeyEvent(&scene.view, QEvent::KeyPress, Qt::Key_Space, both, 57, " ");
+        nativeKeyEvent(&scene.view, QEvent::KeyRelease, Qt::Key_Space, both, 57, " ");
+        nativeKeyEvent(&scene.view, QEvent::KeyRelease, Qt::Key_Alt, Qt::MetaModifier, 56);
+        nativeKeyEvent(&scene.view, QEvent::KeyRelease, Qt::Key_Meta, Qt::NoModifier, 125);
+        QTRY_COMPARE(input->layout(), QString("us"));
+        QVERIFY(typeAscii(&scene.view, "yz"));
+        QTRY_COMPARE(QDBusReply<QString>(probe.call("Text")).value(), QString("zyyz"));
+        probe.asyncCall("Finish");
+        QTRY_COMPARE(app.state(), QProcess::NotRunning);
         QCOMPARE(app.exitCode(), 0);
     }
     void applicationShortcutsOpenLauncherAndRespectCloseVeto()

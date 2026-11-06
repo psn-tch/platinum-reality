@@ -9,6 +9,8 @@ Canvas {
     property bool selected: false
     property string personalFolder: ""
     property bool full: false
+    // Label ▸ (FileLabels): the drawing tinted with this colour, as Mac OS 9 shows a labelled icon.
+    property string labelColor: ""
     readonly property string personalName: ({folder: "folder", application: "application", launcher: "application", disk: "hard-disk",
                                               trash: full ? "trash-full" : "trash", file: "document"})[kind] || ""
     readonly property string personal: personalFolder !== "" && personalName !== ""
@@ -22,11 +24,19 @@ Canvas {
     onAvailableChanged: if (available) requestPaint()
     onVisibleChanged: if (visible) requestPaint()
     onSelectedChanged: requestPaint()
+    onLabelColorChanged: requestPaint()
+    function tint(c) {
+        if(labelColor==="")return
+        c.globalCompositeOperation="source-atop";c.globalAlpha=0.55
+        c.fillStyle=labelColor;c.fillRect(0,0,width,height)
+        c.globalAlpha=1;c.globalCompositeOperation="source-over"
+    }
     onPaint: {
         let c=getContext("2d")
         c.clearRect(0,0,width,height)
         if(personal!=="" && isImageLoaded(personal)) {
             c.drawImage(personal,1,2,32,32)
+            tint(c)
             if(selected){c.globalCompositeOperation="source-atop";c.fillStyle="rgba(0,0,48,0.45)";c.fillRect(0,0,width,height);c.globalCompositeOperation="source-over"}
             return
         }
@@ -68,5 +78,6 @@ Canvas {
                 c.fillStyle="#222";c.fillRect(4,29,6,2);c.fillRect(8,26,2,6)
             }
         }
+        tint(c)
     }
 }

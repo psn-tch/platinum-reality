@@ -50,39 +50,47 @@ Item {
                 text: "Save energy when the computer is not being used."
             }
         }
-        Text {
-            objectName: "energy-sleep-label"
-            font.pixelSize: 12; font.bold: true; textFormat: Text.PlainText
-            text: "Put the computer to sleep when inactive for: " + panel.describe(panel.settings.sleep)
-        }
-        PlatinumSlider {
-            objectName: "energy-sleep"
-            width: 360; from: 0; to: panel.sleepSteps.length - 1; stepSize: 1; snapMode: Slider.SnapAlways
-            lowLabel: "5 min"; highLabel: "Never"
-            value: panel.nearest(panel.sleepSteps, panel.settings.sleep)
-            onCommitted: function(value) { panel.settings.set("sleep", panel.sleepSteps[Math.round(value)]) }
-        }
-        Text {
-            objectName: "energy-display-label"
-            font.pixelSize: 12; font.bold: true; textFormat: Text.PlainText
-            text: "Turn the display off when inactive for: " + panel.describe(panel.settings.displayOff)
-        }
-        PlatinumSlider {
-            objectName: "energy-display"
-            width: 360; from: 0; to: panel.displaySteps.length - 1; stepSize: 1; snapMode: Slider.SnapAlways
-            lowLabel: "1 min"; highLabel: "Never"
-            value: panel.nearest(panel.displaySteps, panel.settings.displayOff)
-            onCommitted: function(value) { panel.settings.set("displayOff", panel.displaySteps[Math.round(value)]) }
+        // 9.2.2's Sleep Setup: a sentence above each slider, its steps ticked and labelled below.
+        PlatinumGroup {
+            title: "Sleep Setup"
+            width: Math.min(parent.width, 500)
+            spacing: 6
+            Text {
+                objectName: "energy-sleep-label"
+                font.pixelSize: 12; textFormat: Text.PlainText
+                text: "Put the computer to sleep whenever it’s inactive for: " + panel.describe(panel.settings.sleep)
+            }
+            PlatinumSlider {
+                objectName: "energy-sleep"
+                width: parent.width; from: 0; to: panel.sleepSteps.length - 1; stepSize: 1; snapMode: Slider.SnapAlways
+                tickCount: panel.sleepSteps.length
+                tickLabels: ["5 min", "", "", "20", "", "", "1 hr", "", "2", "", "4", "Never"]
+                value: panel.nearest(panel.sleepSteps, panel.settings.sleep)
+                onCommitted: function(value) { panel.settings.set("sleep", panel.sleepSteps[Math.round(value)]) }
+            }
+            Item { width: 1; height: 6 }
+            Text {
+                objectName: "energy-display-label"
+                font.pixelSize: 12; textFormat: Text.PlainText
+                text: "Turn the display off when inactive for: " + panel.describe(panel.settings.displayOff)
+            }
+            PlatinumSlider {
+                objectName: "energy-display"
+                width: parent.width; from: 0; to: panel.displaySteps.length - 1; stepSize: 1; snapMode: Slider.SnapAlways
+                tickCount: panel.displaySteps.length
+                tickLabels: ["1 min", "", "", "5", "", "", "20", "", "", "1 hr", "", "2", "Never"]
+                value: panel.nearest(panel.displaySteps, panel.settings.displayOff)
+                onCommitted: function(value) { panel.settings.set("displayOff", panel.displaySteps[Math.round(value)]) }
+            }
         }
         Text {
             objectName: "energy-note"
-            width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12; color: "#333"; textFormat: Text.PlainText
+            width: Math.min(parent.width, 500); wrapMode: Text.Wrap; font.pixelSize: 12; color: "#333"; textFormat: Text.PlainText
             text: (panel.settings.sleep !== 0 && panel.settings.displayOff !== 0 && panel.settings.displayOff >= panel.settings.sleep
                    ? "The computer sleeps before the display would turn off. " : "")
                   + "The computer locks when it sleeps. Moving the mouse or pressing a key turns the display back on. "
                   + "A playing video, or Appearance's “Never turn the screen off automatically”, keeps both awake."
         }
-        Rectangle { width: parent.width; height: 1; color: "#999" }
         Row {
             spacing: 12
             PlatinumButton {

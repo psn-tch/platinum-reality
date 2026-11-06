@@ -1,5 +1,9 @@
 #include "appearance_settings.hpp"
 #include <QDateTime>
+#include <QGuiApplication>
+#include <QStyleHints>
+#include <array>
+#include <tuple>
 #include <QTimeZone>
 #include <QDir>
 #include <QDirIterator>
@@ -15,6 +19,23 @@
 
 namespace
 {
+// Appearance → Highlight Color: the colour names and their light highlight (black text on it),
+// with Black & White's black (white text) first, as the 9.2.2 menu lists them.
+const QList<std::pair<QString, QString>> &highlights()
+{
+    static const QList<std::pair<QString, QString>> list{
+        {"Black & White", "#000000"}, {"Blue", "#99ccff"}, {"Bronze", "#ffcc99"}, {"Gold", "#ffee88"},
+        {"Graphite", "#cccccc"},      {"Green", "#ccffcc"}, {"Lavender", "#e6ccff"}, {"Purple", "#ccccff"},
+        {"Red", "#ffcccc"},           {"Silver", "#e0e0e0"}};
+    return list;
+}
+QString highlightValue(const QString &name)
+{
+    for (const auto &[label, value] : highlights())
+        if (label == name)
+            return value;
+    return {};
+}
 bool valid(int duration, int x, int y)
 {
     return duration >= 0 && duration <= 1200 && x >= 0 && x <= 65536 && y >= -1 && y <= 65536;
@@ -108,14 +129,34 @@ AppearanceSettings::AppearanceSettings(QString profile, QObject *parent)
     }
     if (const auto accent = object.value("accent").toString(); accent == "blue" || accent == "graphite")
         m_accent = accent;
+    if (const auto name = object.value("highlight").toString(); !highlightValue(name).isEmpty())
+        m_highlight = name;
     if (object.value("doubleClickCollapse").isBool())
         m_doubleClickCollapse = object.value("doubleClickCollapse").toBool();
     if (object.value("keepScreenAwake").isBool())
         m_keepScreenAwake = object.value("keepScreenAwake").toBool();
+    if (const auto modules = object.value("stripModules").toInt(-1); modules >= 0 && modules <= 256)
+        m_stripModules = modules;
     const auto clock = object.value("clock").toObject();
     for (auto it = m_clock.begin(); it != m_clock.end(); ++it)
         if (clock.value(it.key()).isBool())
             it.value() = clock.value(it.key()).toBool();
+    const auto general = object.value("general").toObject();
+    if (general.value("showDesktop").isBool())
+        m_showDesktop = general.value("showDesktop").toBool();
+    if (const auto blinks = general.value("menuBlinks").toInt(-1); blinks >= 0 && blinks <= 3)
+        m_menuBlinks = blinks;
+    if (const auto caret = general.value("caretBlink").toInt(-1); caret >= 0 && caret <= 2)
+        m_caretBlink = caret;
+    const auto switcher = object.value("switcher").toObject();
+    if (const auto x = switcher.value("x").toInt(-1), y = switcher.value("y").toInt(-1);
+        switcher.value("visible").isBool() && x >= 0 && x <= 65536 && y >= 0 && y <= 65536)
+    {
+        m_switcherVisible = switcher.value("visible").toBool();
+        m_switcherX = x;
+        m_switcherY = y;
+    }
+    applyCaretFlash();
 }
 bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x, int y,
                               const QString &picture, const QString &layout)
@@ -139,12 +180,20 @@ bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x,
                                                  {"stripCollapsed", collapsed},
                                                  {"stripX", x},
                                                  {"stripY", y},
+                                                 {"stripModules", m_stripModules},
                                                  {"wallpaperPath", picture},
                                                  {"wallpaperLayout", layout},
                                                  {"accent", m_accent},
+                                                 {"highlight", m_highlight},
                                                  {"doubleClickCollapse", m_doubleClickCollapse},
                                                  {"keepScreenAwake", m_keepScreenAwake},
-                                                 {"clock", clock}})
+                                                 {"clock", clock},
+                                                 {"general", QJsonObject{{"showDesktop", m_showDesktop},
+                                                                         {"menuBlinks", m_menuBlinks},
+                                                                         {"caretBlink", m_caretBlink}}},
+                                                 {"switcher", QJsonObject{{"visible", m_switcherVisible},
+                                                                          {"x", m_switcherX},
+                                                                          {"y", m_switcherY}}}})
                            .toJson();
     QSaveFile file(m_profile + "/appearance.json");
     if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
@@ -226,6 +275,98 @@ bool AppearanceSettings::setClockOption(QString key, bool on)
     m_clock[key] = previous;
     return false;
 }
+QVariantMap AppearanceSettings::general() const
+{
+    return {{"showDesktop", m_showDesktop}, {"menuBlinks", m_menuBlinks}, {"caretBlink", m_caretBlink}};
+}
+QColor AppearanceSettings::highlightColor() const
+{
+    return QColor(highlightValue(m_highlight));
+}
+QColor AppearanceSettings::highlightTextColor() const
+{
+    return m_highlight == "Black & White" ? QColor(Qt::white) : QColor(Qt::black);
+}
+QVariantList AppearanceSettings::highlightChoices() const
+{
+    QVariantList result;
+    for (const auto &[label, value] : highlights())
+        result.append(QVariantMap{{"name", label}, {"color", value}});
+    return result;
+}
+bool AppearanceSettings::setHighlight(QString name)
+{
+    if (highlightValue(name).isEmpty())
+    {
+        emit errorOccurred("That highlight colour is not available.");
+        return false;
+    }
+    if (name == m_highlight)
+        return true;
+    const auto previous = std::exchange(m_highlight, name);
+    if (save(m_duration, m_stripVisible, m_stripCollapsed, m_stripX, m_stripY, m_wallpaperPath,
+             m_wallpaperLayout))
+        return true;
+    m_highlight = previous;
+    return false;
+}
+QVariantMap AppearanceSettings::switcher() const
+{
+    return {{"visible", m_switcherVisible}, {"x", m_switcherX}, {"y", m_switcherY}};
+}
+bool AppearanceSettings::setSwitcher(bool visible, int x, int y)
+{
+    if (x < 0 || x > 65536 || y < 0 || y > 65536)
+    {
+        emit errorOccurred("The appearance setting is outside its supported range.");
+        return false;
+    }
+    const auto previous = std::tuple{m_switcherVisible, m_switcherX, m_switcherY};
+    std::tie(m_switcherVisible, m_switcherX, m_switcherY) = std::tuple{visible, x, y};
+    if (save(m_duration, m_stripVisible, m_stripCollapsed, m_stripX, m_stripY, m_wallpaperPath,
+             m_wallpaperLayout))
+        return true;
+    std::tie(m_switcherVisible, m_switcherX, m_switcherY) = previous;
+    return false;
+}
+int AppearanceSettings::caretFlashTime() const
+{
+    // Slow, medium (Qt's own default) and fast.
+    return std::array{1600, 1000, 500}[std::clamp(m_caretBlink, 0, 2)];
+}
+void AppearanceSettings::applyCaretFlash() const
+{
+    // Every text field of the desktop's own windows; applications keep their toolkit's setting.
+    if (auto *application = qobject_cast<QGuiApplication *>(QCoreApplication::instance()))
+        application->styleHints()->setCursorFlashTime(caretFlashTime());
+}
+bool AppearanceSettings::setGeneralOption(QString key, QVariant value)
+{
+    const auto number = value.toInt();
+    const bool valid = key == "showDesktop" ? value.typeId() == QMetaType::Bool
+                     : (key == "menuBlinks" || key == "caretBlink") && value.typeId() != QMetaType::Bool &&
+                           value.canConvert<int>() && value.toDouble() == number &&
+                           number >= 0 && number <= (key == "menuBlinks" ? 3 : 2);
+    if (!valid)
+    {
+        emit errorOccurred("That General Controls setting is not available.");
+        return false;
+    }
+    auto &slot = key == "menuBlinks" ? m_menuBlinks : m_caretBlink;
+    const auto previous = std::tuple{m_showDesktop, m_menuBlinks, m_caretBlink};
+    if (key == "showDesktop")
+        m_showDesktop = value.toBool();
+    else
+        slot = number;
+    if (save(m_duration, m_stripVisible, m_stripCollapsed, m_stripX, m_stripY, m_wallpaperPath,
+             m_wallpaperLayout))
+    {
+        applyCaretFlash();
+        return true;
+    }
+    std::tie(m_showDesktop, m_menuBlinks, m_caretBlink) = previous;
+    return false;
+}
 bool AppearanceSettings::setKeepScreenAwake(bool keepAwake)
 {
     if (keepAwake == m_keepScreenAwake)
@@ -246,6 +387,20 @@ bool AppearanceSettings::setControlStripPosition(int x, int y)
 {
     return save(m_duration, m_stripVisible, m_stripCollapsed, x, y, m_wallpaperPath,
                 m_wallpaperLayout);
+}
+bool AppearanceSettings::setControlStripModules(int modules)
+{
+    if (modules < 0 || modules > 256)
+    {
+        emit errorOccurred("The appearance setting is outside its supported range.");
+        return false;
+    }
+    const auto previous = std::exchange(m_stripModules, modules);
+    if (save(m_duration, m_stripVisible, false, m_stripX, m_stripY, m_wallpaperPath,
+             m_wallpaperLayout))
+        return true;
+    m_stripModules = previous;
+    return false;
 }
 QString AppearanceSettings::picturesFolder() const
 {

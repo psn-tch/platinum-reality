@@ -117,3 +117,42 @@ real disks or against a privileged attacker.
 This document changes no host packages, sessions, profiles, firmware, storage,
 release selection or configuration. Real VM proofs listed as pending remain
 pending until their receipts and screenshots exist.
+
+## November 2: evidence required for updates 30 and 31
+
+The previous update-29 image evidence remains historical. Update30 replaced
+separate settings dialogs with one Control Panels window and added input and
+energy preferences. Update31 changes keyboard shortcut delivery. Neither
+change is qualified by an older installed-target screenshot or a synthetic
+QTest key. After psn_tch selects31, pin the exact native and distribution
+commits in a fresh immutable image and record these independently:
+
+| Gate | Required observation | Insufficient substitute |
+| --- | --- | --- |
+| Settings container | Actual Apple-menu route opens one Control Panels window; Monitors is selected in its list and shown in its page | Old separate Monitors dialog or a source-only recognizer test |
+| Input preferences | Keyboard and mouse changes persist in target `input.json`; supervisor records `input_applied` after the actual request and again after ordinary login | File existence or an unacknowledged request alone |
+| Energy Saver | One-minute setting really powers off the owned display; keyboard/pointer input wakes it and the session remains usable | A timeout in JSON or merely starting swayidle |
+| Layout-aware keys | VM keyboard sends Command-Shift-3 and an independently read clipboard contains a decodable current-screen PNG | QTest key injection, stale clipboard image or shortcut signal only |
+| Keyboard installer | Every page/control reached by Tab/arrows/Space/Return, actual questions used; Return-only erase refusal preserves the full disk hash; deliberate keyboard erase completes real install and detached encrypted login | Programmatic focus/selection, pointer-assisted navigation, fake engine or omitted disk hashes |
+| NIC absent | No NIC device throughout live boot and installation; actual immutable engine completes offline; detached encrypted boot and normal login | Restricted user networking or detaching NIC only after installation |
+| Installed R4 | Signature-enforcing upgrade on installed target, detached normal boot/login, deliberate signed rollback and another detached boot/login; complete baseline payload/version comparison | An isolated directory-root transaction with dependency checks bypassed |
+
+The updated Monitors driver recognizes the container/list/heading and refuses
+legacy OK/Cancel dialogs. This is prepared tooling with source checks; its new
+recognizer still needs review against an actual new-image VM frame. Primary
+and On changes apply immediately and use Keep; there is no final OK to press.
+Unmanaged "Use all displays" saves immediately but takes effect on next login.
+
+Storage breadth also needs separate negative controls for active swap,
+device-mapper holders, RAID/multipath, physical hotplug/re-enumeration and
+authenticated boot-media ancestry. Replacing a same-size target between plan
+and erase must refuse before any write. Record device identity and complete
+pre/post hashes in the owned fixtures; a model/label or `dev_t` alone does not
+qualify physical identity. No physical disks are used for these tests.
+
+R4 still needs a signed-database/unsigned-repository-package refusal, wrong
+and expired keys, interrupted-update recovery, dependency/ABI compatibility
+and production signing-key custody. Keep test keys private and unpublished.
+Independent rescue boot, encrypted-volume recovery and restoration from the
+external backup must be demonstrated before requesting a physical pilot.
+Only psn_tch can authorize that pilot's exact destination and guard change.

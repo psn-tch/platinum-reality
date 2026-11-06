@@ -40,7 +40,9 @@ class DesktopItems final : public QAbstractListModel
         KindRole,
         XRole,
         YRole,
-        SelectedRole
+        SelectedRole,
+        // Label ▸ (FileLabels): its colour as #rrggbb, "" for none.
+        LabelColorRole
     };
     DesktopItems(QString workspace, QString profile, QObject *parent = nullptr,
                  QSize viewport = {1120, 760});
@@ -105,10 +107,17 @@ class DesktopItems final : public QAbstractListModel
     Q_INVOKABLE void updateDropTarget(int x, int y);
     Q_INVOKABLE bool savePositions();
     Q_INVOKABLE void openSelected();
+    // A spring-loaded folder: a drag held over this folder, disk or Trash opens it (Mac OS 9).
+    Q_INVOKABLE bool springOpen(QString key);
     Q_INVOKABLE void cleanUp();
     Q_INVOKABLE bool createFolder(QString name);
     Q_INVOKABLE bool renameItem(QString key, QString name);
     Q_INVOKABLE bool duplicateSelected();
+    // Label ▸: {index, name, color} for each of the seven labels.
+    Q_INVOKABLE QVariantList labelChoices() const;
+    // The label every selected item has (0 none), or -1 when they differ or nothing is selected.
+    Q_INVOKABLE int selectionLabel() const;
+    Q_INVOKABLE bool labelSelected(int label);
     Q_INVOKABLE bool trashSelected();
     // Special > Empty Trash…: {items, bytes, complete} for the confirmation, then
     // permanent removal of what Trash held when the user confirmed.

@@ -54,7 +54,7 @@ ShellDialog {
                 id: search; objectName: "application-search"
                 width: parent.width - refreshButton.width - 10; height: 28
                 placeholderText: "Find an application"; font.pixelSize: 12; selectByMouse: true
-                color: "black"; selectionColor: "#202050"; selectedTextColor: "white"
+                color: "black"; selectionColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightColor : "#ccccff"; selectedTextColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightTextColor : "black"
                 background: FieldBackground {}
                 onTextChanged: catalog.query = text
                 onAccepted: browser.acceptSelection()

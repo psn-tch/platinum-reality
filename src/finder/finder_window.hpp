@@ -8,9 +8,27 @@
 #include <QMainWindow>
 #include <QSettings>
 #include <QStackedWidget>
+#include <QTimer>
 #include <QTreeView>
+#include <QPersistentModelIndex>
 #include <functional>
 
+// Spring-loaded folders (Mac OS 9): a drag held over a folder for a second opens it, so the
+// drop can go further in. Moving off the folder, leaving the window or dropping cancels it.
+class SpringLoading
+{
+  public:
+    explicit SpringLoading(QAbstractItemView *view);
+    void hover(QPoint at);
+    void cancel();
+    std::function<void(QString)> opened;
+    static constexpr int delay = 1000;
+
+  private:
+    QAbstractItemView *m_view;
+    QTimer m_timer;
+    QPersistentModelIndex m_target;
+};
 class FolderIcons : public QListView
 {
     Q_OBJECT
@@ -23,12 +41,17 @@ class FolderIcons : public QListView
   signals:
     void filesDropped(QStringList sources, QString destination, bool copy);
     void placementChanged();
+    void springOpen(QString folder);
 
   protected:
     void startDrag(Qt::DropActions actions) override;
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dragMoveEvent(QDragMoveEvent *event) override;
+    void dragLeaveEvent(QDragLeaveEvent *event) override;
     void dropEvent(QDropEvent *event) override;
+
+  private:
+    SpringLoading m_spring{this};
 };
 class FolderList final : public QTreeView
 {
@@ -37,12 +60,17 @@ class FolderList final : public QTreeView
     explicit FolderList(QWidget *parent = nullptr);
   signals:
     void filesDropped(QStringList sources, QString destination, bool copy);
+    void springOpen(QString folder);
 
   protected:
     void startDrag(Qt::DropActions) override;
     void dragEnterEvent(QDragEnterEvent *) override;
     void dragMoveEvent(QDragMoveEvent *) override;
+    void dragLeaveEvent(QDragLeaveEvent *) override;
     void dropEvent(QDropEvent *) override;
+
+  private:
+    SpringLoading m_spring{this};
 };
 class FinderWindow final : public QMainWindow
 {
@@ -95,6 +123,8 @@ class FinderWindow final : public QMainWindow
     void pasteInto(const QString &destination);
     std::function<void(QStringList, QString, bool)> m_receiveFiles;
     void showInfo(const QString &path);
+    // Label ▸ for the selected items (0: None).
+    void setLabel(int label);
     void updateTitle();
     void updateHeader();
     void updatePlaces();

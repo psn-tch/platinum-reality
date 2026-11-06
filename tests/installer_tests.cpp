@@ -335,6 +335,128 @@ class InstallerTests final : public QObject
         QTest::keyClick(&window, Qt::Key_Return); // Install asks first; the answer here is Cancel.
         QCOMPARE(window.page(), InstallerWindow::Install);
     }
+    void keyboardOnlyTourUsesRealQuestionsAndReturnNeverInstalls()
+    {
+        // A widget/fixture proof, not an immutable-image installation. No pointer clicks,
+        // setFocus/setCurrentRow/setText, or confirmation-answer bypasses in this tour.
+        QTemporaryDir root;
+        const auto log=root.filePath("keyboard-engine.jsonl");
+        qputenv("FAKE_ENGINE_LOG",log.toLocal8Bit());
+        qunsetenv("FAKE_ENGINE_FAIL");
+        QApplication::setStyle(new PlatinumStyle);
+        const auto restore=qScopeGuard([]{QApplication::setStyle("Fusion");});
+        EngineClient engine(QFINDTESTDATA("fake_install_engine.py"));
+        InstallerWindow window(&engine,"Read me.","MIT License");
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.activateWindow();
+        const auto key=[&](Qt::Key code,Qt::KeyboardModifiers mods=Qt::NoModifier){
+            QTest::keyClick(QApplication::focusWidget() ? QApplication::focusWidget() : &window,code,mods);
+            QCoreApplication::processEvents(); // Includes queued focus restoration after a modal closes.
+        };
+        const auto tabTo=[&](const QString &name){
+            for(int n=0;n<24;++n){
+                if(QApplication::focusWidget() && QApplication::focusWidget()->objectName()==name)return true;
+                key(Qt::Key_Tab);
+            }
+            qInfo()<<"Keyboard tour could not reach"<<name<<"active"<<QApplication::activeWindow()
+                   <<"focus"<<QApplication::focusWidget();
+            return false;
+        };
+        key(Qt::Key_Return);
+        QCOMPARE(window.page(),InstallerWindow::Destination);
+        auto *disks=find<QListWidget>(window,"installer-disks");
+        QTRY_COMPARE(disks->count(),2);
+        QVERIFY(tabTo("installer-disks"));
+        key(Qt::Key_Down);
+        QCOMPARE(disks->currentRow(),1);
+        key(Qt::Key_Return);
+        QCOMPARE(window.page(),InstallerWindow::Information);
+        QVERIFY(tabTo("installer-back"));
+        key(Qt::Key_Space);
+        QCOMPARE(window.page(),InstallerWindow::Destination);
+        key(Qt::Key_Return);
+        QCOMPARE(window.page(),InstallerWindow::Information);
+        key(Qt::Key_Return);
+        QCOMPARE(window.page(),InstallerWindow::License);
+        int questionMode=0,answered=0;
+        bool timedOut=false,unexpected=false;
+        QTimer poll,watchdog;
+        poll.setInterval(10);watchdog.setSingleShot(true);
+        connect(&watchdog,&QTimer::timeout,&window,[&]{
+            timedOut=true;poll.stop();
+            if(auto *box=qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))box->reject();
+        });
+        connect(&poll,&QTimer::timeout,&window,[&]{
+            auto *box=qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            if(!box)return;
+            if(!box->focusWidget() || !box->focusWidget()->hasFocus())return;
+            poll.stop();
+            const bool erase=box->windowTitle().contains("Erase");
+            if(erase!=(questionMode>0)){unexpected=true;box->reject();return;}
+            ++answered;
+            if(questionMode==2){
+                for(int n=0;n<8 && box->buttonRole(qobject_cast<QAbstractButton *>(QApplication::focusWidget()))!=QMessageBox::AcceptRole;++n)
+                    QTest::keyClick(box->focusWidget(),Qt::Key_Tab);
+                if(box->buttonRole(qobject_cast<QAbstractButton *>(QApplication::focusWidget()))!=QMessageBox::AcceptRole){
+                    unexpected=true;box->reject();return;
+                }
+                QTest::keyClick(box->focusWidget(),Qt::Key_Space); // Deliberate focused Erase.
+            }else QTest::keyClick(box->focusWidget(),Qt::Key_Return);
+            watchdog.stop();
+        });
+        poll.start();watchdog.start(3000);
+        key(Qt::Key_Return); // Real license dialog, default Agree.
+        QTRY_COMPARE(window.page(),InstallerWindow::Account);
+        QVERIFY(!timedOut && !unexpected);QCOMPARE(answered,1);
+        // Offscreen has no window manager to reactivate the parent after a modal
+        // closes. Supply only that venue event; Tab still has to find every field.
+        // Real Wayland/X11 runs must restore activation themselves.
+        if(QGuiApplication::platformName()=="offscreen"){window.activateWindow();QCoreApplication::processEvents();}
+        for(auto field:{std::pair{"installer-full-name","Pat Example"},
+                       {"installer-user-name","keyboarduser"},{"installer-password","platinum"},
+                       {"installer-verify","platinum"},{"installer-computer-name","keyboard-g4"}}){
+            QVERIFY2(tabTo(field.first),field.first);
+            key(Qt::Key_A,Qt::ControlModifier);
+            QTest::keyClicks(QApplication::focusWidget(),field.second);
+        }
+        for(const auto *name:{"installer-language","installer-time-zone","installer-keymap"}){
+            auto *combo=find<QComboBox>(window,name);
+            QTRY_VERIFY(combo->count()>=2);
+            QVERIFY2(tabTo(name),name);
+            key(Qt::Key_Home);key(Qt::Key_Down);
+            QCOMPARE(combo->currentIndex(),1);
+        }
+        QVERIFY(tabTo("installer-encrypt"));
+        auto *encrypt=find<QCheckBox>(window,"installer-encrypt");
+        QVERIFY(encrypt->isChecked());
+        key(Qt::Key_Space);QVERIFY(!encrypt->isChecked());
+        key(Qt::Key_Space);QVERIFY(encrypt->isChecked());
+        key(Qt::Key_Return);
+        QCOMPARE(window.page(),InstallerWindow::Install);
+        questionMode=1;poll.start();watchdog.start(3000);
+        key(Qt::Key_Return); // Real occupied-disk erase question: Return must cancel.
+        QTRY_COMPARE(answered,2);
+        QTRY_VERIFY(find<QPushButton>(window,"installer-continue")->isEnabled());
+        QCOMPARE(window.page(),InstallerWindow::Install);
+        QVERIFY(!timedOut && !unexpected);
+        if(QGuiApplication::platformName()=="offscreen"){window.activateWindow();QCoreApplication::processEvents();}
+        for(const auto &call:calls(log))QVERIFY(call.value("argv").toArray().first().toString()!="install");
+        questionMode=2;poll.start();watchdog.start(3000);
+        key(Qt::Key_Return);
+        QTRY_COMPARE(window.page(),InstallerWindow::Finished);
+        QVERIFY(!timedOut && !unexpected);QCOMPARE(answered,3);
+        const auto made=calls(log);
+        QCOMPARE(made.last().value("argv").toArray().first().toString(),QString("install"));
+        const auto config=made.last().value("config").toObject();
+        QCOMPARE(config.value("hostname").toString(),QString("keyboard-g4"));
+        QCOMPARE(config.value("user").toObject().value("name").toString(),QString("keyboarduser"));
+        QVERIFY(config.value("encrypt").toBool());
+        for(auto pair:{std::pair{"locale","installer-language"},{"timezone","installer-time-zone"},{"keymap","installer-keymap"}})
+            QCOMPARE(config.value(pair.first).toString(),find<QComboBox>(window,pair.second)->currentData().toString());
+        if(QGuiApplication::platformName()=="offscreen"){window.activateWindow();QCoreApplication::processEvents();}
+        QVERIFY(tabTo("installer-restart")); // Reachability only: do not restart anything.
+    }
     void tabMovesThroughTheAccountPageInReadingOrder()
     {
         // Keyboard-only installation: Tab visits each control in the order it is read, then the buttons.

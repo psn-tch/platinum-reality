@@ -49,6 +49,12 @@ Canvas {
             c.fillStyle="#9cc0d8";c.fillRect(3,4,10,8)
             c.fillStyle="#4d7a3a";c.beginPath();c.moveTo(3,12);c.lineTo(7,7);c.lineTo(10,10);c.lineTo(11.5,8.5);c.lineTo(13,10);c.lineTo(13,12);c.closePath();c.fill()
             c.fillStyle="#e8c030";c.beginPath();c.arc(11,6,1.3,0,Math.PI*2);c.fill()
+        } else if(kind==="general") {
+            // A desktop window above a slider: General Controls.
+            c.fillStyle="#eee";c.fillRect(1.5,1.5,13,9);c.strokeRect(1.5,1.5,13,9)
+            c.fillStyle="#9999cc";c.fillRect(2,4,12,6);c.fillStyle="#222";c.fillRect(2,3,12,1)
+            line(2,13.5,14,13.5)
+            c.fillStyle="#99f";c.beginPath();c.moveTo(8.5,11);c.lineTo(11.5,11);c.lineTo(11.5,13.5);c.lineTo(10,15);c.lineTo(8.5,13.5);c.closePath();c.fill();c.stroke()
         } else if(kind==="clock") {
             c.fillStyle="#eee";c.beginPath();c.arc(8,8,6.5,0,Math.PI*2);c.fill();c.stroke()
             for(let i=0;i<12;i+=3){const a=i*Math.PI/6;line(8+Math.cos(a)*5,8+Math.sin(a)*5,8+Math.cos(a)*6,8+Math.sin(a)*6)}

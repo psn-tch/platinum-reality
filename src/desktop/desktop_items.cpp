@@ -1,4 +1,5 @@
 #include "desktop_items.hpp"
+#include "finder/file_labels.hpp"
 #include "applications/desktop_entry.hpp"
 #include <QProcessEnvironment>
 #include <unistd.h>
@@ -114,6 +115,9 @@ QVariant DesktopItems::data(const QModelIndex &index, int role) const
         return position(entry).y();
     case SelectedRole:
         return m_selected.contains(entry.key);
+    case LabelColorRole:
+        return entry.filesystemIdentity.isEmpty() ? QString()
+                                                  : FileLabels::color(FileLabels::label(entry.path, m_profile));
     default:
         return {};
     }
@@ -122,7 +126,7 @@ QHash<int, QByteArray> DesktopItems::roleNames() const
 {
     return {{KeyRole, "entryKey"},       {NameRole, "entryName"}, {PathRole, "entryPath"},
             {KindRole, "entryKind"},     {XRole, "itemX"},        {YRole, "itemY"},
-            {SelectedRole, "isSelected"}};
+            {SelectedRole, "isSelected"}, {LabelColorRole, "labelColor"}};
 }
 QPoint DesktopItems::position(const Entry &entry) const
 {
@@ -723,6 +727,17 @@ void DesktopItems::openSelected()
         if (m_selected.contains(entry.key))
             emit openRequested(entry.kind, entry.path);
 }
+bool DesktopItems::springOpen(QString key)
+{
+    for (const auto &entry : m_entries)
+        if (entry.key == key && (entry.kind == "folder" || entry.kind == "disk" || entry.kind == "trash") &&
+            (entry.kind == "trash" || m_operations.readableDirectory(entry.path)))
+        {
+            emit openRequested(entry.kind, entry.path);
+            return true;
+        }
+    return false;
+}
 void DesktopItems::cleanUp()
 {
     if (m_busy)
@@ -788,6 +803,41 @@ bool DesktopItems::renameItem(QString key, QString name)
 bool DesktopItems::duplicateSelected()
 {
     return startOperation(Operation::duplicate, selectedFilePaths());
+}
+QVariantList DesktopItems::labelChoices() const
+{
+    QVariantList result;
+    for (const auto &label : FileLabels::labels())
+        result.append(QVariantMap{{"index", label.index}, {"name", label.name}, {"color", label.color}});
+    return result;
+}
+int DesktopItems::selectionLabel() const
+{
+    const auto paths = selectedFilePaths();
+    int shared = -1;
+    for (const auto &path : paths)
+    {
+        const auto label = FileLabels::label(path, m_profile);
+        if (shared != -1 && shared != label)
+            return -1;
+        shared = label;
+    }
+    return shared;
+}
+bool DesktopItems::labelSelected(int label)
+{
+    const auto paths = selectedFilePaths();
+    if (paths.isEmpty() || label < 0 || label > 7)
+        return false;
+    bool ok = true;
+    for (const auto &path : paths)
+        ok = FileLabels::setLabel(path, label, m_profile) && ok;
+    for (int row = 0; row < m_entries.size(); ++row)
+        if (m_selected.contains(m_entries[row].key))
+            emit dataChanged(index(row), index(row), {LabelColorRole});
+    if (!ok)
+        emit errorOccurred("The label could not be changed for every item.");
+    return ok;
 }
 bool DesktopItems::trashSelected()
 {
@@ -891,6 +941,12 @@ QVariantMap DesktopItems::selectedDetails() const
         return {};
     auto result = fileDetails(entry->path, entry->kind);
     result.insert({{"key", entry->key}, {"path", entry->path}, {"name", entry->name}, {"kind", entry->kind}});
+    if (!entry->filesystemIdentity.isEmpty())
+    {
+        const auto label = FileLabels::label(entry->path, m_profile);
+        result.insert("label", label ? FileLabels::name(label) : QString("None"));
+        result.insert("labelColor", FileLabels::color(label));
+    }
     return result;
 }
 const DesktopItems::Entry *DesktopItems::externalDropEntry(QPoint point) const

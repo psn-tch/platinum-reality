@@ -202,6 +202,27 @@ bool ApplicationCatalog::matchesDocument(const DesktopEntry &entry) const
     return std::any_of(entry.mimeTypes.begin(), entry.mimeTypes.end(), [&](const auto &name)
                        { return m_documentType.name() == name || m_documentType.inherits(name); });
 }
+namespace
+{
+// How well a name answers the search, best first: the name itself, the name's start, the start of
+// a word in it, anywhere in it, then only in its description or keywords (psn_tch, 2026-11-02:
+// typing "steam" listed every Steam game, whose descriptions mention Steam, above Steam itself).
+int nameRank(const QString &name, const QString &query)
+{
+    if (name.compare(query, Qt::CaseInsensitive) == 0)
+        return 0;
+    if (name.startsWith(query, Qt::CaseInsensitive))
+        return 1;
+    const auto at = name.indexOf(query, 0, Qt::CaseInsensitive);
+    if (at < 0)
+        return 4;
+    for (auto from = at; from >= 0; from = name.indexOf(query, from + 1, Qt::CaseInsensitive))
+        if (!name.at(from - 1).isLetterOrNumber())
+            return 2;
+    return 3;
+}
+} // namespace
+
 void ApplicationCatalog::filter()
 {
     beginResetModel();
@@ -215,6 +236,13 @@ void ApplicationCatalog::filter()
             std::all_of(terms.begin(), terms.end(), [&](const auto &term)
                         { return searchable.contains(term, Qt::CaseInsensitive); }))
             m_visible.push_back(i);
+    }
+    // Entries are alphabetical; a stable sort keeps that order within each rank.
+    if (!terms.isEmpty())
+    {
+        const auto query = terms.join(' ');
+        std::stable_sort(m_visible.begin(), m_visible.end(), [&](int a, int b)
+                         { return nameRank(m_entries[a].name, query) < nameRank(m_entries[b].name, query); });
     }
     endResetModel();
     emit countChanged();

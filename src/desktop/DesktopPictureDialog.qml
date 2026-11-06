@@ -64,7 +64,7 @@ Item {
                 id: folder; objectName: "picture-folder"
                 width: parent.width - readButton.width - 8; height: 28
                 font.pixelSize: 12; selectByMouse: true; placeholderText: "Picture folder"
-                color: "black"; selectionColor: "#202050"; selectedTextColor: "white"
+                color: "black"; selectionColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightColor : "#ccccff"; selectedTextColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightTextColor : "black"
                 background: FieldBackground {}
                 // Return here shows the folder.
                 onAccepted: panel.readFolder()
@@ -143,7 +143,7 @@ Item {
             width: parent.width; height: 28
             text: panel.draftPath; onTextEdited: panel.draftPath = text
             font.pixelSize: 12; selectByMouse: true; placeholderText: "Picture file (full path)"
-            color: "black"; selectionColor: "#202050"; selectedTextColor: "white"
+            color: "black"; selectionColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightColor : "#ccccff"; selectedTextColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightTextColor : "black"
             background: FieldBackground {}
             onAccepted: panel.setDesktop()
             Keys.onPressed: function(event) {if(event.key===Qt.Key_A && (event.modifiers & Qt.MetaModifier)){selectAll();event.accepted=true}}

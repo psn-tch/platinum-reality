@@ -92,7 +92,7 @@ ShellDialog {
                         objectName: "wifi-alert-user"
                         visible: alert.asksUser
                         width: 220; height: 26; font.pixelSize: 13; selectByMouse: true
-                        color: "black"; selectionColor: "#202050"; selectedTextColor: "white"
+                        color: "black"; selectionColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightColor : "#ccccff"; selectedTextColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightTextColor : "black"
                         background: FieldBackground {}
                         maximumLength: 256
                         onAccepted: password.forceActiveFocus()
@@ -103,7 +103,7 @@ ShellDialog {
                         objectName: "wifi-alert-password"
                         width: 220; height: 26; font.pixelSize: 13; selectByMouse: true
                         echoMode: show.checked ? TextInput.Normal : TextInput.Password
-                        color: "black"; selectionColor: "#202050"; selectedTextColor: "white"
+                        color: "black"; selectionColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightColor : "#ccccff"; selectedTextColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightTextColor : "black"
                         background: FieldBackground {}
                         maximumLength: 256
                         onAccepted: if (alert.acceptable) { alert.respond(true); alert.close() }

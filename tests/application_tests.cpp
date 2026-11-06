@@ -472,6 +472,42 @@ class ApplicationTests : public QObject
         QVERIFY(write(path, entry("/usr/bin/true", "DBusActivatable=true\n")));
         QVERIFY(readDesktopEntry(path, "id", {}).unavailable.isEmpty());
     }
+    void searchListsTheNamedApplicationBeforeOnesThatOnlyMentionIt()
+    {
+        // psn_tch, 2026-11-02: typing "steam" listed every Steam game (each described as a Steam
+        // game) above Steam itself, which was then far down the list.
+        QTemporaryDir root;
+        const auto directory = root.filePath("apps");
+        const auto app = [&](const QString &file, const QByteArray &name, const QByteArray &comment) {
+            return write(directory + "/" + file, "[Desktop Entry]\nType=Application\nName=" + name +
+                         "\nComment=" + comment + "\nExec=/usr/bin/true\n");
+        };
+        QVERIFY(app("among.desktop", "Among Us", "Play this game on Steam"));
+        QVERIFY(app("balatro.desktop", "Balatro", "Play this game on Steam"));
+        QVERIFY(app("steam.desktop", "Steam", "Application for managing and playing games on Steam"));
+        QVERIFY(app("link.desktop", "Steam Link", "Stream games from another computer"));
+        QVERIFY(app("deck.desktop", "Big Steam Picture", "A game"));
+        QVERIFY(app("upsteam.desktop", "Upsteamer", "Another program"));
+        ApplicationCatalog catalog({directory}, root.path(), root.path(), QCoreApplication::applicationDirPath());
+        catalog.refresh();
+        QTRY_VERIFY(catalog.ready());
+        const auto names = [&] {
+            QStringList result;
+            for (int row = 0; row < catalog.count(); ++row)
+                result << catalog.item(row).value("name").toString();
+            return result;
+        };
+        catalog.setQuery("steam");
+        QCOMPARE(names(), QStringList({"Steam", "Steam Link", "Big Steam Picture", "Upsteamer", "Among Us", "Balatro"}));
+        catalog.setQuery("STEAM");
+        QCOMPARE(names().first(), QString("Steam"));
+        // Several words: still the name first.
+        catalog.setQuery("steam link");
+        QCOMPARE(names(), QStringList({"Steam Link"}));
+        // Without a search, everything stays alphabetical.
+        catalog.setQuery("");
+        QCOMPARE(names().mid(0, 3), QStringList({"Among Us", "Balatro", "Big Steam Picture"}));
+    }
     void bluetoothIsSearchableButNeverADocumentHandler()
     {
         QTemporaryDir root;

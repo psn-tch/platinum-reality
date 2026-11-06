@@ -36,6 +36,9 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
+#include <QPainter>
+#include "file_labels.hpp"
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
@@ -54,6 +57,7 @@
 
 FolderIcons::FolderIcons(QWidget *parent) : QListView(parent)
 {
+    m_spring.opened = [this](const QString &folder) { emit springOpen(folder); };
     setViewMode(QListView::IconMode);
     setIconSize({32, 32});
     setGridSize({96, 78});
@@ -122,6 +126,74 @@ class LongPressMenu final : public QObject
     QTimer m_timer;
     QPoint m_at;
     bool m_fired = false;
+};
+
+// Labelled items (Label menu, FileLabels): the icon tinted with the label's colour, as Mac OS 9
+// draws it, and in the list the name in that colour. Labels are read when first shown.
+class LabelledFileModel final : public QFileSystemModel
+{
+  public:
+    LabelledFileModel(QString profile, QObject *parent) : QFileSystemModel(parent), m_profile(std::move(profile))
+    {
+        connect(this, &QFileSystemModel::directoryLoaded, this, [this] { m_labels.clear(); m_icons.clear(); });
+    }
+    int labelOf(const QString &path) const
+    {
+        if (const auto known = m_labels.constFind(path); known != m_labels.cend())
+            return *known;
+        const auto label = FileLabels::label(path, m_profile);
+        m_labels.insert(path, label);
+        return label;
+    }
+    void forget(const QString &path)
+    {
+        m_labels.remove(path);
+        m_icons.remove(path);
+        const auto at = index(path);
+        if (at.isValid())
+            emit dataChanged(at, at.siblingAtColumn(columnCount(at.parent()) - 1));
+    }
+    QVariant data(const QModelIndex &at, int role) const override
+    {
+        if (at.column() == 0 && (role == Qt::DecorationRole || role == Qt::ForegroundRole))
+            if (const auto label = labelOf(filePath(at)); label)
+            {
+                if (role == Qt::ForegroundRole)
+                    return QColor(FileLabels::color(label));
+                const auto path = filePath(at);
+                if (const auto cached = m_icons.constFind(path); cached != m_icons.cend())
+                    return *cached;
+                const auto icon = tinted(QFileSystemModel::data(at, role).value<QIcon>(), QColor(FileLabels::color(label)));
+                m_icons.insert(path, icon);
+                return icon;
+            }
+        return QFileSystemModel::data(at, role);
+    }
+    static QIcon tinted(const QIcon &icon, const QColor &color)
+    {
+        QIcon result;
+        for (const int size : {16, 32, 64, 128})
+        {
+            auto image = icon.pixmap(size, size).toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
+            if (image.isNull())
+                continue;
+            const auto original = image;
+            QPainter painter(&image);
+            // Darken the drawing by the colour, then keep only the drawing's own shape.
+            painter.setCompositionMode(QPainter::CompositionMode_Multiply);
+            painter.fillRect(image.rect(), color);
+            painter.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            painter.drawImage(0, 0, original);
+            painter.end();
+            result.addPixmap(QPixmap::fromImage(image));
+        }
+        return result.isNull() ? icon : result;
+    }
+
+  private:
+    QString m_profile;
+    mutable QHash<QString, int> m_labels;
+    mutable QHash<QString, QIcon> m_icons;
 };
 
 QPointer<QDrag> activeFileDrag;
@@ -223,12 +295,58 @@ void FolderIcons::dragEnterEvent(QDragEnterEvent *e)
 {
     acceptFileDrag(e);
 }
+SpringLoading::SpringLoading(QAbstractItemView *view) : m_view(view)
+{
+    m_timer.setSingleShot(true);
+    m_timer.setInterval(delay);
+    QObject::connect(&m_timer, &QTimer::timeout, view, [this]
+    {
+        auto *model = qobject_cast<QFileSystemModel *>(m_view->model());
+        if (!m_target.isValid() || !model || !model->isDir(m_target))
+            return;
+        const auto path = model->filePath(m_target);
+        m_target = QPersistentModelIndex();
+        if (opened)
+            opened(path);
+    });
+}
+void SpringLoading::hover(QPoint at)
+{
+    auto *model = qobject_cast<QFileSystemModel *>(m_view->model());
+    const auto index = m_view->indexAt(at).siblingAtColumn(0);
+    // A folder being dragged does not open under itself.
+    const bool dragged = m_view->selectionModel() && m_view->selectionModel()->isSelected(index) && activeFileDrag;
+    if (!index.isValid() || !model || !model->isDir(index) || dragged)
+    {
+        cancel();
+        return;
+    }
+    if (QPersistentModelIndex(index) == m_target && m_timer.isActive())
+        return;
+    m_target = index;
+    m_timer.start();
+}
+void SpringLoading::cancel()
+{
+    m_timer.stop();
+    m_target = QPersistentModelIndex();
+}
 void FolderIcons::dragMoveEvent(QDragMoveEvent *e)
 {
     acceptFileDrag(e);
+    if (e->isAccepted())
+        m_spring.hover(e->position().toPoint());
+    else
+        m_spring.cancel();
+}
+void FolderIcons::dragLeaveEvent(QDragLeaveEvent *e)
+{
+    m_spring.cancel();
+    QListView::dragLeaveEvent(e);
 }
 void FolderIcons::dropEvent(QDropEvent *e)
 {
+    m_spring.cancel();
     auto *model = qobject_cast<QFileSystemModel *>(this->model());
     const auto target = indexAt(e->position().toPoint());
     const bool folder = target.isValid() && model->isDir(target);
@@ -262,6 +380,7 @@ void FolderIcons::dropEvent(QDropEvent *e)
 }
 FolderList::FolderList(QWidget *parent) : QTreeView(parent)
 {
+    m_spring.opened = [this](const QString &folder) { emit springOpen(folder); };
     setDragEnabled(true);
     setAcceptDrops(true);
     setDropIndicatorShown(true);
@@ -278,9 +397,19 @@ void FolderList::dragEnterEvent(QDragEnterEvent *e)
 void FolderList::dragMoveEvent(QDragMoveEvent *e)
 {
     acceptFileDrag(e);
+    if (e->isAccepted())
+        m_spring.hover(e->position().toPoint());
+    else
+        m_spring.cancel();
+}
+void FolderList::dragLeaveEvent(QDragLeaveEvent *e)
+{
+    m_spring.cancel();
+    QTreeView::dragLeaveEvent(e);
 }
 void FolderList::dropEvent(QDropEvent *e)
 {
+    m_spring.cancel();
     const auto paths = fileDragPaths(e->mimeData());
     if (paths.isEmpty())
     {
@@ -295,7 +424,7 @@ void FolderList::dropEvent(QDropEvent *e)
 FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWidget *parent)
     : QMainWindow(parent), m_root(std::move(root)), m_profile(std::move(profile)),
       m_directory(QDir::cleanPath(std::move(directory))),
-      m_operations(m_root, FinderPlaces::trashFor(m_profile), FinderPlaces::volumes), m_model(new QFileSystemModel(this)),
+      m_operations(m_root, FinderPlaces::trashFor(m_profile), FinderPlaces::volumes), m_model(new LabelledFileModel(m_profile, this)),
       m_icons(new FolderIcons), m_list(new FolderList), m_views(new QStackedWidget)
 {
     setAttribute(Qt::WA_DeleteOnClose);
@@ -462,6 +591,14 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
     m_receiveFiles = receiveFiles;
     connect(m_icons, &FolderIcons::filesDropped, this, receiveFiles);
     connect(m_list, &FolderList::filesDropped, this, receiveFiles);
+    // A spring-loaded folder opens in this window, as a click on it does.
+    const auto spring = [this](const QString &folder)
+    {
+        if (m_operations.readableDirectory(folder))
+            navigate(folder);
+    };
+    connect(m_icons, &FolderIcons::springOpen, this, spring);
+    connect(m_list, &FolderList::springOpen, this, spring);
     // Paste follows the clipboard (files copied here, in another Finder or another file manager).
     connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, this, &FinderWindow::updateActions);
     auto action = [this](QMenu *menu, QString text, QString name, QKeySequence shortcut, auto fn)
@@ -515,6 +652,45 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
             if (paths.size() == 1)
                 showInfo(paths.first());
         });
+    // Label ▸ None and the seven colours, each with its swatch (Mac OS 9's File ▸ Label).
+    auto *labels = file->addMenu("Label");
+    labels->setObjectName("labelMenu");
+    labels->menuAction()->setObjectName("label");
+    const auto addLabel = [this, labels](int number, const QString &name)
+    {
+        auto *a = labels->addAction(name);
+        a->setObjectName("label" + QString::number(number));
+        a->setCheckable(true);
+        if (number)
+        {
+            QPixmap swatch(12, 12);
+            swatch.fill(QColor(FileLabels::color(number)));
+            QPainter frame(&swatch);
+            frame.setPen(Qt::black);
+            frame.drawRect(0, 0, 11, 11);
+            frame.end();
+            a->setIcon(QIcon(swatch));
+        }
+        connect(a, &QAction::triggered, this, [this, number] { setLabel(number); });
+    };
+    addLabel(0, "None");
+    labels->addSeparator();
+    for (const auto &label : FileLabels::labels())
+        addLabel(label.index, label.name);
+    // The current label is ticked when every selected item has it.
+    connect(labels, &QMenu::aboutToShow, this, [this, labels]
+    {
+        const auto paths = selectedPaths();
+        int shared = -1;
+        for (const auto &path : paths)
+        {
+            const auto label = static_cast<LabelledFileModel *>(m_model)->labelOf(path);
+            shared = shared == -1 || shared == label ? label : -2;
+        }
+        for (int n = 0; n <= 7; ++n)
+            if (auto *a = labels->findChild<QAction *>("label" + QString::number(n)))
+                a->setChecked(n == shared);
+    });
     action(file, "Duplicate", "duplicate", QKeySequence(Qt::CTRL | Qt::Key_D),
            [this]
            {
@@ -957,6 +1133,23 @@ void FinderWindow::showInfo(const QString &path)
         value->setTextInteractionFlags(Qt::TextSelectableByMouse);
         facts->addRow(label + ":", value);
     }
+    const auto label = static_cast<LabelledFileModel *>(m_model)->labelOf(path);
+    auto *labelValue = new QLabel(label ? FileLabels::name(label) : QString("None"));
+    labelValue->setObjectName("infoLabel");
+    labelValue->setTextFormat(Qt::PlainText);
+    if (label)
+    {
+        QPixmap swatch(12, 12);
+        swatch.fill(QColor(FileLabels::color(label)));
+        auto *row = new QHBoxLayout;
+        auto *chip = new QLabel;
+        chip->setPixmap(swatch);
+        row->addWidget(chip);
+        row->addWidget(labelValue, 1);
+        facts->addRow("Label:", row);
+    }
+    else
+        facts->addRow("Label:", labelValue);
     layout->addLayout(facts);
     // Escape or Close Window (Ctrl+W, the Finder's Command key) closes it; nothing is written.
     for (const auto &sequence : {QKeySequence(Qt::Key_Escape), QKeySequence(Qt::CTRL | Qt::Key_W)})
@@ -964,6 +1157,19 @@ void FinderWindow::showInfo(const QString &path)
     window->setMinimumWidth(320);
     m_infoWindows.insert(path, window);
     window->show();
+}
+void FinderWindow::setLabel(int label)
+{
+    auto *model = static_cast<LabelledFileModel *>(m_model);
+    QStringList failed;
+    for (const auto &path : selectedPaths())
+    {
+        if (!FileLabels::setLabel(path, label, m_profile))
+            failed << QFileInfo(path).fileName();
+        model->forget(path);
+    }
+    if (!failed.isEmpty())
+        QMessageBox::warning(this, "Label", "The label could not be changed for: " + failed.join(", ") + ".");
 }
 void FinderWindow::resizeEvent(QResizeEvent *event)
 {
@@ -1127,6 +1333,8 @@ void FinderWindow::showContextMenu(QAbstractItemView *view, QPoint point)
         add("copyPath");
         menu->addSeparator();
         add("getInfo");
+        if (auto *labels = findChild<QMenu *>("labelMenu"))
+            menu->addMenu(labels);
         add("rename");
         add("duplicate");
         add("makeAlias");

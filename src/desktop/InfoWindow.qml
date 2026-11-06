@@ -17,7 +17,8 @@ FocusScope {
            ["Where", details.where], ["Created", details.created], ["Modified", details.modified]]
         : [["Kind", details.kindLabel]].concat(details.original !== undefined ? [["Original", details.original]]
                                                                               : [["Size", details.size]],
-              [["Where", details.where], ["Created", details.created], ["Modified", details.modified]])
+              [["Where", details.where], ["Created", details.created], ["Modified", details.modified]],
+              details.label !== undefined ? [["Label", details.label]] : [])
     Keys.onEscapePressed: info.closeRequested()
     Rectangle {
         anchors.fill: parent

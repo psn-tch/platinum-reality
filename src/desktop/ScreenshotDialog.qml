@@ -66,7 +66,7 @@ ShellDialog {
         }
         TextField {
             id:filename; objectName:"screenshot-path";width:parent.width;height:28
-            font.pixelSize:12;selectByMouse:true;color:"black";selectionColor:"#202050";selectedTextColor:"white"
+            font.pixelSize:12;selectByMouse:true;color:"black";selectionColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightColor : "#ccccff"; selectedTextColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightTextColor : "black"
             background:FieldBackground{}
             onAccepted:panel.savePicture()
             Keys.onPressed:function(event){if(event.key===Qt.Key_A && (event.modifiers & Qt.MetaModifier)){selectAll();event.accepted=true}}

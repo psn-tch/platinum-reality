@@ -92,6 +92,35 @@ class InputSettingsTests(unittest.TestCase):
             self.assertFalse(session.apply_input_settings("backend.sock", self.profile, state))
         self.assertEqual(state["input_error"], "gone")
 
+    def test_the_keyboard_layout_in_use_is_set_variant_first(self):
+        self.write({"version": 1, "keyboard": {"layouts": ["us", "ch(fr)"], "layout": "ch(fr)"}})
+        settings = session.saved_input_settings(self.profile)
+        self.assertEqual(settings, {"keyboard": {"layout": "ch(fr)"}})
+        self.assertEqual(session.input_commands(settings), [
+            'input type:keyboard xkb_variant ""',
+            "input type:keyboard xkb_layout ch",
+            "input type:keyboard xkb_variant fr",
+        ])
+        # Without a variant, it is cleared; a layout no longer checked gives the first checked one.
+        self.write({"version": 1, "keyboard": {"layouts": ["de", "us"], "layout": "fr"}})
+        self.assertEqual(session.input_commands(session.saved_input_settings(self.profile)),
+                         ['input type:keyboard xkb_variant ""', "input type:keyboard xkb_layout de"])
+
+    def test_unknown_or_malformed_layouts_change_nothing(self):
+        for layouts in (["us; input * events disabled"], [], ["us", "us"], "us", [1], ["xx"],
+                        ["us", "de", "fr", "gb", "it", "es", "se", "no", "dk"]):
+            self.write({"version": 1, "keyboard": {"layouts": layouts, "layout": "us"}})
+            self.assertEqual(session.saved_input_settings(self.profile), {}, layouts)
+        # A layout alone, without the checked list, is not used either.
+        self.write({"version": 1, "keyboard": {"layout": "de"}})
+        self.assertEqual(session.saved_input_settings(self.profile), {})
+
+    def test_the_two_layout_tables_agree(self):
+        source = (Path(__file__).resolve().parents[1] / "src/desktop/input_settings.cpp").read_text()
+        table = source[source.index("layoutTable()"):source.index("bool knownLayout")]
+        import re
+        self.assertEqual(set(re.findall(r'\{"([a-z()]+)", "', table)), set(session.KEYBOARD_LAYOUTS))
+
     def test_nothing_saved_sends_nothing(self):
         def fail(*_args, **_kwargs):
             raise AssertionError("no request expected")

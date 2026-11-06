@@ -13,6 +13,8 @@ class AppearanceSettings final : public QObject
     Q_PROPERTY(bool controlStripCollapsed READ controlStripCollapsed NOTIFY changed)
     Q_PROPERTY(int controlStripX READ controlStripX NOTIFY changed)
     Q_PROPERTY(int controlStripY READ controlStripY NOTIFY changed)
+    // How many modules the strip shows, set by dragging its end tab; 0 shows every one that fits.
+    Q_PROPERTY(int controlStripModules READ controlStripModules NOTIFY changed)
     Q_PROPERTY(QString fontFamily READ fontFamily CONSTANT)
     Q_PROPERTY(QUrl menuEmblem READ menuEmblem CONSTANT)
     Q_PROPERTY(QUrl wallpaper READ wallpaper NOTIFY changed)
@@ -23,11 +25,24 @@ class AppearanceSettings final : public QObject
     // Appearance → Appearance variation: "blue" (default) or "graphite" (F01, V922 E11).
     Q_PROPERTY(QString accent READ accent NOTIFY changed)
     Q_PROPERTY(QColor accentColor READ accentColor NOTIFY changed)
+    // Appearance → Highlight Color (9.2.2): selected text's colour in the desktop's own fields.
+    // One of highlightChoices()' names; Purple, as the reference 9.2.2 shows, by default.
+    Q_PROPERTY(QString highlight READ highlight NOTIFY changed)
+    Q_PROPERTY(QColor highlightColor READ highlightColor NOTIFY changed)
+    Q_PROPERTY(QColor highlightTextColor READ highlightTextColor NOTIFY changed)
     // Appearance → Options: double-click a title bar to collapse the window (on by default).
     Q_PROPERTY(bool doubleClickCollapse READ doubleClickCollapse NOTIFY changed)
     Q_PROPERTY(bool keepScreenAwake READ keepScreenAwake NOTIFY changed)
     // Date & Time → the menu bar clock: {visible, hours24, seconds, weekday, date, flash}.
     Q_PROPERTY(QVariantMap clock READ clock NOTIFY changed)
+    // General Controls (9.2.2): {showDesktop (the desktop's icons while another application is in
+    // front), menuBlinks (times a chosen menu item blinks, 0-3), caretBlink (0 slow, 1 medium,
+    // 2 fast)}.
+    Q_PROPERTY(QVariantMap general READ general NOTIFY changed)
+    // The insertion point's full on-and-off cycle in milliseconds, from caretBlink.
+    Q_PROPERTY(int caretFlashTime READ caretFlashTime NOTIFY changed)
+    // The Application Switcher palette torn off the Application menu: {visible, x, y}.
+    Q_PROPERTY(QVariantMap switcher READ switcher NOTIFY changed)
   public:
     explicit AppearanceSettings(QString profile, QObject *parent = nullptr);
     int shadeDuration() const
@@ -49,6 +64,10 @@ class AppearanceSettings final : public QObject
     int controlStripY() const
     {
         return m_stripY;
+    }
+    int controlStripModules() const
+    {
+        return m_stripModules;
     }
     QString fontFamily() const
     {
@@ -75,12 +94,21 @@ class AppearanceSettings final : public QObject
         return m_accent;
     }
     QColor accentColor() const;
+    QString highlight() const { return m_highlight; }
+    QColor highlightColor() const;
+    QColor highlightTextColor() const;
+    // [{name, color}] in menu order.
+    Q_INVOKABLE QVariantList highlightChoices() const;
+    Q_INVOKABLE bool setHighlight(QString name);
     bool doubleClickCollapse() const
     {
         return m_doubleClickCollapse;
     }
     bool keepScreenAwake() const { return m_keepScreenAwake; }
     QVariantMap clock() const;
+    QVariantMap general() const;
+    QVariantMap switcher() const;
+    int caretFlashTime() const;
     QString defaultWallpaperPath() const;
     QString picturesFolder() const;
     Q_INVOKABLE bool apply(int duration, bool stripVisible);
@@ -88,11 +116,17 @@ class AppearanceSettings final : public QObject
     Q_INVOKABLE bool setKeepScreenAwake(bool keepAwake);
     // One of clock()'s keys; any other is refused.
     Q_INVOKABLE bool setClockOption(QString key, bool on);
+    // One of general()'s keys with a value in its range; anything else is refused.
+    Q_INVOKABLE bool setGeneralOption(QString key, QVariant value);
+    // Shows (at x, y on the primary display) or hides the Application Switcher.
+    Q_INVOKABLE bool setSwitcher(bool visible, int x, int y);
     // The computer's time zone, as the system sets it: {id ("America/Denver"), name ("MST"),
     // offset ("7 hours behind UTC")}.
     Q_INVOKABLE QVariantMap timeZone() const;
     Q_INVOKABLE bool setControlStripCollapsed(bool collapsed);
     Q_INVOKABLE bool setControlStripPosition(int x, int y);
+    // Sets the length (0 = every module) and expands the strip, as releasing a tab drag does.
+    Q_INVOKABLE bool setControlStripModules(int modules);
     Q_INVOKABLE bool applyDesktopPicture(QString path, QString layout);
     Q_INVOKABLE QUrl previewDesktopPicture(QString path) const;
     Q_INVOKABLE QVariantMap listDesktopPictures(QString folder) const;
@@ -104,17 +138,24 @@ class AppearanceSettings final : public QObject
     void errorOccurred(QString message);
 
   private:
+    void applyCaretFlash() const;
     bool save(int duration, bool visible, bool collapsed, int x, int y, const QString &picture,
               const QString &layout);
     QString m_profile;
     QUrl m_emblem, m_wallpaper;
     QString m_wallpaperPath, m_wallpaperLayout = "fill";
-    int m_duration = 240, m_stripX = 8, m_stripY = -1;
+    int m_duration = 240, m_stripX = 8, m_stripY = -1, m_stripModules = 0;
     bool m_stripVisible = true, m_stripCollapsed = false;
     QString m_accent = "blue";
+    QString m_highlight = "Purple";
     bool m_doubleClickCollapse = true;
     bool m_keepScreenAwake = false;
     // Shown, 12-hour, no seconds, no weekday or date, steady separators: as before this setting.
+    // As 9.2.2 ships: the desktop shown, menus blink three times, medium insertion point.
+    bool m_showDesktop = true;
+    int m_menuBlinks = 3, m_caretBlink = 1;
+    bool m_switcherVisible = false;
+    int m_switcherX = 0, m_switcherY = 0;
     QMap<QString, bool> m_clock{{"visible", true}, {"hours24", false}, {"seconds", false},
                                 {"weekday", false}, {"date", false}, {"flash", false}};
 };

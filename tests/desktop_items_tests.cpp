@@ -8,8 +8,11 @@
 #include <QRegion>
 #include <QTemporaryDir>
 #include <QSettings>
+#include <QSignalSpy>
 #include <QtTest>
 #include <unistd.h>
+#include <sys/xattr.h>
+#include "finder/file_labels.hpp"
 
 class DesktopItemsTests : public QObject
 {
@@ -64,6 +67,56 @@ class DesktopItemsTests : public QObject
         QVERIFY(!withDrives.canModifySelection());
         QVERIFY(QDir(drives.path() + "/USB STICK").removeRecursively());
         QTRY_VERIFY_WITH_TIMEOUT(!named(withDrives, "USB STICK").isValid(), 8000);
+    }
+    void aDragHeldOverAFolderSpringsItOpen()
+    {
+        QTemporaryDir root, profile;
+        DesktopItems items(root.path(), profile.path());
+        QVERIFY(QDir(items.directory()).mkdir("Projects"));
+        QVERIFY(write(items.directory() + "/notes.txt"));
+        items.refresh();
+        QTRY_VERIFY(named(items, "Projects").isValid() && named(items, "notes.txt").isValid());
+        QSignalSpy opened(&items, &DesktopItems::openRequested);
+        QVERIFY(!items.springOpen(key(items, "notes.txt"))); // Only containers spring open.
+        QVERIFY(items.springOpen(key(items, "Projects")));
+        QCOMPARE(opened.count(), 1);
+        QCOMPARE(opened.first().value(0).toString(), QString("folder"));
+        QCOMPARE(opened.first().value(1).toString(), items.directory() + "/Projects");
+        QVERIFY(!items.springOpen("no-such-key"));
+    }
+    void labelsAreKeptWithTheFileOrInTheProfile()
+    {
+        QTemporaryDir root, profile;
+        DesktopItems items(root.path(), profile.path());
+        const auto report = items.directory() + "/report.txt";
+        QVERIFY(write(report));
+        QVERIFY(QFile::link(report, items.directory() + "/report alias"));
+        items.refresh();
+        QTRY_VERIFY(named(items, "report.txt").isValid() && named(items, "report alias").isValid());
+        QCOMPARE(items.data(named(items, "report.txt"), DesktopItems::LabelColorRole).toString(), QString());
+        QCOMPARE(items.labelChoices().size(), 7);
+        items.select(key(items, "report.txt"), false);
+        QCOMPARE(items.selectionLabel(), 0);
+        QVERIFY(items.labelSelected(5));
+        QCOMPARE(items.data(named(items, "report.txt"), DesktopItems::LabelColorRole).toString(), QString("#0000d3"));
+        QCOMPARE(items.selectedDetails().value("label").toString(), QString("Blue"));
+        // Kept with the file itself.
+        char value[4]{};
+        QCOMPARE(int(getxattr(QFile::encodeName(report).constData(), "user.platinum.label", value, 3)), 1);
+        QCOMPARE(value[0], '5');
+        QVERIFY(!QFileInfo::exists(profile.path() + "/labels.json"));
+        // A link cannot carry the attribute: its label is kept in the profile instead.
+        items.select(key(items, "report alias"), false);
+        QVERIFY(items.labelSelected(3));
+        QCOMPARE(FileLabels::label(items.directory() + "/report alias", profile.path()), 3);
+        QVERIFY(QFileInfo::exists(profile.path() + "/labels.json"));
+        QCOMPARE(FileLabels::label(report, profile.path()), 5); // The original keeps its own.
+        // Both selected, labels differ; then the same.
+        items.select(key(items, "report.txt"), true);
+        QCOMPARE(items.selectionLabel(), -1);
+        QVERIFY(items.labelSelected(0));
+        QCOMPARE(items.selectionLabel(), 0);
+        QVERIFY(!items.labelSelected(8));
     }
     void monitorGapsAreNotIconSlotsOrFileDropDestinations()
     {
