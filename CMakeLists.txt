@@ -172,10 +172,10 @@ qt_add_resources(frankenstein-desktop computer-assets PREFIX "/desktop" FILES sr
 qt_add_resources(frankenstein-desktop picture-assets PREFIX "/desktop" FILES src/desktop/DesktopPictureDialog.qml)
 qt_add_resources(frankenstein-desktop screenshot-assets PREFIX "/desktop" FILES src/desktop/ScreenshotDialog.qml)
 qt_add_resources(frankenstein-desktop controls-assets PREFIX "/desktop" FILES src/desktop/QuickControls.qml)
-qt_add_resources(frankenstein-desktop bluetooth-assets PREFIX "/desktop" FILES src/desktop/BluetoothPanel.qml src/desktop/BluetoothAlert.qml src/desktop/WifiAlert.qml)
+qt_add_resources(frankenstein-desktop bluetooth-assets PREFIX "/desktop" FILES src/desktop/BluetoothPanel.qml src/desktop/HandheldPanel.qml src/desktop/BluetoothAlert.qml src/desktop/WifiAlert.qml)
 qt_add_resources(frankenstein-desktop sound-assets PREFIX "/desktop" FILES src/desktop/SoundPanel.qml)
 qt_add_resources(frankenstein-desktop desktop-window-assets PREFIX "/desktop" FILES src/desktop/DesktopWindow.qml)
-qt_add_resources(frankenstein-desktop calculator-assets PREFIX "/desktop" FILES src/desktop/CalculatorWindow.qml src/desktop/NotePadWindow.qml src/desktop/ScrapbookWindow.qml src/desktop/KeyCapsWindow.qml)
+qt_add_resources(frankenstein-desktop calculator-assets PREFIX "/desktop" FILES src/desktop/CalculatorWindow.qml src/desktop/ClassicControlPanelWindow.qml src/desktop/NotePadWindow.qml src/desktop/ScrapbookWindow.qml src/desktop/KeyCapsWindow.qml)
 add_executable(frankenstein src/desktop/main.cpp)
 target_link_libraries(frankenstein PRIVATE frankenstein-desktop)
 # dmabuf_formats.cpp interposes the Qt dmabuf plugin's EGL lookup from here.

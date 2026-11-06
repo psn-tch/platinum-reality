@@ -20,6 +20,9 @@ class AppearanceSettings final : public QObject
     Q_PROPERTY(QUrl wallpaper READ wallpaper NOTIFY changed)
     Q_PROPERTY(QString wallpaperPath READ wallpaperPath NOTIFY changed)
     Q_PROPERTY(QString wallpaperLayout READ wallpaperLayout NOTIFY changed)
+    // The Control Panel's desktop pattern in use: 16 hex digits, a byte a row (top first, high bit
+    // left, set = black), or "" while the desktop shows a picture instead.
+    Q_PROPERTY(QString desktopPattern READ desktopPattern NOTIFY changed)
     Q_PROPERTY(QString defaultWallpaperPath READ defaultWallpaperPath CONSTANT)
     Q_PROPERTY(QString picturesFolder READ picturesFolder CONSTANT)
     // Appearance → Appearance variation: "blue" (default) or "graphite" (F01, V922 E11).
@@ -128,6 +131,10 @@ class AppearanceSettings final : public QObject
     // Sets the length (0 = every module) and expands the strip, as releasing a tab drag does.
     Q_INVOKABLE bool setControlStripModules(int modules);
     Q_INVOKABLE bool applyDesktopPicture(QString path, QString layout);
+    // Tiles the desktop with an 8x8 black-and-white pattern (as desktopPattern), saved as a small
+    // PNG in the profile's patterns folder; the previous pattern's file is removed.
+    Q_INVOKABLE bool setDesktopPattern(QString pattern);
+    QString desktopPattern() const;
     Q_INVOKABLE QUrl previewDesktopPicture(QString path) const;
     Q_INVOKABLE QVariantMap listDesktopPictures(QString folder) const;
     // Collections under a folder (the user's imported Mac OS 9 desktop pictures): [{name, path}],

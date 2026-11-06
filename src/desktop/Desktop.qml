@@ -65,6 +65,8 @@ Rectangle {
                  : desktop.appearance.wallpaperLayout==="center" ? Image.Pad
                  : desktop.appearance.wallpaperLayout==="tile" ? Image.Tile : Image.PreserveAspectCrop
         asynchronous:true
+        // A tiled pattern keeps its dots sharp.
+        smooth:desktop.appearance.wallpaperLayout!=="tile"
         sourceSize:desktop.appearance.wallpaperLayout==="center" || desktop.appearance.wallpaperLayout==="tile"
                    ? Qt.size(0,0) : Qt.size(Math.min(4096,desktop.width*manager.hostScale),Math.min(4096,desktop.height*manager.hostScale))
     }
@@ -175,6 +177,7 @@ Rectangle {
         else if(action==="mouse")mousePanel.edit()
         else if(action==="control-panels-window")controlPanels.show("")
         else if(action==="calculator")calculator.open()
+        else if(action==="control-panel")classicControlPanel.open()
         else if(action==="note-pad")notePadWindow.open()
         else if(action==="scrapbook")scrapbookWindow.open()
         else if(action==="key-caps")keyCapsWindow.open()
@@ -197,6 +200,8 @@ Rectangle {
         else if(action==="quit")manager.quitSession()
         else if(action==="eject")manager.removableMedia.eject(desktopFiles.selectedDrive)
         else if(action==="handheld-set")manager.handheld.set(applicationId.key,applicationId.value)
+        else if(action==="handheld-builtin")manager.handheld.setControllerOn(applicationId===1)
+        else if(action==="handheld")handheldPanel.edit()
         else if(action==="sleep")manager.sleepComputer()
         else if(action==="restart")manager.restartComputer()
         else if(action==="shut-down")manager.shutDownComputer()
@@ -352,6 +357,7 @@ Rectangle {
                 {separator:true,action:"separator"},
                 {text:"Applications…",action:"applications",glyph:"application"},
                 {text:"Calculator",action:"calculator",glyph:"application"},
+                {text:"Control Panel",action:"control-panel",glyph:"application"},
                 {text:"Control Panels",action:"control-panels",glyph:"application",children:[
                     {text:"All Control Panels…",action:"control-panels-window"},
                     {separator:true,action:"separator"},
@@ -601,7 +607,9 @@ Rectangle {
     // checked line under its heading, as the Mac OS 9 strip modules listed their settings.
     function handheldMenuEntries() {
         let service=manager.handheld, state=service.state||({})
-        let entries=[{text:"Open Handheld Daemon…",action:"launch",id:"hhd-ui.desktop"},{separator:true,action:"separator"}]
+        let entries=[{text:"Open Handheld Daemon…",action:"launch",id:"hhd-ui.desktop"}]
+            .concat(service.controllerSwitchable?[{text:"Handheld…",action:"handheld",name:"handheld-panel"}]:[])
+            .concat([{separator:true,action:"separator"}])
         if(!service.available)return entries.concat([
             {text:service.busy?"Checking…":"Handheld Daemon Unavailable",action:"none",name:"status",enabled:false}])
         let ready=!service.busy
@@ -614,6 +622,13 @@ Rectangle {
             return [{text:title+": "+(current?current.title:item.value),action:"submenu",name:name,enabled:ready,
                      children:item.options.map(function(o){return choice(item,o.value,o.title,"handheld-"+o.value)})}]
         }
+        // The built-in controller On or Off first, as the Bluetooth module's power: Off lets an external
+        // controller be player 1.
+        if(service.controllerSwitchable)entries=entries.concat([
+            {text:"Built-in Controller: "+(service.controllerOn?"On":"Off"),action:"none",name:"handheld-builtin-status",enabled:false},
+            {text:service.controllerOn?"Turn Built-in Controller Off":"Turn Built-in Controller On",action:"handheld-builtin",
+             id:service.controllerOn?0:1,name:"handheld-builtin",enabled:ready},
+            {separator:true,action:"separator"}])
         entries=entries.concat(setting("Controller",state.controller,"handheld-controller"))
         if(state.tdp){
             let t=state.tdp, levels=[t.min,8,12,15,20,25,t.max,t.value].filter(function(w,i,all){return w>=t.min && w<=t.max && all.indexOf(w)===i})
@@ -1237,6 +1252,12 @@ Rectangle {
     Rectangle {visible:stripMenu.visible;z:10000.5;x:stripMenu.x+3;y:stripMenu.y+3;width:stripMenu.width;height:stripMenu.height;color:"#50000000"}
     Rectangle {
         id: stripMenu; objectName:"control-strip-menu"; z: 10001; visible:desktop.stripModule!==""
+        // The rows, rebuilt only when they change: the entries read every module's live state
+        // (Quick Controls, hhd, Wi-Fi), and a rebuild that changed nothing lost a click on its way.
+        readonly property var live:desktop.stripModule!=="" ? desktop.stripMenuEntries(desktop.stripModule) : []
+        property var entries:[]
+        onLiveChanged:if(JSON.stringify(live)!==JSON.stringify(entries))entries=live
+        Component.onCompleted:entries=live
         width:220;height:stripItems.height+6;color:"#ddd";border.color:"#222"
         x:Math.max(menuBar.x,Math.min(desktop.stripAnchor.x,menuBar.x+menuBar.width-width))
         // Above the module (V922 E12), or below it when the strip sits under the menu bar.
@@ -1246,7 +1267,7 @@ Rectangle {
           :Math.max(menuBar.y+26,manager.primaryDisplayRect.y+manager.primaryDisplayRect.height-height)
         Column {
             id:stripItems;x:3;y:3;width:parent.width-6
-            Repeater {model:desktop.stripModule!=="" ? desktop.stripMenuEntries(desktop.stripModule) : [];delegate:shellMenuRow}
+            Repeater {model:stripMenu.entries;delegate:shellMenuRow}
         }
     }
     Rectangle {
@@ -1426,6 +1447,32 @@ Rectangle {
             else desktop.forceActiveFocus()
         }
     }
+    // Control Panel (System 6), kept open beside the applications as long as the user likes.
+    property var classicPanelReturnTo:0
+    property var classicPanelReturnWindow:null
+    ClassicControlPanelWindow {
+        id:classicControlPanel
+        appearance:desktop.appearance;input:manager.input;controls:manager.systemControls
+        z:front?3995:0.795
+        x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
+        y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
+        onOpenPanel:function(action){desktop.dispatchShellCommand(action,0)}
+        onRaised:{
+            if(!manager.desktopActive){let a=manager.applications.find(function(a){return a.active});desktop.classicPanelReturnTo=a?a.id:0}
+            let previous=desktop.frontShellWindow
+            if(previous && previous!==classicControlPanel && previous.visible)desktop.classicPanelReturnWindow=previous
+            desktop.bringShellWindowForward(classicControlPanel)
+        }
+        onFrontChanged:if(!front && visible){desktop.classicPanelReturnTo=0;desktop.classicPanelReturnWindow=null}
+        onClosed:{
+            let id=desktop.classicPanelReturnTo, previous=desktop.classicPanelReturnWindow
+            desktop.classicPanelReturnTo=0;desktop.classicPanelReturnWindow=null
+            if(desktop.shellWindowPending===classicControlPanel)desktop.shellWindowPending=null
+            if(id && manager.desktopActive && manager.applications.some(function(a){return a.id===id && !a.hidden}))manager.activateApplication(id)
+            else if(previous && previous.visible)desktop.bringShellWindowForward(previous)
+            else desktop.forceActiveFocus()
+        }
+    }
     property var notePadReturnTo:0
     property var notePadReturnWindow:null
     NotePadWindow {
@@ -1520,6 +1567,8 @@ Rectangle {
         DesktopPictureDialog {id:desktopPictureDialog;settings:desktop.appearance}
         EnergySaverPanel {id:energyPanel;settings:manager.energy;sessionManager:manager}
         GeneralControlsPanel {id:generalPanel;settings:desktop.appearance}
+        // Listed only on a computer whose Handheld Daemon can hide its built-in controller.
+        HandheldPanel {id:handheldPanel;service:manager.handheld}
         KeyboardPanel {id:keyboardPanel;settings:manager.input}
         MonitorsPanel {id:monitorsPanel;sessionManager:manager}
         MousePanel {id:mousePanel;settings:manager.input}

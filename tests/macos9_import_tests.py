@@ -117,6 +117,32 @@ class ImporterTests(unittest.TestCase):
             self.assertEqual(chunk[6:], (8 * size // 16, 2 * size // 16, 90))
             self.assertEqual(struct.unpack_from('<I', data, position + 36)[0], 0xFF000000)
 
+    def test_indexed_pict_banner_decodes_and_its_logo_is_cropped(self):
+        # A made-up 12x4 picture, 8 bits a pixel: a 3-column block, a white gap, then "text".
+        rows = [bytes([0, 1, 1, 1, 0, 0, 0, 0, 2, 2, 0, 0]), bytes([0, 1, 2, 1, 0, 0, 0, 0, 2, 0, 0, 0]),
+                bytes([0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0]), bytes(12)]
+        def packed(row):  # One literal run.
+            return bytes([len(row) - 1]) + row
+        table = struct.pack('>IHH', 0, 0, 2) + b''.join(struct.pack('>HHHH', i, *c) for i, c in
+                                                     enumerate([(0xFFFF,) * 3, (0x6666, 0x6666, 0xCCCC), (0, 0, 0)]))
+        pixmap = struct.pack('>Hhhhh', 0x8000 | 12, 0, 0, 4, 12) + struct.pack('>HHI', 0, 0, 0) + struct.pack(
+            '>II', 72 << 16, 72 << 16) + struct.pack('>HHHH', 0, 8, 1, 8) + struct.pack('>III', 0, 0, 0)
+        body = pixmap + table + struct.pack('>hhhhhhhhH', 0, 0, 4, 12, 0, 0, 4, 12, 0) + b''.join(
+            bytes([len(packed(r))]) + packed(r) for r in rows)
+        pict = struct.pack('>Hhhhh', 0, 0, 0, 4, 12) + struct.pack('>HH', 0x0011, 0x02FF) + struct.pack(
+            '>H', 0x0C00) + bytes(24) + struct.pack('>HH', 0x0001, 10) + struct.pack('>hhhh', 0, 0, 4, 12) + struct.pack(
+            '>H', 0x0098) + body + (b'\0' if len(body) % 2 else b'') + struct.pack('>H', 0x00FF)
+        width, height, pixels = importer.decode_pict(pict)
+        self.assertEqual((width, height), (12, 4))
+        self.assertEqual(pixels[4:8], bytes([0x66, 0x66, 0xCC, 0xFF]))
+        self.assertEqual(pixels[(1 * 12 + 2) * 4:(1 * 12 + 2) * 4 + 3], bytes(3))
+        logo = importer.banner_logo(width, height, pixels)
+        self.assertEqual(logo[:2], (3, 2))
+        self.assertEqual(logo[2][:4], bytes([0x66, 0x66, 0xCC, 0xFF]))
+        # Anything but an indexed PackBitsRect is refused rather than guessed.
+        self.assertIsNone(importer.decode_pict(pict[:40] + struct.pack('>H', 0x0030) + pict[42:]))
+        self.assertIsNone(importer.decode_pict(b'short'))
+
     def test_names_cannot_escape_the_sounds_folder(self):
         self.assertEqual(importer.safe_name('../../x/y'), '_.._x_y')
         self.assertEqual(importer.safe_name('...'), 'Sound')

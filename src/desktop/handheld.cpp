@@ -48,6 +48,17 @@ QVariantList choices(const QJsonObject &setting, const QStringList &first = {})
     });
     return result;
 }
+// The controller modes that keep the built-in controller from games: Hidden, and Paused.
+bool controllerModeOff(const QString &mode)
+{
+    return mode == "hidden" || mode == "disabled";
+}
+bool offers(const QVariantMap &item, const QString &value)
+{
+    const auto options = item.value("options").toList();
+    return std::any_of(options.cbegin(), options.cend(),
+                       [&](const QVariant &o) { return o.toMap().value("value").toString() == value; });
+}
 } // namespace
 
 DesktopHandheldEndpoint desktopHandheldEndpoint(bool hasCompositor, const QProcessEnvironment &environment)
@@ -116,9 +127,10 @@ void HandheldDaemon::refresh()
     const auto generation = m_generation;
     const auto finish = [this, generation](const QJsonObject &state)
     {
+        const bool wasBusy = busy();
         m_refreshing = false;
         if (generation == m_generation)
-            apply(state);
+            apply(state, wasBusy != busy());
         else
             emit changed();
     };
@@ -139,7 +151,7 @@ void HandheldDaemon::refresh()
     });
 }
 
-void HandheldDaemon::apply(const QJsonObject &state)
+void HandheldDaemon::apply(const QJsonObject &state, bool force)
 {
     QVariantMap result;
     if (!state.isEmpty())
@@ -176,6 +188,13 @@ void HandheldDaemon::apply(const QJsonObject &state)
                                                 {"value", stateValue(state, "tdp.battery.charge_limit").toString()},
                                                 {"options", choices(charge)}};
     }
+    if (const auto mode = result.value("controller").toMap().value("value").toString();
+        !mode.isEmpty() && !controllerModeOff(mode))
+        m_controllerMode = mode;
+    // The module's menu is rebuilt on every change: an answer that changes nothing must not
+    // rebuild it under a click (the refresh as the module opens answers while it's in use).
+    if (!force && m_available == !result.isEmpty() && m_state == result)
+        return;
     m_available = !result.isEmpty();
     m_state = result;
     emit changed();
@@ -215,6 +234,38 @@ void HandheldDaemon::set(const QString &key, const QVariant &value)
             emit failed("Handheld Daemon did not accept the change.");
             return;
         }
-        apply(state);
+        apply(state, true); // no longer busy, even if hhd changed nothing
     });
+}
+
+bool HandheldDaemon::controllerSwitchable() const
+{
+    return offers(m_state.value("controller").toMap(), "hidden");
+}
+
+bool HandheldDaemon::controllerOn() const
+{
+    const auto mode = m_state.value("controller").toMap().value("value").toString();
+    return !mode.isEmpty() && !controllerModeOff(mode);
+}
+
+void HandheldDaemon::setControllerOn(bool on)
+{
+    const auto controller = m_state.value("controller").toMap();
+    if (!controllerSwitchable() || on == controllerOn())
+        return;
+    if (!on)
+    {
+        set(controller.value("key").toString(), "hidden");
+        return;
+    }
+    // The mode it had, else Xbox, else the first mode hhd offers that games can see.
+    QString mode = offers(controller, m_controllerMode) ? m_controllerMode : QString();
+    if (mode.isEmpty() && offers(controller, "uinput"))
+        mode = "uinput";
+    for (const auto &option : controller.value("options").toList())
+        if (const auto value = option.toMap().value("value").toString(); mode.isEmpty() && !controllerModeOff(value))
+            mode = value;
+    if (!mode.isEmpty())
+        set(controller.value("key").toString(), mode);
 }

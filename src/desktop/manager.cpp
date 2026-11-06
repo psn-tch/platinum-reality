@@ -2525,7 +2525,12 @@ QVariantMap NativeManager::computerInformation() const
     QList<ComputerApplication> applications;
     for (auto id : m_state.applications_back_to_front) {
         ComputerApplication app{id.value,m_applicationNames.value(id.value),{}};
-        if (id == m_desktopApplication) app.processes.append(QCoreApplication::applicationPid());
+        // As in 9.2.2, the Finder is part of the system's row: the desktop with its Finder windows.
+        if (id == m_desktopApplication) {
+            app.name = "Platinum Reality";
+            app.system = true;
+            app.processes.append(QCoreApplication::applicationPid());
+        }
         for (auto *window : m_windows) {
             const auto state = m_state.windows.find(window->identity);
             if (state == m_state.windows.end() || state->second.application != id) continue;
@@ -2538,6 +2543,7 @@ QVariantMap NativeManager::computerInformation() const
         applications.append(app);
     }
     std::sort(applications.begin(),applications.end(),[](const auto &a,const auto &b){
+        if (a.system != b.system) return b.system;
         return QString::localeAwareCompare(a.name,b.name)<0;
     });
     return ::computerInformation(applications);

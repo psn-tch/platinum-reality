@@ -69,7 +69,7 @@ QVariantMap computerInformation(const QList<ComputerApplication> &applications, 
         }
         const std::optional<qint64> measured = known ? std::optional<qint64>(resident) : std::nullopt;
         if (known) largest = std::max(largest,resident);
-        rows.append(QVariantMap{{"id",app.id},{"name",app.name.left(256)},
+        rows.append(QVariantMap{{"id",app.id},{"name",app.name.left(256)},{"system",app.system},
                                 {"rssBytes",number(measured)},{"rssText",label(measured)},
                                 {"known",known}});
     }

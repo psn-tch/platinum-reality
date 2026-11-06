@@ -9,6 +9,8 @@ $XDG_DATA_HOME/platinum-reality/assets, which is never part of the repository or
   sounds/platinum/<tag>.wav  the Appearance "Platinum Sounds" set, by theme-sound tag
   sounds/platinum/manifest.json
   icons/<name>.png, icons/<name>-16.png  standard Finder icons (folder, trash, hard-disk, ...)
+  icons/about-banner.png, icons/about-logo.png  the Finder's About This Computer banner, and the
+                             Mac OS face from it, shown in About This Computer
   desktop-pictures/<Collection>/<Name>.jpg  the Appearance desktop pictures (JPEG files)
   cursors/Platinum-MacOS9/  an Xcursor theme from the System file's cursors (the arrow lives in ROM,
                             so it and anything else missing come from the inherited theme)
@@ -30,6 +32,8 @@ import zlib
 SYSTEM = 'System Folder/System'
 PLATINUM = 'System Folder/Appearance/Sound Sets/Platinum Sounds'
 ICONS_FILE = 'System Folder/System Resources'  # Mac OS 9; older systems keep icons in System.
+FINDER = 'System Folder/Finder'
+ABOUT_BANNER = 4000  # The Finder's 'PICT' drawn at the top of About This Computer (Mac OS 9.2.2).
 PICTURES = 'System Folder/Appearance/Desktop Pictures'
 MAX_PICTURE_BYTES = 16 * 1024 * 1024
 # Standard icon resource IDs (Icons.h) and the names the desktop looks for.
@@ -181,6 +185,102 @@ def png(width, height, pixels):
             chunk(b'IDAT', zlib.compress(rows, 9)) + chunk(b'IEND', b''))
 
 
+def unpack_bits(data, at, length):
+    """One PackBits-compressed row: `length` bytes from `at`, and where the row's data ended."""
+    row, end = bytearray(), at + length
+    while at < end:
+        count = data[at]
+        if count < 0x80:
+            row += data[at + 1:at + 2 + count]
+            at += 2 + count
+        elif count > 0x80:
+            row += bytes([data[at + 1]]) * (257 - count)
+            at += 2
+        else:
+            at += 1
+    return bytes(row)
+
+
+def decode_pict(data):
+    """(width, height, RGBA) for a version 2 'PICT' holding one indexed PackBitsRect (as the Finder's
+    About banner is), else None. Any other drawing operation gives None rather than a wrong picture."""
+    try:
+        at = 10
+        while at + 2 <= len(data):
+            at += at % 2
+            (op,) = struct.unpack_from('>H', data, at)
+            at += 2
+            if op == 0x0011:
+                at += 2
+            elif op == 0x0C00:
+                at += 24
+            elif op in (0x0000, 0x001E):
+                pass
+            elif op == 0x0001:
+                at += struct.unpack_from('>H', data, at)[0]
+            elif op == 0x00A0:
+                at += 2
+            elif op == 0x00A1:
+                at += 4 + struct.unpack_from('>HH', data, at)[1]
+            elif op == 0x0098:
+                row_bytes, top, left, bottom, right = struct.unpack_from('>Hhhhh', data, at)
+                pixel_size, components = struct.unpack_from('>HH', data, at + 28)
+                if not row_bytes & 0x8000 or pixel_size not in (1, 2, 4, 8) or components != 1:
+                    return None
+                row_bytes &= 0x3FFF
+                width, height = right - left, bottom - top
+                if not (0 < width <= 2048 and 0 < height <= 1024):
+                    return None
+                at += 46
+                (entries,) = struct.unpack_from('>H', data, at + 6)
+                colors = {}
+                for entry in range(entries + 1):
+                    value, red, green, blue = struct.unpack_from('>HHHH', data, at + 8 + entry * 8)
+                    colors[value] = (red >> 8, green >> 8, blue >> 8)
+                at += 8 + (entries + 1) * 8 + 18  # The color table, then source, destination, mode.
+                pixels = bytearray()
+                per_byte = 8 // pixel_size
+                for _ in range(height):
+                    if row_bytes < 8:
+                        row, at = data[at:at + row_bytes], at + row_bytes
+                    else:
+                        size_bytes = 2 if row_bytes > 250 else 1
+                        length = int.from_bytes(data[at:at + size_bytes], 'big')
+                        row = unpack_bits(data, at + size_bytes, length)
+                        at += size_bytes + length
+                    for x in range(width):
+                        byte = row[x // per_byte] if x // per_byte < len(row) else 0
+                        shift = 8 - pixel_size * (x % per_byte + 1)
+                        pixels += bytes(colors.get((byte >> shift) & ((1 << pixel_size) - 1), (0, 0, 0))) + b'\xff'
+                return width, height, bytes(pixels)
+            else:
+                return None
+    except (struct.error, IndexError):
+        return None
+    return None
+
+
+def crop(width, height, pixels, left, top, right, bottom):
+    rows = [pixels[(y * width + left) * 4:(y * width + right) * 4] for y in range(top, bottom)]
+    return right - left, bottom - top, b''.join(rows)
+
+
+def banner_logo(width, height, pixels):
+    """The face at the banner's left: the first run of columns with anything not white, to the
+    first gap of white columns, trimmed to its rows."""
+    def white(x, y):
+        return pixels[(y * width + x) * 4:(y * width + x) * 4 + 3] == b'\xff\xff\xff'
+    used = [any(not white(x, y) for y in range(height)) for x in range(width)]
+    if True not in used:
+        return None
+    left = used.index(True)
+    right = left
+    while right < width and (used[right] or any(used[right:right + 3])):
+        right += 1
+    rows = [y for y in range(height) if any(not white(x, y) for x in range(left, right))]
+    return crop(width, height, pixels, left, rows[0], right, rows[-1] + 1)
+
+
 # System 'CURS' IDs (single cursors) and 'acur' frame lists, by Xcursor names. Verified by eye
 # against psn_tch's 9.2.2 System file (labelled sheet, 2026-10-22).
 CURSORS = {(1,): ('text', 'xterm', 'ibeam'), (2,): ('crosshair', 'cross', 'tcross'), (3,): ('cell', 'plus'),
@@ -258,9 +358,9 @@ def extract_forks(disk, work):
                              text=True, check=True).stdout
     paths = re.findall(r'^Path = (.+)$', listing, re.M)
     forks = {}
-    for wanted in (SYSTEM, PLATINUM, ICONS_FILE):
+    for wanted in (SYSTEM, PLATINUM, ICONS_FILE, FINDER):
         matches = [p for p in paths if p.endswith('/' + wanted + ':rsrc') and p.count('/') == wanted.count('/') + 1]
-        if len(matches) != 1 and wanted == ICONS_FILE:
+        if len(matches) != 1 and wanted in (ICONS_FILE, FINDER):
             continue
         if len(matches) != 1:
             raise SystemExit(f'Expected one Mac OS 9 "{wanted}"; found {len(matches)}')
@@ -374,6 +474,17 @@ def main():
     if made:
         write(theme / 'index.theme', ('[Icon Theme]\nName=Platinum Mac OS 9\nComment=From the user\'s own '
                                       'Mac OS 9 System file\nInherits=' + inherited_theme() + '\n').encode(), True)
+    # The About This Computer banner and the face from it (the Finder's 'PICT' 4000).
+    banners = {identity: data for identity, _, data in resources(forks.get(FINDER) or b'', b'PICT')} if forks.get(FINDER) else {}
+    banner = ABOUT_BANNER in banners and decode_pict(banners[ABOUT_BANNER])
+    logo = banner and banner_logo(*banner)
+    for file, picture in (('about-banner.png', banner), ('about-logo.png', logo)):
+        if not picture:
+            skipped += 1
+        elif write(icons / file, png(*picture), options.replace):
+            written += 1
+        else:
+            kept += 1
     for (collection, name), data in sorted(forks['pictures'].items()):
         folder = options.assets.expanduser() / 'desktop-pictures' / safe_name(collection)
         folder.mkdir(parents=True, exist_ok=True)

@@ -29,6 +29,11 @@ class HandheldDaemon final : public QObject
     // {controller, tdp, boost, fan, chargeLimit}: each {key, value, ...} and present only when
     // hhd offers it. controller/fan/chargeLimit carry options [{value, title}]; tdp has min, max.
     Q_PROPERTY(QVariantMap state READ state NOTIFY changed)
+    // The built-in controller On or Off (psn_tch, 2026-11-06: with an external controller plugged
+    // in, games should make that one player 1). Off is hhd's Hidden mode, which hides the built-in
+    // controller from games; On goes back to the mode it had before (Xbox when that's unknown).
+    Q_PROPERTY(bool controllerSwitchable READ controllerSwitchable NOTIFY changed)
+    Q_PROPERTY(bool controllerOn READ controllerOn NOTIFY changed)
   public:
     explicit HandheldDaemon(QUrl base = QUrl("http://127.0.0.1:5335"),
                             QString tokenFile = "/etc/hhd/.token", QObject *parent = nullptr);
@@ -49,6 +54,9 @@ class HandheldDaemon final : public QObject
     Q_INVOKABLE void refresh();
     // A key from state (for example the controller's "...controller_mode.mode") and its new value.
     Q_INVOKABLE void set(const QString &key, const QVariant &value);
+    bool controllerSwitchable() const;
+    bool controllerOn() const;
+    Q_INVOKABLE void setControllerOn(bool on);
 
   signals:
     void changed();
@@ -56,12 +64,14 @@ class HandheldDaemon final : public QObject
 
   private:
     void request(const QString &path, const QByteArray &body, std::function<void(const QJsonObject &)> done);
-    void apply(const QJsonObject &state);
+    // Emits changed only when something did, unless force (busy() changed).
+    void apply(const QJsonObject &state, bool force = false);
     QUrl m_base;
     QString m_tokenFile;
     QNetworkAccessManager m_network;
     QJsonObject m_settings; // hhd's settings tree, read once
     QVariantMap m_state;
+    QString m_controllerMode; // the controller's last mode while it was On
     bool m_available = false, m_refreshing = false, m_setting = false;
     int m_generation = 0; // a change made during a refresh outranks that refresh's older answer
 };

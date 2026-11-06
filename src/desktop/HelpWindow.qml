@@ -41,12 +41,26 @@ FocusScope {
         {id: "computer", title: "About This Computer", body:
             "<h3>About This Computer</h3>" +
             "<p><b>Apple menu ▸ About This Computer</b> shows your system version, built-in RAM, " +
-            "swap and available memory, with live resident-memory bars for running applications.</p>" +
+            "swap and available memory, with live resident-memory bars for running applications. " +
+            "The last row, Platinum Reality, is the desktop itself with the Finder, as Mac OS listed " +
+            "itself.</p>" +
             "<p>Bars compare the listed applications. Shared pages can appear in more than one app; " +
             "helper processes are not included. Measurements that cannot be read say Unavailable. " +
-            "Linux does not report a classic largest unused application block.</p>" +
-            "<p>The values update while the window is open. Close it with its close box, " +
+            "Linux has no classic largest unused block, so that line shows the memory available.</p>" +
+            "<p>The values update while the window is open. Click the box at the far right of the title " +
+            "bar (or double-click the title bar) to roll it up, the box beside it to fit every " +
+            "application, and drag the bottom-right corner to resize it. Close it with its close box, " +
             "Command-W or Escape.</p>"},
+        {id: "control-panel", title: "Control Panel", body:
+            "<h3>Control Panel</h3>" +
+            "<p><b>Apple menu ▸ Control Panel</b> opens one window of the everyday settings, after the " +
+            "System 6 Control Panel, that you can keep open while you work. Click an icon on the left.</p><ul>" +
+            "<li><b>General</b>: click dots to draw a desktop pattern, or use the arrows above the pattern " +
+            "on the right to step through patterns; click that pattern to put it on the desktop. Also the " +
+            "insertion point and menu blinking, the time and date (12 or 24 hours), the speaker volume " +
+            "and the menu bar clock.</li>" +
+            "<li><b>Keyboard</b> and <b>Mouse</b>: key repeat and mouse tracking.</li>" +
+            "<li><b>Sound</b>: the speaker volume. The other icons open their Control Panels panel.</li></ul>"},
         {id: "note-pad", title: "Note Pad", body:
             "<h3>Note Pad</h3>" +
             "<p>Choose <b>Apple menu ▸ Note Pad</b> for eight pages of notes. Type on a page; it is saved " +

@@ -5,6 +5,7 @@
 #include "desktop/appearance_settings.hpp"
 #include "desktop/desktop_items.hpp"
 #include "desktop/manager.hpp"
+#include "desktop/handheld.hpp"
 #include "desktop/sticky_notes.hpp"
 #include "desktop/input_settings.hpp"
 #include "desktop/alert_sounds.hpp"
@@ -6109,6 +6110,107 @@ class NativeTests : public QObject
         QTRY_COMPARE(posts(), QByteArray(R"({"controllers.oxp.controller_mode.mode": "uinput"})"));
         QTRY_VERIFY(!menu->isVisible());
     }
+    void theBuiltInControllerTurnsOnAndOffFromTheStripAndControlPanels()
+    {
+        // psn_tch, 2026-11-06: games made the built-in controller player 1 with an external one
+        // plugged in. The Handheld module and the Handheld control panel turn it off (hhd's
+        // Hidden mode) and on again. A fake hhd serves a OneXPlayer G1, its controller Hidden.
+        QTemporaryDir fixture;
+        QFile token(fixture.filePath("token"));
+        QVERIFY(token.open(QIODevice::WriteOnly) && token.write("builtin-token") > 0);
+        token.close();
+        QProcess daemon;
+        const auto stopDaemon = qScopeGuard([&] { daemon.kill(); daemon.waitForFinished(3000); });
+        daemon.start("python3", {"-B", QFINDTESTDATA("fake_hhd.py"), QFINDTESTDATA("fixtures/hhd-oxp-g1.json"),
+                                 "builtin-token", fixture.filePath("posts.log")});
+        QVERIFY(daemon.waitForStarted() && daemon.waitForReadyRead(5000));
+        qputenv("FRANKENSTEIN_TEST_HHD", "http://127.0.0.1:" + daemon.readLine().trimmed() + " " +
+                                             token.fileName().toUtf8());
+        const auto unset = qScopeGuard([] { qunsetenv("FRANKENSTEIN_TEST_HHD"); });
+        const auto posts = [&] {
+            QFile log(fixture.filePath("posts.log"));
+            return log.open(QIODevice::ReadOnly) ? QString::fromUtf8(log.readAll()).split('\n', Qt::SkipEmptyParts)
+                                                 : QStringList();
+        };
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto *handheld = qobject_cast<HandheldDaemon *>(scene.manager->handheld());
+        QVERIFY(handheld);
+        const auto failure = qScopeGuard([&] {
+            if (!QTest::currentTestFailed()) return;
+            capture(scene.view, "handheld-builtin-failed.png");
+            if (auto *window = visualItem(scene.view.contentItem(), "control-panels-window"))
+                qInfo() << "Control Panels visible" << window->isVisible() << "current" << window->property("current")
+                        << "entries" << window->property("entries");
+            qInfo() << "hhd available" << handheld->available() << "busy" << handheld->busy()
+                    << "switchable" << handheld->controllerSwitchable() << "on" << handheld->controllerOn();
+        });
+        QQuickItem *module = nullptr;
+        QTRY_VERIFY_WITH_TIMEOUT((module = visualItem(scene.view.contentItem(), "control-strip-handheld")) &&
+                                 module->isVisible(), 5000);
+        const auto click = [&](QQuickItem *item) {
+            QTest::mouseClick(&scene.view, Qt::LeftButton, {}, item->mapToScene(QPointF(30, item->height() / 2)).toPoint());
+        };
+        // The strip: the switch first, under its state.
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, module->mapToScene(QPointF(8, 8)).toPoint());
+        auto *menu = visualItem(scene.view.contentItem(), "control-strip-menu");
+        QTRY_VERIFY(menu->isVisible());
+        QQuickItem *status = nullptr, *toggle = nullptr;
+        QTRY_VERIFY((status = visualItem(scene.view.contentItem(), "desktop-command-handheld-builtin-status")) &&
+                    (toggle = visualItem(scene.view.contentItem(), "desktop-command-handheld-builtin")) &&
+                    toggle->property("modelData").toMap().value("enabled").toBool());
+        QCOMPARE(status->property("modelData").toMap().value("text").toString(), QString("Built-in Controller: Off"));
+        QCOMPARE(toggle->property("modelData").toMap().value("text").toString(), QString("Turn Built-in Controller On"));
+        QVERIFY(capture(scene.view, "control-strip-builtin-controller.png"));
+        click(toggle);
+        // Nothing was known before it was off: on is Xbox.
+        QTRY_COMPARE(posts(), QStringList({R"({"controllers.oxp.controller_mode.mode": "uinput"})"}));
+        QTRY_VERIFY(!menu->isVisible());
+        QTRY_VERIFY(handheld->controllerOn() && !handheld->busy());
+        // The Handheld control panel, from the module's "Handheld…".
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, module->mapToScene(QPointF(8, 8)).toPoint());
+        QTRY_VERIFY(menu->isVisible());
+        QQuickItem *open = nullptr;
+        QTRY_VERIFY((open = visualItem(scene.view.contentItem(), "desktop-command-handheld-panel")) && open->isVisible());
+        QTRY_COMPARE(visualItem(scene.view.contentItem(), "desktop-command-handheld-builtin")
+                         ->property("modelData").toMap().value("text").toString(), QString("Turn Built-in Controller Off"));
+        click(open);
+        QQuickItem *panel = nullptr, *on = nullptr, *off = nullptr, *detail = nullptr;
+        QTRY_VERIFY((panel = visualItem(scene.view.contentItem(), "handheld-panel")) && panel->isVisible() &&
+                    (on = visualItem(scene.view.contentItem(), "handheld-builtin-on")) &&
+                    (off = visualItem(scene.view.contentItem(), "handheld-builtin-off")) &&
+                    (detail = visualItem(scene.view.contentItem(), "handheld-builtin-detail")));
+        QVERIFY(visualItem(scene.view.contentItem(), "control-panel-handheld"));
+        QTRY_VERIFY(on->property("checked").toBool() && !off->property("checked").toBool() && off->isEnabled());
+        QCOMPARE(detail->property("text").toString(), QString("Games see the built-in controller (as Xbox)."));
+        QVERIFY(capture(scene.view, "handheld-panel-on.png"));
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, off->mapToScene(QPointF(8, off->height() / 2)).toPoint());
+        QTRY_COMPARE(posts().size(), 2);
+        QCOMPARE(posts().last(), QString(R"({"controllers.oxp.controller_mode.mode": "hidden"})"));
+        QTRY_VERIFY(off->property("checked").toBool() && !on->property("checked").toBool());
+        QTRY_VERIFY(detail->property("text").toString().contains("external controller is player 1"));
+        QVERIFY(capture(scene.view, "handheld-panel-off.png"));
+        // Back on: the mode it had.
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, on->mapToScene(QPointF(8, on->height() / 2)).toPoint());
+        QTRY_COMPARE(posts().size(), 3);
+        QCOMPARE(posts().last(), QString(R"({"controllers.oxp.controller_mode.mode": "uinput"})"));
+    }
+    void theHandheldPanelIsListedOnlyWithHandheldDaemon()
+    {
+        NativeScene scene;
+        QVERIFY(scene.show());
+        // No hhd here (native tests never reach the host's): the list goes from General Controls to Keyboard.
+        auto *window = visualItem(scene.view.contentItem(), "control-panels-window");
+        QVERIFY(window);
+        QStringList ids;
+        QTRY_VERIFY([&] {
+            ids.clear();
+            for (const auto &entry : window->property("entries").toList()) ids << entry.toMap().value("id").toString();
+            return ids.contains("general");
+        }());
+        QVERIFY2(!ids.contains("handheld"), qPrintable(ids.join(' ')));
+        QCOMPARE(ids.indexOf("keyboard"), ids.indexOf("general") + 1);
+    }
     void fixedSizeWindowsTooBigForTheScreenAreShownFullScreen()
     {
         // psn_tch, 2026-10-22 (Daggerfall Unity's launcher): a window whose client fixed its size too
@@ -7579,6 +7681,148 @@ class NativeTests : public QObject
         QTRY_COMPARE(app.state(), QProcess::NotRunning);
         QCOMPARE(app.exitStatus(), QProcess::NormalExit);
         QCOMPARE(app.exitCode(), 0);
+    }
+    void controlAndCommandCopyAndPasteFromARealKeyboard()
+    {
+        // psn_tch, 2026-11-05: Control-C and Control-V stopped working (right-click Copy and
+        // Paste still did). Through the host keyboard, as she types: Control chords as Linux
+        // applications know them, then the Command (Super) chords the desktop translates.
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager = *scene.manager;
+        auto *clipboard = qobject_cast<Clipboard *>(manager.clipboard());
+        QVERIFY(clipboard);
+        QProcess app;
+        app.setProcessEnvironment(scene.childEnvironment());
+        app.start(QCoreApplication::applicationDirPath() + "/native-probe", {"Chords"});
+        const auto stop = qScopeGuard([&] {
+            if (app.state() != QProcess::NotRunning) { app.kill(); app.waitForFinished(3000); }
+        });
+        QTRY_VERIFY(!first(manager, "Native Probe Chords").isEmpty());
+        QDBusInterface probe("org.frankenstein.NativeProbeChords", "/Probe", "org.frankenstein.NativeProbe");
+        QTRY_VERIFY(probeAcceptsTextInput(probe));
+        LineProcess keyboard;
+        keyboard.process.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
+        keyboard.process.start(QCoreApplication::applicationDirPath() + "/virtual-keyboard-driver");
+        QCOMPARE(keyboard.next("driver-ready"), QString("driver-ready"));
+        QTest::qWait(500);
+        const auto text = [&] { return QDBusReply<QString>(probe.call("Text")).value(); };
+        for (const QString modifier : {"ctrl", "super"}) {
+            qInfo() << "Chords with" << modifier;
+            QVERIFY(keyboard.send("type copy " + modifier, "ok"));
+            QTRY_COMPARE(text(), "copy " + modifier);
+            QVERIFY(keyboard.send("chord " + modifier + "+a", "ok"));
+            QVERIFY(keyboard.send("chord " + modifier + "+c", "ok"));
+            QTRY_COMPARE(clipboard->text(), "copy " + modifier);
+            QVERIFY(keyboard.send("chord " + modifier + "+a", "ok"));
+            QVERIFY(keyboard.send("type x", "ok"));
+            QTRY_COMPARE(text(), QString("x"));
+            QVERIFY(keyboard.send("chord " + modifier + "+v", "ok"));
+            QTRY_COMPARE(text(), "xcopy " + modifier);
+            QVERIFY(keyboard.send("chord " + modifier + "+a", "ok"));
+            QVERIFY(keyboard.send("chord " + modifier + "+x", "ok"));
+            QTRY_COMPARE(text(), QString());
+        }
+        keyboard.process.write("quit\n");
+        QVERIFY(keyboard.process.waitForFinished(3000));
+        probe.asyncCall("Finish");
+        QTRY_COMPARE(app.state(), QProcess::NotRunning);
+    }
+    void firefoxControlAndCommandCopyAndPasteFromARealKeyboard()
+    {
+        // The same chords in Firefox, which psn_tch types in most: a text area whose value
+        // the page title shows.
+        if (!QFileInfo::exists("/usr/lib/firefox/firefox"))
+            QSKIP("This browser workflow needs the installed Firefox.");
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager = *scene.manager;
+        auto *clipboard = qobject_cast<Clipboard *>(manager.clipboard());
+        QVERIFY(clipboard);
+        const auto profile=scene.files.path()+"/chords-profile";
+        const auto home=scene.files.path()+"/home";
+        QVERIFY(QDir().mkpath(home));
+        QVERIFY(QDir().mkpath(profile+"/browsers/firefox"));
+        QFile preferences(profile+"/browsers/firefox/prefs.js");
+        QVERIFY(preferences.open(QIODevice::WriteOnly));
+        preferences.write("user_pref(\"browser.aboutwelcome.enabled\",false);\n"
+                          "user_pref(\"browser.shell.checkDefaultBrowser\",false);\n"
+                          "user_pref(\"browser.startup.homepage_override.mstone\",\"ignore\");\n"
+                          "user_pref(\"extensions.enabledScopes\",1);\n"
+                          "user_pref(\"extensions.autoDisableScopes\",15);\n"
+                          "user_pref(\"datareporting.policy.firstRunURL\",\"\");\n");
+        preferences.close();
+        QFile page(home+"/chords.html");
+        QVERIFY(page.open(QIODevice::WriteOnly));
+        page.write("<!doctype html><title>Chords loading</title>"
+                   "<textarea id=t style='position:fixed;inset:0'></textarea>"
+                   "<script>t.addEventListener('input',()=>document.title='Chords ['+t.value+']');"
+                   "addEventListener('load',()=>requestAnimationFrame(()=>{t.focus();document.title='Chords []';}));</script>");
+        page.close();
+        frankenstein::applications::LaunchPlan plan;
+        plan.program="/usr/lib/firefox/firefox";
+        plan.arguments={"--new-window",QUrl::fromLocalFile(page.fileName()).toString()};
+        QString error;
+        QVERIFY2(prepareApplicationAppearance(profile,error),qPrintable(error));
+        QVERIFY2(prepareStyledApplication(plan,profile,error),qPrintable(error));
+        auto environment=nativeApplicationEnvironment(QProcessEnvironment::systemEnvironment(),
+                          QString::fromUtf8(scene.compositor.socketName()),profile,externalApplicationPlugins());
+        environment.insert("HOME",home);
+        environment.insert("MOZ_GTK_TITLEBAR_DECORATION","client");
+        silenceFixtureAudio(environment,scene.files.path());
+        QProcess browser;
+        browser.setProcessEnvironment(environment);
+        browser.setStandardErrorFile(qEnvironmentVariable("FRANKENSTEIN_EVIDENCE_DIR")+"/firefox-chords.txt");
+        const auto stop=qScopeGuard([&]{if(browser.state()!=QProcess::NotRunning){browser.kill();browser.waitForFinished(5000);}});
+        const auto failure=qScopeGuard([&]{if(QTest::currentTestFailed())capture(scene.view,"firefox-chords-failed.png");});
+        browser.start(plan.program,plan.arguments);
+        QVERIFY(browser.waitForStarted());
+        const auto title=[&] {
+            for(const auto &entry:manager.snapshot().value("windows").toList())
+                if(entry.toMap().value("title").toString().startsWith("Chords ["))
+                    return entry.toMap().value("title").toString().section(" — ",0,0).section(" - ",0,0);
+            return QString();
+        };
+        QVERIFY2(QTest::qWaitFor([&]{return !title().isEmpty();},20000),
+                 qPrintable(QJsonDocument::fromVariant(manager.snapshot()).toJson()));
+        quint64 id=0;
+        for(const auto &entry:manager.snapshot().value("windows").toList())
+            if(entry.toMap().value("title").toString().startsWith("Chords ["))id=entry.toMap().value("id").toULongLong();
+        auto *client=qobject_cast<QWaylandQuickShellSurfaceItem *>(visualItem(scene.view.contentItem(),"client-"+QString::number(id)));
+        QVERIFY(client);
+        manager.moveWindow(id,130,80);
+        manager.resizeWindow(id,700,400);
+        manager.activate(id);
+        QTRY_VERIFY(client->hasActiveFocus());
+        const auto point=client->mapToScene(client->mapFromSurface(QPointF(300,200))).toPoint();
+        QTest::mouseMove(&scene.view,point);QTest::qWait(60);
+        QTest::mouseClick(&scene.view,Qt::LeftButton,{},point);
+        QTest::qWait(300);
+        LineProcess keyboard;
+        keyboard.process.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
+        keyboard.process.start(QCoreApplication::applicationDirPath() + "/virtual-keyboard-driver");
+        QCOMPARE(keyboard.next("driver-ready"), QString("driver-ready"));
+        QTest::qWait(500);
+        for (const QString modifier : {"ctrl", "super"}) {
+            qInfo() << "Firefox chords with" << modifier;
+            QVERIFY(keyboard.send("type copy " + modifier, "ok"));
+            QTRY_COMPARE_WITH_TIMEOUT(title(), "Chords [copy " + modifier + "]", 5000);
+            QVERIFY(keyboard.send("chord " + modifier + "+a", "ok"));
+            QVERIFY(keyboard.send("chord " + modifier + "+c", "ok"));
+            QTRY_COMPARE_WITH_TIMEOUT(clipboard->text(), "copy " + modifier, 5000);
+            QVERIFY(keyboard.send("chord " + modifier + "+a", "ok"));
+            QVERIFY(keyboard.send("type x", "ok"));
+            QTRY_COMPARE_WITH_TIMEOUT(title(), QString("Chords [x]"), 5000);
+            QVERIFY(keyboard.send("chord " + modifier + "+v", "ok"));
+            QTRY_COMPARE_WITH_TIMEOUT(title(), "Chords [xcopy " + modifier + "]", 5000);
+            QVERIFY(keyboard.send("chord " + modifier + "+a", "ok"));
+            QVERIFY(keyboard.send("chord " + modifier + "+x", "ok"));
+            QTRY_COMPARE_WITH_TIMEOUT(title(), QString("Chords []"), 5000);
+        }
+        keyboard.process.write("quit\n");
+        QVERIFY(keyboard.process.waitForFinished(3000));
+        manager.closeWindow(id);
+        QTRY_VERIFY_WITH_TIMEOUT(browser.state()==QProcess::NotRunning,10000);
     }
     void applicationsTypeWithTheKeyboardLayoutInUse()
     {

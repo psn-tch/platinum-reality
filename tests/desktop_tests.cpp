@@ -4130,13 +4130,138 @@ class DesktopTests : public QObject
             ? property.value<QJSValue>().toVariant().toMap() : property.toMap();
         QVERIFY(!snapshot.value("system").toString().isEmpty());
         QVERIFY(!snapshot.value("applications").toList().isEmpty());
+        // The system's own row (the desktop with its Finder) comes last, named for the system.
+        const auto last=snapshot.value("applications").toList().last().toMap();
+        QCOMPARE(last.value("name").toString(),QString("Platinum Reality"));
+        QVERIFY(last.value("system").toBool());
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath()+"/artifacts/about-computer.png"));
+        // 9.2's window controls: the collapse box rolls it up and back, the size box resizes it
+        // (never below its minimum), the zoom box switches between that size and the zoomed one.
+        const auto clickItem=[&](const QString &name){
+            auto *box=visualItem(view.contentItem(),name);
+            if(!box || !box->isVisible())return false;
+            QTest::mouseClick(&view,Qt::LeftButton,{},box->mapToScene(QPointF(box->width()/2,box->height()/2)).toPoint());
+            return true;
+        };
+        const auto openHeight=window->height();
+        QVERIFY(clickItem("about-computer-window-collapse"));
+        QTRY_COMPARE(window->height(),24.0);
+        QVERIFY(!visualItem(view.contentItem(),"about-applications")->isVisible());
+        QVERIFY(clickItem("about-computer-window-collapse"));
+        QTRY_COMPARE(window->height(),openHeight);
+        auto *size=visualItem(view.contentItem(),"about-computer-window-size");
+        QVERIFY(size && size->isVisible());
+        const auto grip=size->mapToScene(QPointF(7,7)).toPoint();
+        QTest::mousePress(&view,Qt::LeftButton,{},grip);
+        QTest::mouseMove(&view,grip+QPoint(40,60),30);
+        QTest::mouseMove(&view,grip+QPoint(80,120),30);
+        QTest::mouseRelease(&view,Qt::LeftButton,{},grip+QPoint(80,120),30);
+        QTRY_COMPARE(window->width(),560.0+80);
+        QCOMPARE(window->height(),openHeight+120);
+        const auto corner=size->mapToScene(QPointF(7,7)).toPoint();
+        QTest::mousePress(&view,Qt::LeftButton,{},corner);
+        QTest::mouseMove(&view,corner-QPoint(200,200),30);
+        QTest::mouseMove(&view,corner-QPoint(400,300),30);
+        QTest::mouseRelease(&view,Qt::LeftButton,{},corner-QPoint(400,300),30);
+        QTRY_COMPARE(window->width(),470.0);
+        QCOMPARE(window->height(),260.0);
+        QVERIFY(clickItem("about-computer-window-zoom"));
+        QTRY_VERIFY(window->property("zoomed").toBool());
+        QVERIFY(window->height()>260.0);
+        QVERIFY(clickItem("about-computer-window-zoom"));
+        QTRY_COMPARE(window->height(),260.0);
         commandKey(&view,Qt::Key_W,17);
         QTRY_VERIFY(!window->isVisible());
         const auto stopped=window->property("samples").toInt();
         QTest::qWait(1100);QCOMPARE(window->property("samples").toInt(),stopped);
         QVERIFY(open());
         QTest::keyClick(&view,Qt::Key_Escape);QTRY_VERIFY(!window->isVisible());
+    }
+    void classicControlPanelChangesTheRealSettings()
+    {
+        QTemporaryDir root;
+        QQuickView view;view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY2(view.status()!=QQuickView::Error,qPrintable(view.errors().isEmpty()?QString():view.errors()[0].toString()));
+        const auto clearView=qScopeGuard([&]{view.setSource({});});
+        view.show();QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *appearance=qobject_cast<AppearanceSettings *>(manager.appearance());
+        auto *input=qobject_cast<InputSettings *>(manager.input());
+        QVERIFY(appearance && input);
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(),"dispatchShellCommand",
+            Q_ARG(QVariant,QVariant("control-panel")),Q_ARG(QVariant,QVariant(0))));
+        auto *window=visualItem(view.contentItem(),"classic-control-panel");
+        QVERIFY(window);QTRY_VERIFY(window->isVisible() && window->hasActiveFocus());
+        QVERIFY(!manager.shellModal());
+        const auto item=[&](const QString &name){view.grabWindow();return visualItem(view.contentItem(),name);};
+        const auto click=[&](const QString &name,QPointF at=QPointF(-1,-1)){
+            auto *target=item(name);
+            if(!target || !target->isVisible())return false;
+            const auto point=at.x()<0?QPointF(target->width()/2,9):at;
+            QTest::mouseClick(&view,Qt::LeftButton,{},target->mapToScene(point).toPoint());
+            return true;
+        };
+        // Menu blinking and the insertion point: the same settings as General Controls.
+        QVERIFY(click("classic-menu-blink-0"));
+        QTRY_COMPARE(appearance->general().value("menuBlinks").toInt(),0);
+        QVERIFY(click("classic-caret-2"));
+        QTRY_COMPARE(appearance->general().value("caretBlink").toInt(),2);
+        // The clock: 24 hours, then off in the menu bar, and on again.
+        QVERIFY(click("classic-24hr"));
+        QTRY_VERIFY(appearance->clock().value("hours24").toBool());
+        QVERIFY(item("classic-time")->property("text").toString().size()==8); // HH:mm:ss
+        QVERIFY(click("classic-clock-off"));
+        QTRY_VERIFY(!item("menu-bar-clock")->isVisible());
+        QVERIFY(click("classic-clock-on"));
+        QTRY_VERIFY(item("menu-bar-clock")->isVisible());
+        // A drawn pattern goes on the desktop when its preview is clicked: tiled, from the profile.
+        QCOMPARE(appearance->desktopPattern(),QString());
+        QVERIFY(click("classic-pattern-next"));
+        QVERIFY(click("classic-pattern-editor",QPointF(1+5,1+5))); // The top-left dot.
+        QVERIFY(click("classic-pattern-preview",QPointF(40,30)));
+        QTRY_COMPARE(appearance->desktopPattern(),QString("0822882288228822"));
+        QCOMPARE(appearance->wallpaperLayout(),QString("tile"));
+        QVERIFY(QFile::exists(root.filePath("profile/patterns/0822882288228822.png")));
+        auto *wallpaper=item("desktop-wallpaper");
+        QVERIFY(wallpaper);
+        QTRY_VERIFY(wallpaper->property("source").toUrl().toLocalFile().endsWith("patterns/0822882288228822.png"));
+        QTRY_COMPARE(wallpaper->property("status").toInt(),1); // Image.Ready
+        QCOMPARE(wallpaper->property("fillMode").toInt(),3); // Image.Tile
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath()+"/artifacts/classic-control-panel.png"));
+        QVERIFY(click("classic-pattern-next"));
+        QVERIFY(click("classic-pattern-preview",QPointF(40,30)));
+        QTRY_COMPARE(appearance->desktopPattern(),QString("77dd77dd77dd77dd"));
+        QVERIFY(!QFile::exists(root.filePath("profile/patterns/0822882288228822.png"))); // The old one is gone.
+        AppearanceSettings reread(root.filePath("profile"));
+        QCOMPARE(reread.desktopPattern(),QString("77dd77dd77dd77dd"));
+        QVERIFY(!reread.setDesktopPattern("not a pattern")); // Refused on a second reader: no alert here.
+        // Keyboard and Mouse: rows of buttons for the same values as their panels.
+        QVERIFY(click("classic-control-panel-keyboard",QPointF(60,40)));
+        QTRY_VERIFY(item("classic-keyboard")->isVisible());
+        QVERIFY(click("classic-repeat-rate-4"));
+        QTRY_COMPARE(input->keyboard().value("repeatRate").toInt(),40);
+        QVERIFY(click("classic-repeat-delay-0"));
+        QTRY_COMPARE(input->keyboard().value("repeatDelay").toInt(),1200);
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath()+"/artifacts/classic-control-panel-keyboard.png"));
+        QVERIFY(click("classic-control-panel-mouse",QPointF(60,40)));
+        QTRY_VERIFY(item("classic-mouse")->isVisible());
+        QVERIFY(click("classic-tracking-0"));
+        QTRY_COMPARE(input->pointer().value("speed").toDouble(),-0.75);
+        // The others open their Control Panels panel.
+        QVERIFY(click("classic-control-panel-monitors",QPointF(60,40)));
+        QVERIFY(click("classic-open-panel"));
+        auto *monitors=view.rootObject()->findChild<QObject *>("monitors-panel");
+        QTRY_VERIFY(monitors && monitors->property("opened").toBool());
+        // It stays open beside the other windows; Escape doesn't close it, its close box does.
+        QVERIFY(window->isVisible());
+        window->forceActiveFocus();
+        QTest::keyClick(&view,Qt::Key_Escape);
+        QTest::qWait(100);
+        QVERIFY(window->isVisible());
+        QVERIFY(click("classic-control-panel-close",QPointF(7,7)));
+        QTRY_VERIFY(!window->isVisible());
     }
     void calculatorUsesImmediateArithmeticAndBoundsInput_data()
     {

@@ -24,7 +24,9 @@ an emulator: no Apple software runs, and none is included.
   (Option to copy), Cut, Copy and Paste of files, Get Info, Find, and **View ▸ Show Hidden Files**.
   Right-click and long-press menus, Back/Forward, a path you can type, and Places, like Dolphin.
 - **Control Strip**: sound, brightness, monitors, battery, **Wi-Fi networks** (through iwd) and
-  **Bluetooth** (through BlueZ), each a pop-up menu like the 9.2.2 modules.
+  **Bluetooth** (through BlueZ), each a pop-up menu like the 9.2.2 modules. On a handheld PC running
+  [Handheld Daemon](https://github.com/hhd-dev/hhd), a Handheld module sets its controller mode, power,
+  fan and charge limit, and turns the **built-in controller** off so an external one is player 1.
 - **One clipboard**: what you copy in an application, on the desktop or with a command-line tool
   (`wl-copy`) pastes everywhere, and still pastes after the application that copied it quits.
   **Edit ▸ Show Clipboard** shows it.
@@ -50,7 +52,7 @@ an emulator: no Apple software runs, and none is included.
 - **About This Computer**: system version, RAM and swap, plus live application memory bars.
 - **Control Panels** (Apple menu ▸ Control Panels): every panel in one window — Appearance,
   Bluetooth, Date & Time (menu bar clock, calendar), Desktop Picture, Energy Saver (display off
-  and sleep), Keyboard (keyboard layouts with a menu bar keyboard menu, key repeat), Monitors (on/off, resolution, rotation, size, arrangement,
+  and sleep), Handheld (the built-in controller on or off, with Handheld Daemon), Keyboard (keyboard layouts with a menu bar keyboard menu, key repeat), Monitors (on/off, resolution, rotation, size, arrangement,
   mirroring), Mouse & Trackpad, Network (Wi-Fi and addresses) and Sound. Changes apply at once.
 - **X11 applications and games** through a bundled, patched xwayland-satellite.
 - **An optional startup screen**: a gray 1-bit screen with a smiling computer instead of boot text.

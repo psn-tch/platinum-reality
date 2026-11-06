@@ -9,7 +9,9 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QImageReader>
+#include <QRegularExpression>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <utility>
@@ -430,6 +432,59 @@ bool AppearanceSettings::applyDesktopPicture(QString path, QString layout)
     }
     return save(m_duration, m_stripVisible, m_stripCollapsed, m_stripX, m_stripY, normalized,
                 layout);
+}
+namespace
+{
+const QRegularExpression &patternForm()
+{
+    static const QRegularExpression form("^[0-9a-f]{16}$");
+    return form;
+}
+} // namespace
+QString AppearanceSettings::desktopPattern() const
+{
+    // Only a pattern this panel wrote, still in use: patterns/<16 hex digits>.png, tiled.
+    const QFileInfo file(m_wallpaperPath);
+    if (m_wallpaperLayout != "tile" || file.absolutePath() != QDir(m_profile).filePath("patterns") ||
+        file.suffix() != "png" || !patternForm().match(file.completeBaseName()).hasMatch())
+        return {};
+    return file.completeBaseName();
+}
+bool AppearanceSettings::setDesktopPattern(QString pattern)
+{
+    pattern = pattern.toLower();
+    if (!patternForm().match(pattern).hasMatch())
+    {
+        emit errorOccurred("A desktop pattern is 8 rows of 8 dots.");
+        return false;
+    }
+    const QDir folder(QDir(m_profile).filePath("patterns"));
+    const auto path = folder.filePath(pattern + ".png");
+    if (!QDir().mkpath(folder.path()) || QFileInfo(folder.path()).isSymLink())
+    {
+        emit errorOccurred("The desktop pattern could not be saved.");
+        return false;
+    }
+    QImage tile(8, 8, QImage::Format_Mono);
+    tile.setColorTable({qRgb(255, 255, 255), qRgb(0, 0, 0)});
+    for (int y = 0; y < 8; ++y)
+    {
+        const auto row = pattern.mid(2 * y, 2).toUInt(nullptr, 16);
+        for (int x = 0; x < 8; ++x)
+            tile.setPixel(x, y, (row >> (7 - x)) & 1);
+    }
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || !tile.save(&file, "PNG") || !file.commit())
+    {
+        emit errorOccurred("The desktop pattern could not be saved: " + file.errorString());
+        return false;
+    }
+    const auto previous = desktopPattern();
+    if (!applyDesktopPicture(path, "tile"))
+        return false;
+    if (!previous.isEmpty() && previous != pattern)
+        QFile::remove(folder.filePath(previous + ".png"));
+    return true;
 }
 QVariantMap AppearanceSettings::listDesktopPictures(QString folder) const
 {

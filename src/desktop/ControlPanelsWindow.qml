@@ -39,13 +39,17 @@ FocusScope {
         for (let i = 0; i < stack.children.length; ++i) {
             const panel = stack.children[i]
             if (panel.panelId === undefined) continue
-            found.push({id: panel.panelId, title: panel.title, glyph: panel.glyph})
             panel.host = window
+            // A panel for hardware this computer doesn't have (Handheld) sets listed: false.
+            if (panel.listed === false) { panel.visible = false; panel.shown = false; continue }
+            found.push({id: panel.panelId, title: panel.title, glyph: panel.glyph})
             panel.visible = panel.panelId === window.current
             panel.shown = window.visible && panel.panelId === window.current
             if (panel.panelId === window.current) currentPanel = panel
         }
         if (JSON.stringify(found) !== JSON.stringify(entries)) entries = found
+        // The panel on screen went away (hhd stopped): show the first one instead.
+        if (found.length && !found.some(function(e) { return e.id === window.current })) current = found[0].id
     }
     // In front: it had the keyboard last (ShellWindowFocus).
     property alias front: focusTracker.front

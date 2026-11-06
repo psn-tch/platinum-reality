@@ -143,6 +143,50 @@ class HandheldTests final : public QObject
         QCOMPARE(hhd.state().value("tdp").toMap().value("value").toInt(), 20);
         QVERIFY(posts().contains(R"({"tdp.qam.tdp": 20})"));
     }
+    void theBuiltInControllerTurnsOffAndBackToItsMode()
+    {
+        // psn_tch, 2026-11-06: off so an external controller is player 1, then back as it was.
+        HandheldDaemon hhd(base, tokenFile);
+        hhd.refresh();
+        QTRY_VERIFY(hhd.available() && !hhd.busy());
+        QVERIFY(hhd.controllerSwitchable());
+        hhd.set("controllers.oxp.controller_mode.mode", "dualsense");
+        QTRY_VERIFY(hhd.controllerOn() && !hhd.busy());
+        hhd.setControllerOn(false);
+        QTRY_COMPARE(hhd.state().value("controller").toMap().value("value").toString(), QString("hidden"));
+        QTRY_VERIFY(!hhd.controllerOn() && !hhd.busy());
+        hhd.setControllerOn(false); // already off: nothing is sent
+        hhd.setControllerOn(true);
+        QTRY_COMPARE(hhd.state().value("controller").toMap().value("value").toString(), QString("dualsense"));
+        QTRY_VERIFY(hhd.controllerOn() && !hhd.busy());
+        QCOMPARE(posts().mid(posts().size() - 3),
+                 QStringList({R"({"controllers.oxp.controller_mode.mode": "dualsense"})",
+                              R"({"controllers.oxp.controller_mode.mode": "hidden"})",
+                              R"({"controllers.oxp.controller_mode.mode": "dualsense"})"}));
+        // Paused counts as off too. Started while off, with no earlier mode known: Xbox.
+        hhd.set("controllers.oxp.controller_mode.mode", "disabled");
+        QTRY_VERIFY(!hhd.controllerOn() && !hhd.busy());
+        HandheldDaemon fresh(base, tokenFile);
+        fresh.refresh();
+        QTRY_VERIFY(fresh.available() && !fresh.busy());
+        QVERIFY(!fresh.controllerOn());
+        fresh.setControllerOn(true);
+        QTRY_COMPARE(fresh.state().value("controller").toMap().value("value").toString(), QString("uinput"));
+        QTRY_VERIFY(!fresh.busy());
+    }
+    void aRefreshThatChangesNothingLeavesTheMenuAlone()
+    {
+        // The Handheld module's menu is rebuilt on each change; the refresh as it opens must not
+        // rebuild it under a click when hhd's answer is the same.
+        HandheldDaemon hhd(base, tokenFile);
+        hhd.refresh();
+        QTRY_VERIFY(hhd.available() && !hhd.busy());
+        QSignalSpy changed(&hhd, &HandheldDaemon::changed);
+        hhd.refresh();
+        QTest::qWait(500);
+        QCOMPARE(changed.count(), 0);
+        QVERIFY(hhd.available() && !hhd.busy());
+    }
     void withoutTheRightTokenItIsUnavailable()
     {
         QFile wrong(directory.filePath("wrong-token"));
