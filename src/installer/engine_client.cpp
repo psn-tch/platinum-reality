@@ -59,7 +59,13 @@ void EngineClient::listDisks()
         const auto document = QJsonDocument::fromJson(process->readAllStandardOutput());
         if (status != QProcess::NormalExit || code != 0 || !document.isArray())
         {
-            emit failed("The installer could not list the disks.");
+            // The engine says why it refused on its last line of standard error (on a real computer:
+            // that the test version installs in virtual machines only). Show that, not a generic error.
+            const auto lines = QString::fromUtf8(process->readAllStandardError()).trimmed().split('\n');
+            const auto reason = lines.isEmpty() ? QString() : lines.last().trimmed().left(300);
+            emit failed(reason.isEmpty() || status != QProcess::NormalExit
+                            ? QString("The installer could not list the disks.")
+                            : "The installer could not list the disks: " + reason);
             return;
         }
         QVariantList disks;

@@ -990,15 +990,19 @@ void InstallerWindow::showDisks(const QVariantList &disks)
         const bool boot = disk.value("is_boot_medium").toBool();
         // An empty CD drive or card reader (0 bytes) or a small stick can't take the installation.
         const bool small = disk.value("size_bytes").toLongLong() < minimumDiskBytes;
+        // The engine's own verdict (on a real computer, internal disks: USB drives only for now).
+        const bool refused = disk.value("installable").isValid() && !disk.value("installable").toBool() && !boot;
         const auto model_ = disk.value("model").toString().trimmed();
         // The path before the size: it says which disk is erased, so it must never be cut off.
         m_disks->addItem(QString("%1 (%3) — %2%4")
                              .arg(model_.isEmpty() ? QString("Disk") : model_, sizeText(disk.value("size_bytes").toLongLong()),
                                   disk.value("path").toString(),
-                                  boot ? "  — the installation disk" : small ? "  — too small" : ""),
+                                  boot ? "  — the installation disk"
+                                  : refused ? QString("  — internal disk")
+                                  : small ? "  — too small" : ""),
                          disk);
         // What can't be chosen is listed dimmed, as a Mac menu shows it.
-        if ((boot || small) && model)
+        if ((boot || small || refused) && model)
             model->item(m_disks->count() - 1)->setEnabled(false);
         else if (first < 0)
             first = m_disks->count() - 1;
@@ -1018,9 +1022,15 @@ void InstallerWindow::describeDisk()
     {
         m_diskContents->clear();
         m_diskSize->clear();
-        m_destinationNote->setText(m_disks->count() ? "There is no disk here that Platinum Reality can be installed on: "
-                                                      "it needs one of at least 16 GB, other than the installation disk."
-                                                    : QString());
+        bool internal = false;
+        for (int i = 0; i < m_disks->count(); ++i)
+            internal = internal || m_disks->itemText(i).endsWith("internal disk");
+        m_destinationNote->setText(!m_disks->count() ? QString()
+                                   : internal ? "On a real computer this version installs only onto a USB drive "
+                                                "(16 GB or larger), never an internal disk. Plug one in, then quit "
+                                                "and open Install Platinum Reality again."
+                                              : "There is no disk here that Platinum Reality can be installed on: "
+                                                "it needs one of at least 16 GB, other than the installation disk.");
         return;
     }
     const auto partitions = disk.value("partitions").toList();

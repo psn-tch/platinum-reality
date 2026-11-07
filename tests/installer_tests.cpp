@@ -662,6 +662,54 @@ class InstallerTests final : public QObject
         QTRY_COMPARE(zones->count(), 3);
         QCOMPARE(zones->currentText(), QString("UTC"));
     }
+    void anEngineRefusalSaysWhyOnTheDestinationPage()
+    {
+        // psn_tch's first boot of the live USB on a real computer said only "could not list disks".
+        QTemporaryDir root;
+        qputenv("FAKE_ENGINE_LOG", root.filePath("engine.jsonl").toLocal8Bit());
+        qputenv("FAKE_ENGINE_REFUSE_HOST", "1");
+        const auto unset = qScopeGuard([] { qunsetenv("FAKE_ENGINE_REFUSE_HOST"); });
+        EngineClient engine(QFINDTESTDATA("fake_install_engine.py"));
+        InstallerWindow window(&engine, "Read me.", "MIT License");
+        window.show();
+        find<QPushButton>(window, "installer-continue")->click();
+        QTRY_VERIFY(find<QLabel>(window, "installer-destination-note")->text().contains("isn't turned on yet"));
+        QVERIFY(find<QLabel>(window, "installer-destination-note")->text().contains("Nothing on your disks was changed"));
+        QVERIFY(!find<QPushButton>(window, "installer-continue")->isEnabled());
+    }
+    void onARealComputerInternalDisksAreDimmedAndAUsbDriveIsChosen()
+    {
+        // psn_tch's potato: several internal disks, a USB SSD for a portable install.
+        QTemporaryDir root;
+        qputenv("FAKE_ENGINE_LOG", root.filePath("engine.jsonl").toLocal8Bit());
+        qputenv("FAKE_ENGINE_PHYSICAL", "usb");
+        const auto unset = qScopeGuard([] { qunsetenv("FAKE_ENGINE_PHYSICAL"); });
+        EngineClient engine(QFINDTESTDATA("fake_install_engine.py"));
+        InstallerWindow window(&engine, "Read me.", "MIT License");
+        window.show();
+        find<QPushButton>(window, "installer-continue")->click();
+        auto *disks = find<QComboBox>(window, "installer-disks");
+        QTRY_COMPARE(disks->count(), 3);
+        auto *model = qobject_cast<QStandardItemModel *>(disks->model());
+        QVERIFY(model && !model->item(1)->isEnabled() && disks->itemText(1).endsWith("internal disk"));
+        QVERIFY(model->item(2)->isEnabled());
+        QCOMPARE(window.config().value("disk").toString(), QString("/dev/sdc"));
+        QVERIFY(find<QPushButton>(window, "installer-continue")->isEnabled());
+    }
+    void withoutAUsbDriveARealComputerSaysToPlugOneIn()
+    {
+        QTemporaryDir root;
+        qputenv("FAKE_ENGINE_LOG", root.filePath("engine.jsonl").toLocal8Bit());
+        qputenv("FAKE_ENGINE_PHYSICAL", "1");
+        const auto unset = qScopeGuard([] { qunsetenv("FAKE_ENGINE_PHYSICAL"); });
+        EngineClient engine(QFINDTESTDATA("fake_install_engine.py"));
+        InstallerWindow window(&engine, "Read me.", "MIT License");
+        window.show();
+        find<QPushButton>(window, "installer-continue")->click();
+        QTRY_COMPARE(find<QComboBox>(window, "installer-disks")->count(), 2);
+        QVERIFY(find<QLabel>(window, "installer-destination-note")->text().contains("only onto a USB drive"));
+        QVERIFY(!find<QPushButton>(window, "installer-continue")->isEnabled());
+    }
     void aMissingEngineIsReportedOnTheDestinationPage()
     {
         EngineClient engine("/nonexistent/platinum-reality-install");

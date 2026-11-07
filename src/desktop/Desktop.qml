@@ -151,7 +151,7 @@ Rectangle {
         if(action==="hide")manager.hideApplication()
         else if(action==="hide-others")manager.hideOtherApplications()
         else if(action==="show-all")manager.showAllApplications()
-        else if(action==="app")manager.activateApplication(applicationId)
+        else if(action==="app")activateListedApplication(applicationId)
         else if(action==="keyboard-layout")manager.input.set("keyboard","layout",applicationId)
         else if(action==="window")manager.activate(applicationId,true)
         else if(action==="launch")manager.launchApplication(applicationId)
@@ -320,9 +320,31 @@ Rectangle {
     // The Application menu lists applications by name, as 9.2.2 does (checked in psn_tch's 9.2.2 VM),
     // and Command-Tab / Command-Shift-Tab bring the next / previous one in that list forward at
     // once, wrapping, with no switcher palette.
+    // In 9.2.2 control panels and desk accessories were applications of their own: open, each is
+    // listed in the Application menu and the Application Switcher (psn_tch, 2026-11-07: Control Panel
+    // wasn't). Their ids are "shell:<action>"; choosing one brings that window forward.
+    function openShellApplications() {
+        const windows=[{name:"Control Panels",action:"control-panels-window",item:controlPanels},
+                       {name:"Control Panel",action:"control-panel",item:classicControlPanel},
+                       {name:"Calculator",action:"calculator",item:calculator},
+                       {name:"Key Caps",action:"key-caps",item:keyCapsWindow},
+                       {name:"Note Pad",action:"note-pad",item:notePadWindow},
+                       {name:"Scrapbook",action:"scrapbook",item:scrapbookWindow}]
+        return windows.filter(function(w){return w.item && w.item.visible}).map(function(w){
+            return {id:"shell:"+w.action,name:w.name,hidden:false,attention:false,shell:true,
+                    active:manager.desktopActive && Boolean(w.item.front)}})
+    }
     function applicationsByName() {
-        return manager.applications.slice().sort(function(a,b){
-            return String(a.name).localeCompare(String(b.name),undefined,{sensitivity:"base"}) || a.id-b.id})
+        const shell=openShellApplications()
+        // Finder is active only while no built-in window is in front.
+        const apps=manager.applications.map(function(a){
+            return a.name==="Finder" && shell.some(function(w){return w.active}) ? Object.assign({},a,{active:false}) : a})
+        return apps.concat(shell).sort(function(a,b){
+            return String(a.name).localeCompare(String(b.name),undefined,{sensitivity:"base"}) || String(a.id).localeCompare(String(b.id))})
+    }
+    function activateListedApplication(id) {
+        if(String(id).startsWith("shell:"))dispatchShellCommand(String(id).slice(6),0)
+        else manager.activateApplication(id)
     }
     function switchApplication(step) {
         let apps=applicationsByName()
@@ -330,7 +352,7 @@ Rectangle {
         let current=apps.findIndex(function(a){return a.active})
         let next=apps[((current<0?0:current)+step+apps.length)%apps.length]
         closeMenu()
-        manager.activateApplication(next.id)
+        activateListedApplication(next.id)
     }
     Shortcut {sequence:"Meta+Tab";enabled:!manager.shellModal && !manager.nativeDragging;onActivated:desktop.switchApplication(1)}
     // Several spellings: a real keyboard's layout makes more than one match (see the screenshot keys).

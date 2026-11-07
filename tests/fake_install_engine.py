@@ -43,12 +43,28 @@ arguments = sys.argv[1:]
 command = arguments[0] if arguments else ""
 if command == "disks" and arguments[1:] == ["--json"]:
     note({"argv": arguments})
+    if os.environ.get("FAKE_ENGINE_REFUSE_HOST"):
+        # As the real engine on a real computer, while installs are qualified in virtual machines only.
+        print("Installing on a real computer isn't turned on yet in this test version. Nothing on your disks "
+              "was changed.", file=sys.stderr)
+        sys.exit(2)
     disks = [
         {"path": "/dev/sda", "model": "Platinum USB", "size_bytes": 16_000_000_000, "removable": True,
          "transport": "usb", "is_boot_medium": True, "partitions": []},
         {"path": "/dev/vda", "model": "Hard Disk", "size_bytes": 64_000_000_000, "removable": False,
          "transport": "virtio", "is_boot_medium": False,
          "partitions": [{"path": "/dev/vda1", "fstype": "ext4", "label": "old", "size_bytes": 64_000_000_000}]}]
+    if os.environ.get("FAKE_ENGINE_PHYSICAL"):
+        # A real computer: the engine marks internal disks not installable; only USB drives are.
+        for disk in disks:
+            usb = disk["transport"] == "usb" and not disk["is_boot_medium"]
+            disk["installable"] = usb
+            disk["unavailable"] = "" if usb else ("the installation disk" if disk["is_boot_medium"] else
+                "internal disk: on a real computer this version installs only onto a USB drive")
+        if os.environ.get("FAKE_ENGINE_PHYSICAL") == "usb":
+            disks.append({"path": "/dev/sdc", "model": "USB SSD", "size_bytes": 128_000_000_000, "removable": False,
+                          "transport": "usb", "is_boot_medium": False, "partitions": [], "installable": True,
+                          "unavailable": ""})
     if os.environ.get("FAKE_ENGINE_SMALL_DISKS"):
         # As QEMU lists them (the update-37 image's first actual R3): an empty CD drive, then a stick
         # too small to install on, both before the hard disk.

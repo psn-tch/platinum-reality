@@ -10,6 +10,7 @@
 #include <QSettings>
 #include <QSignalSpy>
 #include <QtTest>
+#include "finder/file_operations.hpp"
 #include <unistd.h>
 #include <sys/xattr.h>
 #include "finder/file_labels.hpp"
@@ -67,6 +68,29 @@ class DesktopItemsTests : public QObject
         QVERIFY(!withDrives.canModifySelection());
         QVERIFY(QDir(drives.path() + "/USB STICK").removeRecursively());
         QTRY_VERIFY_WITH_TIMEOUT(!named(withDrives, "USB STICK").isValid(), 8000);
+    }
+    void aPlainDragFromAFlashDriveCopiesToTheDesktop()
+    {
+        // psn_tch, 2026-11-07: files from her flash drive wouldn't go onto the desktop ("outside the
+        // selected workspace"); and as in Mac OS, a plain drag to another disk copies, never moves.
+        QTemporaryDir root, profile, drives(QDir("/dev/shm").exists() ? "/dev/shm/drives-XXXXXX" : QString());
+        QVERIFY(drives.isValid());
+        QVERIFY(QDir(drives.path()).mkpath("USB STICK/Folder"));
+        QVERIFY(write(drives.path() + "/USB STICK/photo.txt"));
+        QVERIFY(write(drives.path() + "/USB STICK/Folder/inner.txt"));
+        FinderPlaces::volumes = {drives.path()};
+        const auto reset = qScopeGuard([] { FinderPlaces::volumes.clear(); });
+        DesktopItems items(root.path(), profile.path());
+        const QStringList sources{drives.path() + "/USB STICK/photo.txt", drives.path() + "/USB STICK/Folder"};
+        if (FileOperations::sameVolume(sources, items.directory()))
+            QSKIP("The drive fixture and the desktop are on one filesystem here.");
+        QVERIFY(FileOperations::sameVolume({items.directory()}, items.directory()));
+        QSignalSpy errors(&items, &DesktopItems::errorOccurred);
+        QVERIFY(items.receiveFiles(sources, {260, 450}, false));
+        QTRY_VERIFY(QFileInfo::exists(items.directory() + "/photo.txt") &&
+                    QFileInfo::exists(items.directory() + "/Folder/inner.txt"));
+        QVERIFY(QFileInfo::exists(sources[0]) && QFileInfo::exists(sources[1] + "/inner.txt")); // Still on the drive.
+        QCOMPARE(errors.count(), 0);
     }
     void aDragHeldOverAFolderSpringsItOpen()
     {

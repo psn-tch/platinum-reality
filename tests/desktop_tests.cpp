@@ -177,6 +177,47 @@ class DesktopTests : public QObject
         QTest::qWait(50);
         QCOMPARE(field->property("text").toString(),QString("unchanged fixture"));
     }
+    void openControlPanelsAndAccessoriesAreListedAsApplications()
+    {
+        // psn_tch, 2026-11-07: Control Panel didn't show in the Application Switcher. In 9.2.2 control
+        // panels and desk accessories were applications, listed in the Application menu and switcher.
+        QTemporaryDir root;
+        QQuickView view;
+        view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status()!=QQuickView::Error);
+        const auto clearView=qScopeGuard([&]{view.setSource({});});
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto dispatch=[&](const QVariant &action,const QVariant &id=0){return QMetaObject::invokeMethod(
+            view.rootObject(),"dispatchShellCommand",Q_ARG(QVariant,action),Q_ARG(QVariant,id));};
+        const auto listed=[&]{
+            QVariant result;
+            QMetaObject::invokeMethod(view.rootObject(),"applicationsByName",Q_RETURN_ARG(QVariant,result));
+            QVariantMap byName;
+            for(const auto &entry:result.toList())byName.insert(entry.toMap().value("name").toString(),entry);
+            return byName;
+        };
+        QVERIFY(!listed().contains("Control Panel"));
+        QVERIFY(dispatch("control-panel"));
+        QTRY_VERIFY(listed().contains("Control Panel"));
+        QVERIFY(dispatch("calculator"));
+        QTRY_VERIFY(listed().value("Calculator").toMap().value("active").toBool());
+        QVERIFY(!listed().value("Control Panel").toMap().value("active").toBool());
+        // Choosing it, as from the menu or the switcher, brings that window forward.
+        QVERIFY(dispatch("app","shell:control-panel"));
+        QTRY_VERIFY(listed().value("Control Panel").toMap().value("active").toBool());
+        QVERIFY(!listed().value("Calculator").toMap().value("active").toBool());
+        // In the Application menu too, by the same list.
+        QVariant entries;
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(),"shellMenuEntries",Q_RETURN_ARG(QVariant,entries),
+            Q_ARG(QVariant,view.rootObject()->property("barEntries").toList().size())));
+        QStringList names;
+        for(const auto &entry:entries.toList())names<<entry.toMap().value("text").toString();
+        QVERIFY2(names.contains("Control Panel") && names.contains("Calculator"),qPrintable(names.join(", ")));
+    }
     void printableCommandEventsKeepNoteAndPanelCommandsWorking()
     {
         QTemporaryDir root;

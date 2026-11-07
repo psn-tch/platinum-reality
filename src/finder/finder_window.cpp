@@ -562,6 +562,8 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
     {
         if (paths.isEmpty())
             return;
+        // To another disk a plain drag copies (the flash drive keeps its files), as in Mac OS.
+        copy = copy || !FileOperations::sameVolume(paths, destination);
         const auto ops = m_operations;
         auto bytes = copy ? std::make_shared<CopyProgress>() : std::shared_ptr<CopyProgress>();
         auto cancel = std::make_shared<std::atomic_bool>(false);

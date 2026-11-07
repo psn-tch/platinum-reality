@@ -124,6 +124,13 @@ bool copyTree(const QString &source, const QString &target, GCancellable *cancel
             G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, cancel, &e);
         bool ok = metadata && g_file_set_attributes_from_info(
                                   to, metadata, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, cancel, &e);
+        // FAT and exFAT flash drives can't store Unix modes: the folder is copied without them, as
+        // single files already are (g_file_copy treats metadata it can't set as non-fatal).
+        if (!ok && metadata && e && g_error_matches(e, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED))
+        {
+            g_clear_error(&e);
+            ok = true;
+        }
         if (metadata)
             g_object_unref(metadata);
         g_object_unref(from);
@@ -255,6 +262,17 @@ FileResult FileOperations::copy(const QString &source, const QString &directory,
     if (!result.ok)
         removeCreatedStage(stage);
     return result;
+}
+bool FileOperations::sameVolume(const QStringList &sources, const QString &directory)
+{
+    struct stat folder{};
+    if (::stat(QFile::encodeName(directory).constData(), &folder) != 0)
+        return false;
+    return std::all_of(sources.cbegin(), sources.cend(), [&](const QString &source)
+    {
+        struct stat item{};
+        return ::lstat(QFile::encodeName(source).constData(), &item) == 0 && item.st_dev == folder.st_dev;
+    });
 }
 FileResult FileOperations::move(const QString &source, const QString &directory) const
 {

@@ -1036,8 +1036,12 @@ bool DesktopItems::receiveFiles(QStringList paths, QPoint point, bool copy)
     for (const auto &path : paths)
     {
         const auto parent = QFileInfo(path).dir().canonicalPath();
+        // From the home folder or a mounted drive (/run/media/<user>): dropping from a flash drive
+        // was refused as "outside the selected workspace" (psn_tch, 2026-11-07).
         if (!QDir::isAbsolutePath(path) || path.contains(QChar::Null) ||
-            (parent != m_root && !parent.startsWith(m_root + '/')) || path == m_root ||
+            (parent != m_root && !parent.startsWith(m_root + '/') &&
+             !m_operations.readableFile(path) && !m_operations.readableDirectory(path)) ||
+            path == m_root ||
             (!QFileInfo::exists(path) && !QFileInfo(path).isSymLink()))
         {
             emit errorOccurred(
@@ -1048,6 +1052,8 @@ bool DesktopItems::receiveFiles(QStringList paths, QPoint point, bool copy)
     const auto *target = externalDropEntry(point);
     const bool trash = target && target->kind == "trash";
     const auto directory = target && !trash ? target->path : m_directory;
+    // To another disk a plain drag copies, as in Mac OS; within a disk it moves.
+    copy = copy || (!trash && !FileOperations::sameVolume(paths, directory));
     if (!copy && !trash)
         paths.removeIf([&](const QString &path)
                        { return QFileInfo(path).absolutePath() == directory; });
