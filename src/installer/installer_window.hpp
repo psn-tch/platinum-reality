@@ -3,22 +3,25 @@
 #include <QVariantList>
 #include <QWidget>
 
+#include <QElapsedTimer>
+
 class EngineClient;
+class QDialog;
 class QKeyEvent;
 class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
-class QListWidget;
 class QProgressBar;
 class QPushButton;
 class QStackedWidget;
 class QTextBrowser;
 
-// Install Platinum Reality, modelled on the Mac OS 9 Installer's window: a title band naming the
-// step, a page, and Go Back / Continue. Welcome lists the steps; then the destination disk,
-// important information, the license (Agree / Disagree), the account, and Install Software,
-// which erases the chosen disk only after a confirmation whose default button is Cancel.
+// Install Platinum Reality, as faithful to the Mac OS 9.2.2 Installer as an original can be: the band
+// naming the step, a page, and the step's buttons. Welcome lists the steps; then Select Destination
+// (a Destination Disk pop-up, Options… for encryption), Important Information and the license (Save…,
+// Print…, then Agree / Disagree), the account, and Install Software, whose Start erases the chosen disk
+// only after a question whose default button is Cancel. It ends with 9.2.2's finished alert.
 // All disk work is done by the install engine (EngineClient).
 class InstallerWindow final : public QWidget
 {
@@ -59,6 +62,14 @@ class InstallerWindow final : public QWidget
     void showDisks(const QVariantList &disks);
     QString eraseQuestion(const QJsonObject &plan) const;
     void startInstall();
+    void finish(const QString &message);
+    QString remainingText(double fraction);
+    QString chosenDisk() const;
+    QString diskName() const;
+    bool diskUsable(int index) const;
+    void describeDisk();
+    void showOptions();
+    void saveText();
     QWidget *welcomePage();
     QWidget *destinationPage();
     QWidget *textPage(QTextBrowser **browser, const QString &text);
@@ -70,15 +81,20 @@ class InstallerWindow final : public QWidget
     Page m_page = Welcome;
     QStackedWidget *m_pages = nullptr;
     QLabel *m_title = nullptr, *m_destinationNote = nullptr, *m_installSummary = nullptr;
-    QLabel *m_progressText = nullptr, *m_finishedText = nullptr;
-    QListWidget *m_disks = nullptr;
+    QLabel *m_progressText = nullptr, *m_finishedText = nullptr, *m_progressHeading = nullptr, *m_remaining = nullptr,
+           *m_finishedSummary = nullptr, *m_diskContents = nullptr, *m_diskSize = nullptr, *m_diskRequired = nullptr;
+    QWidget *m_band = nullptr;
+    QComboBox *m_disks = nullptr, *m_licenseLanguage = nullptr;
+    QDialog *m_optionsDialog = nullptr, *m_finishedAlert = nullptr;
+    QElapsedTimer m_installClock;
     QTextBrowser *m_information = nullptr, *m_license = nullptr;
     QLineEdit *m_fullName = nullptr, *m_userName = nullptr, *m_password = nullptr, *m_verify = nullptr,
               *m_computerName = nullptr;
     QComboBox *m_timeZone = nullptr, *m_keymap = nullptr, *m_language = nullptr;
     QCheckBox *m_encrypt = nullptr;
     QProgressBar *m_progress = nullptr;
-    QPushButton *m_back = nullptr, *m_continue = nullptr, *m_restart = nullptr;
+    QPushButton *m_back = nullptr, *m_continue = nullptr, *m_restart = nullptr, *m_quit = nullptr, *m_options = nullptr,
+                *m_save = nullptr, *m_print = nullptr;
     bool m_choicesAsked = false;
     bool m_agreed = false, m_userNameEdited = false, m_installOk = false, m_diskChanged = false;
     struct Answers

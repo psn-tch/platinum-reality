@@ -33,6 +33,57 @@ spec.loader.exec_module(verifier)
 
 
 class SourceChecks(unittest.TestCase):
+    def test_vendored_package_configuration_examples_are_comments_not_repositories(self):
+        root_builder = load('guest-root')
+        real = (HERE/'profile/pacman.conf').read_text()
+        for upstream in (real, '#[core]\n' + real):
+            with self.subTest(commented_core=upstream.startswith('#[core]')), tempfile.TemporaryDirectory() as folder:
+                work = Path(folder); profile = work/'profile'; profile.mkdir()
+                (profile/'pacman.conf').write_text(upstream)
+                repo = root_builder.repository_config(work, profile)
+                self.assertEqual((profile/'airootfs/etc/pacman.conf').read_text(), upstream)
+                active = [line.split('#', 1)[0].strip() for line in (profile/'pacman.conf').read_text().splitlines()]
+                self.assertEqual(active.count('[platinum-reality]'), 1)
+                self.assertEqual(active.count('[core]'), 1)
+                self.assertLess(active.index('[platinum-reality]'), active.index('[core]'))
+                self.assertEqual([line for line in active if 'file://' in line], ['Server = file://'+str(repo)])
+
+    def test_acquisition_repository_stays_outside_the_immutable_root(self):
+        root_builder = load('guest-root')
+        with tempfile.TemporaryDirectory() as folder:
+            work = Path(folder); profile = work/'profile'; profile.mkdir()
+            upstream = '[options]\nSigLevel=Required DatabaseOptional\n[core]\nInclude=/etc/pacman.d/mirrorlist\n'
+            (profile/'pacman.conf').write_text(upstream)
+            repo = root_builder.repository_config(work, profile)
+            self.assertEqual(repo, work/'package-repository')
+            self.assertFalse(repo.is_relative_to(profile/'airootfs'))
+            self.assertEqual((profile/'airootfs/etc/pacman.conf').read_text(), upstream)
+            build_config = (profile/'pacman.conf').read_text()
+            self.assertLess(build_config.index('[platinum-reality]'), build_config.index('[core]'))
+            self.assertIn('Server = file://'+str(repo), build_config)
+            self.assertIn('SigLevel=Required DatabaseOptional', build_config)
+            self.assertFalse((profile/'airootfs/opt/platinum-reality/repo').exists())
+            package = work/'fixture.pkg.tar.zst'; package.write_bytes(b'fixture package, never installed')
+            root_builder.write_image_policy(profile, {'commit': 'a'*40}, package)
+            policy = json.loads((profile/'airootfs/opt/platinum-reality/image.json').read_text())
+            self.assertEqual(policy['version'], 2)
+            self.assertEqual(policy['installation_source'], 'live-squashfs-v1')
+            self.assertEqual(policy['package_sha256'], hashlib.sha256(package.read_bytes()).hexdigest())
+            self.assertNotIn(str(work), json.dumps(policy))
+
+    def test_live_copy_builder_refuses_legacy_embedded_cache_or_builder_mirrors(self):
+        root_builder = load('guest-root')
+        for change in ('embedded', 'mirror', 'duplicate-core'):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as folder:
+                work = Path(folder); profile = work/'profile'; profile.mkdir()
+                config = '[options]\n[core]\n'
+                if change == 'embedded': (profile/'airootfs/opt/platinum-reality/repo').mkdir(parents=True)
+                elif change == 'mirror': config += 'Server=file:///home/builder/private\n'
+                else: config += '[core]\n'
+                (profile/'pacman.conf').write_text(config)
+                with self.assertRaises(RuntimeError):
+                    root_builder.repository_config(work, profile)
+
     def test_builder_can_discard_only_its_owned_overlay_and_keeps_seed_read_only(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

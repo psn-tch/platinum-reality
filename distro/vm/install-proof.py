@@ -322,23 +322,33 @@ def boot_proof(guest, password, receipt):
     guest.start(uefi=True, network=False, target=path/'target.qcow2', installed=True,
                 serial=unlock_ui != 'plymouth', gpu=receipt.get('gpu', 'virtio-vga'),
                 outputs=receipt.get('requested_output_capacity', 1))
+    observe_installed_boot(guest, password, receipt)
+
+
+def observe_installed_boot(guest, password, receipt, stem=''):
+    """Observe real unlock/login without transport, reset or authentication edits."""
+    if stem not in ('', 'reboot-'):
+        raise ValueError('Unsupported installed capture prefix')
+    path = guest.path
+    greeter = receipt.get('greeter', 'stock')
+    unlock_ui = receipt.get('unlock_ui', 'plain')
     observed={'scope':'One owned VM run, host monotonic offsets from QEMU start; includes controller/input waiting, not intrinsic boot performance'}
     receipt['installed_boot_observations']=observed
     receipt['installed_virtual_serial'] = unlock_ui != 'plymouth'
     deadline = time.monotonic()+180
     if receipt['encrypted']:
         while time.monotonic() < deadline:
-            guest.qmp('screendump', {'filename': str(path/'unlock.ppm')})
-            text = (subprocess.check_output(['tesseract', str(path/'unlock.ppm'), 'stdout', '--psm', '6'],
+            guest.qmp('screendump', {'filename': str(path/(stem+'unlock.ppm'))})
+            text = (subprocess.check_output(['tesseract', str(path/(stem+'unlock.ppm')), 'stdout', '--psm', '6'],
                                            stderr=subprocess.DEVNULL, text=True).lower()
                     if unlock_ui == 'plain' else '')
-            recognized = (graphical_unlock_visible(path/'unlock.ppm', path/'expected-unlock-dialog.png')
+            recognized = (graphical_unlock_visible(path/(stem+'unlock.ppm'), path/'expected-unlock-dialog.png')
                           if unlock_ui == 'plymouth' else unlock_visible(text, unlock_ui))
             if recognized:
                 observed['unlock_prompt_seconds']=round(time.monotonic()-guest.started,3)
                 # Exactly one attempt, only after seeing the actual unlock prompt.
                 type_text(guest, password)
-                guest.qmp('screendump', {'filename': str(path/'unlock-typed.ppm')})
+                guest.qmp('screendump', {'filename': str(path/(stem+'unlock-typed.ppm'))})
                 key(guest, 'ret')
                 observed['unlock_submitted_seconds']=round(time.monotonic()-guest.started,3)
                 receipt['unlock_prompt'] = 'Observed '+unlock_ui+'; one synthetic credential submitted by owned QMP'
@@ -350,8 +360,8 @@ def boot_proof(guest, password, receipt):
             raise TimeoutError('Installed UKI did not show a recognizable LUKS prompt; no password typed')
     deadline = time.monotonic()+180
     while True:
-        guest.qmp('screendump', {'filename': str(path/'login.ppm')})
-        text = greeter_text(path/'login.ppm', greeter)
+        guest.qmp('screendump', {'filename': str(path/(stem+'login.ppm'))})
+        text = greeter_text(path/(stem+'login.ppm'), greeter)
         if greeter_visible(text, greeter):
             observed['greeter_prompt_seconds']=round(time.monotonic()-guest.started,3)
             break
@@ -359,20 +369,20 @@ def boot_proof(guest, password, receipt):
             raise TimeoutError('Installed disk did not reach the real SDDM greeter')
         time.sleep(1)
     time.sleep(2)
-    guest.qmp('screendump', {'filename': str(path/'login.ppm')})
-    text = greeter_text(path/'login.ppm', greeter)
+    guest.qmp('screendump', {'filename': str(path/(stem+'login.ppm'))})
+    text = greeter_text(path/(stem+'login.ppm'), greeter)
     receipt['installed_disk_boot'] = 'PASS: all ISOs detached; real password greeter observed'
     # Stock baseline keeps its reviewed click. The explicitly selected Platinum
     # theme already focuses the password; do not reuse the old click geometry.
     # Recognize the selected theme/account before sending a synthetic credential.
-    point = login_point(path/'login.ppm', text, greeter)
-    (path/'login-action.json').write_text(json.dumps(point)+'\n')
+    point = login_point(path/(stem+'login.ppm'), text, greeter)
+    (path/(stem+'login-action.json')).write_text(json.dumps(point)+'\n')
     submit_login(guest, password, point)
     observed['account_submitted_seconds']=round(time.monotonic()-guest.started,3)
     deadline = time.monotonic()+90
     while True:
-        guest.qmp('screendump', {'filename': str(path/'installed-desktop.ppm')})
-        text = subprocess.check_output(['tesseract', str(path/'installed-desktop.ppm'), 'stdout', '--psm', '11'],
+        guest.qmp('screendump', {'filename': str(path/(stem+'installed-desktop.ppm'))})
+        text = subprocess.check_output(['tesseract', str(path/(stem+'installed-desktop.ppm')), 'stdout', '--psm', '11'],
                                        stderr=subprocess.DEVNULL, text=True)
         if desktop_visible(text):
             observed['desktop_observed_seconds']=round(time.monotonic()-guest.started,3)
@@ -381,11 +391,45 @@ def boot_proof(guest, password, receipt):
             raise TimeoutError('Password login did not reach installed Platinum desktop')
         time.sleep(1)
     time.sleep(1)
-    guest.qmp('screendump', {'filename': str(path/'installed-desktop.ppm')})
+    guest.qmp('screendump', {'filename': str(path/(stem+'installed-desktop.ppm'))})
     receipt['password_login'] = 'PASS'
-    receipt['installed_display_captures'] = guest.capture_displays('installed-head')
+    receipt['installed_display_captures'] = guest.capture_displays(stem+'installed-head')
     receipt['password_login_evidence'] = 'Real SDDM authentication followed by installed Platinum desktop; ISOs detached; no target authentication changes'
     print('Installed-disk password login and desktop readiness passed.', flush=True)
+
+
+def restart_and_repeat_login(guest, password, receipt, gui=None):
+    """Request the installed desktop's normal Restart; never QMP-reset a pass."""
+    if gui is None:
+        source = Path(__file__).with_name('gui-drive.py')
+        spec = importlib.util.spec_from_file_location('installed_gui', source)
+        gui = importlib.util.module_from_spec(spec); spec.loader.exec_module(gui)
+    # The controller's reviewed one-output geometry only. Validate the actual
+    # frame before sending even the blank-desktop activation click.
+    gui.capture(guest, 'reboot-before', region=(0, 0, 1280, 800))
+    gui.click(guest, 600, 740)
+    words = gui.capture(guest, 'reboot-finder-menu', region=(0, 0, 1280, 26))
+    special = gui.matches(words, 'Special')
+    if len(special) != 1 or not 0 <= special[0]['y'] < 26:
+        raise ValueError('No unique Finder Special menu; no restart requested')
+    point = special[0]
+    gui.click(guest, point['x'], point['y'])
+    left = max(0, point['left'] - 15)
+    words = gui.capture(guest, 'reboot-special-menu', region=(left, 26, 240, 320))
+    positions = [gui.matches(words, name) for name in ('Sleep', 'Restart', 'Shut Down')]
+    if (any(len(found) != 1 for found in positions) or
+            not positions[0][0]['y'] < positions[1][0]['y'] < positions[2][0]['y'] or
+            any(not left <= found[0]['x'] < left+220 or not 26 <= found[0]['y'] < 300 for found in positions)):
+        raise ValueError('Unrecognized actual power menu; no restart requested')
+    restart = positions[1][0]
+    repeat = {key: receipt[key] for key in ('encrypted', 'greeter', 'unlock_ui', 'gpu', 'requested_output_capacity')}
+    repeat['request'] = 'Actual installed Finder Special menu Restart via QMP pointer; no force reset, SSH or target edits'
+    receipt['reboot_login'] = repeat
+    gui.click(guest, restart['x'], restart['y'])
+    # A fresh encrypted prompt after an authenticated desktop establishes a
+    # new startup; credentials are submitted only after the normal recognizers.
+    observe_installed_boot(guest, password, repeat, stem='reboot-')
+    repeat['ok'] = repeat.get('password_login') == 'PASS'
 
 
 def main(argv=None):
@@ -394,6 +438,7 @@ def main(argv=None):
     parser.add_argument('--gpu', choices=GPUS, default='virtio-vga')
     parser.add_argument('--outputs', type=int, choices=(1, 2), default=1)
     parser.add_argument('--gui', action='store_true', help='Drive the actual image installer GUI (requires --image-engine --boot-proof)')
+    parser.add_argument('--repeat-login', action='store_true', help='After GUI installation and first login, use the installed Finder Restart and repeat encrypted/password login')
     parser.add_argument('--occupied-gui', action='store_true', help='GUI proof with a synthetic existing partition; require its actual erase warning before confirmation')
     parser.add_argument('--verify-erase-return', action='store_true', help='With occupied GUI, require Return to cancel and preserve the full disk hash before explicit erase')
     parser.add_argument('--collect-boot-metrics', action='store_true', help='Collect read-only live-VM systemd timing/blame/critical-chain; no installed transport or host query')
@@ -417,6 +462,8 @@ def main(argv=None):
         parser.error('--interrupt-retry requires encrypted --image-engine --boot-proof, one virtio output, and no GUI/refusal/display-observation scenario')
     if args.gui and not (args.image_engine and args.boot_proof):
         parser.error('--gui requires --image-engine --boot-proof')
+    if args.repeat_login and not (args.gui and args.boot_proof and args.image_engine and not args.unencrypted):
+        parser.error('--repeat-login requires encrypted --gui --image-engine --boot-proof')
     if args.occupied_gui and not args.gui:
         parser.error('--occupied-gui requires --gui')
     if args.verify_erase_return and not args.occupied_gui:
@@ -711,6 +758,8 @@ RemainAfterExit=yes
                 'sudo -n python3 -I /run/pr-test/read-installed.py', 'installed-readback', input=password.encode()))
             if args.boot_proof:
                 boot_proof(guest, password, receipt)
+                if args.repeat_login:
+                    restart_and_repeat_login(guest, password, receipt)
             if args.interrupt_retry:
                 receipt['interrupted_retry']['ok']=bool(receipt['installed'] and receipt['installed_disk_boot'].startswith('PASS:') and receipt['password_login']=='PASS')
                 if not receipt['interrupted_retry']['ok']:raise RuntimeError('Reinstall did not complete every required boot/login stage')

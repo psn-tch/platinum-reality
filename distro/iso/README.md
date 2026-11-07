@@ -8,6 +8,57 @@ These are free-space floors, not a bound on arbitrary guest build growth.
 
 ## Status
 
+The November 6 source draft moves acquisition packages to a **builder-only**
+`package-repository` directory outside `profile/airootfs`. Official download
+signature policy is retained; the unsigned project repository's exception is
+limited to that builder cache. Its complete package hashes/provenance stay in
+the build receipts. The live and installed pacman configuration uses official
+mirrors without builder paths. Installation itself remains offline: the image
+policy declares the new immutable Squashfs copy mode. See
+[the installer design](../docs/live-root-install-design.md).
+
+This is a changed installation source requiring new image qualification.
+Historical R1/R3 receipts used the embedded-repository layout described below;
+they do not establish live-copy acceptance. The first size-oriented candidate selects xz Squashfs and GRUB for live UEFI
+boot. The installed target retains systemd-boot. The final ISO size and both
+boot/install paths still require actual qualification; no sub-2-GiB release is
+claimed here.
+
+### Size-oriented boot layout candidate (not yet boot-qualified)
+
+A controlled extraction of the exact update-36 immutable root, excluding only
+its package repository, verified all 154,239 regular-file sizes and all 823
+package records before recompression. Same four workers and 1-MiB blocks:
+
+| Squashfs compression | Actual archive bytes | Compression seconds |
+| --- | ---: | ---: |
+| zstd-15 | 1,856,626,688 | 69.028 |
+| zstd-19 | 1,768,247,296 | 219.668 |
+| xz | 1,704,099,840 | 240.018 |
+
+These are root-archive measurements, not completed ISO sizes or decompression
+benchmarks. The baseline ISO additionally has a 256,079,164-byte initramfs and a
+17,248,768-byte kernel in ISO9660, plus a 284,164,096-byte appended EFI partition.
+The systemd-boot layout duplicates boot payloads in that partition. Upstream
+[Archiso's GRUB mode](https://github.com/archlinux/archiso/blob/master/archiso/mkarchiso)
+places its EFI loader there and reads the kernel/initramfs from ISO9660. This
+motivates trying GRUB for **live media only** before cutting applications or
+firmware. The existing profile includes GRUB and its templates; mkarchiso must
+validate the builder's installed version and the resulting image must boot.
+
+A separate byte-preserving initramfs experiment found 230,184,960 bytes of
+uncompressed early CPIO. Recompressing only its main archive with xz-9e/CRC32
+kept the decompressed SHA256 identical but saved only 4,732,544 bytes per boot
+copy (31.354 seconds to compress). This supports keeping zstd for initramfs;
+it is not a boot qualification or a reason to remove broad CPU microcode.
+
+The candidate keeps the faster existing zstd live initramfs, all packages,
+firmware and BIOS Syslinux path. GRUB's normal entry inherits the same Plymouth
+arguments as the previous UEFI entry, boots without a menu delay and does not
+play an automatic tune. No target bootloader, encryption policy, physical-host
+guard or Secure Boot claim changes. Exact image receipts and R1/R3 evidence,
+not arithmetic estimates, decide whether this layout is accepted.
+
 R1 live-desktop proof passed on 2026-10-29: an unchanged ISO booted under OVMF
 with no network, target disk or manual input. Desktop readiness took **16.112 s**
 (guest uptime 12.43 s); QMP screenshot visually inspected. Package checks 36/36,

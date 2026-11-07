@@ -23,11 +23,13 @@ import secrets
 import resource
 import shutil
 import signal
+from contextlib import contextmanager
 
 BOOT_MOUNT = Path('/run/archiso/bootmnt')
 REPO = Path('/opt/platinum-reality/repo')
 BOOT_ASSETS = Path('/usr/lib/platinum-reality/installer-boot')
 BOOT_THEME = Path('/usr/share/plymouth/themes/platinum-reality')
+IMAGE_RECORD = Path('/opt/platinum-reality/image.json')
 BOOT_ASSET_FILES = {'scripts/boot-splash.py', 'packaging/plymouth/platinum-reality.plymouth',
                     'packaging/plymouth/platinum-reality.script.in'}
 MIN_DISK_BYTES = 16 * 1024**3
@@ -46,6 +48,34 @@ KEYMAP_PATTERN = r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}'
 ZONE_PATTERN = r'[A-Za-z0-9_+.-]+(?:/[A-Za-z0-9_+.-]+)*'
 SDDM_THEME_FILES = {f'usr/share/sddm/themes/platinum-reality/{name}'
                     for name in ('Main.qml', 'metadata.desktop', 'theme.conf')}
+LIVE_ROOT_EXCLUDES = (
+    'boot', 'dev', 'proc', 'sys', 'run', 'tmp', 'home', 'root', 'var/tmp', 'var/log',
+    'var/cache/pacman/pkg', 'etc/pacman.d/gnupg', 'etc/machine-id',
+    'var/lib/dbus/machine-id', 'var/lib/systemd/random-seed', 'var/lib/systemd/network',
+    'var/lib/iwd', 'var/lib/bluetooth', 'var/lib/cloud', 'var/lib/sddm',
+    'opt/platinum-reality/repo', 'usr/bin/platinum-reality-install',
+    'usr/lib/platinum-reality/installer-engine', 'usr/lib/platinum-reality/installer-boot')
+LIVE_ONLY_FILES = (
+    'etc/sddm.conf.d/10-platinum-live.conf', 'etc/sudoers.d/10-platinum-live',
+    'etc/ssh/sshd_config.d/10-archiso.conf', 'etc/mkinitcpio.conf.d/archiso.conf',
+    'etc/systemd/logind.conf.d/do-not-suspend.conf',
+    'etc/systemd/journald.conf.d/volatile-storage.conf',
+    'etc/systemd/resolved.conf.d/archiso.conf',
+    'etc/systemd/system/systemd-networkd-wait-online.service.d/wait-for-only-one-interface.conf',
+    'etc/systemd/network/20-ethernet.network', 'etc/systemd/network/20-wwan.network',
+    'etc/systemd/system/getty@tty1.service.d/autologin.conf',
+    'etc/systemd/system/getty@tty1.service.d/override.conf',
+    'etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf',
+    'etc/pacman.d/hooks/uncomment-mirrors.hook',
+    'etc/pacman.d/hooks/zzzz99-remove-custom-hooks-from-airootfs.hook',
+    'usr/local/lib/platinum-live-ready.py', 'usr/local/bin/choose-mirror',
+    'usr/local/bin/Installation_guide', 'usr/local/bin/livecd-sound',
+    'opt/platinum-reality/image.json', 'var/lib/pacman/db.lck', 'var/lib/alsa/asound.state')
+LIVE_UNITS = frozenset(('platinum-live-ready.service', 'pacman-init.service',
+    'etc-pacman.d-gnupg.mount', 'choose-mirror.service', 'livecd-alsa-unmuter.service',
+    'livecd-talk.service', 'sshd.service', 'cloud-init.target', 'cloud-init.service',
+    'cloud-init-local.service', 'cloud-init-network.service', 'cloud-config.service', 'cloud-final.service'))
+LIVE_ONLY_PACKAGES = frozenset(('archinstall', 'mkinitcpio-archiso', 'cloud-init'))
 
 
 class Refused(ValueError):
@@ -253,10 +283,11 @@ class Progress:
         self.send({'step': step, 'fraction': fraction, 'message': message})
 
 
-def tool(argv, *, input=None, capture=False):
+def tool(argv, *, input=None, capture=False, pass_fds=()):
     # Never put input (credentials) in diagnostics or exception text.
+    extra = {'pass_fds': tuple(pass_fds)} if pass_fds else {}
     result = subprocess.run([str(value) for value in argv], input=input, check=False, timeout=1800,
-        stdout=subprocess.PIPE if capture else sys.stderr, stderr=sys.stderr, env=TOOL_ENV)
+        stdout=subprocess.PIPE if capture else sys.stderr, stderr=sys.stderr, env=TOOL_ENV, **extra)
     if result.returncode:
         raise Refused('Installation command failed: '+str(argv[0]))
     return result.stdout if capture else None
@@ -355,6 +386,357 @@ def validate_repo(repo=REPO):
     if theme_packages != 1:
         raise Refused('Expected exactly one offline Platinum desktop package')
     validate_boot_assets()
+
+
+def live_root_checksum(raw):
+    """Archiso's detached checksum authenticates bytes, not a publisher."""
+    if not isinstance(raw, bytes) or len(raw) > 256:
+        raise Refused('Invalid immutable live-root checksum record')
+    try:
+        record = raw.decode('ascii')
+    except UnicodeDecodeError as error:
+        raise Refused('Invalid immutable live-root checksum encoding') from error
+    match = re.fullmatch(r'([0-9a-f]{128})[ \t]+\*?airootfs\.sfs\n?', record)
+    if not match:
+        raise Refused('Expected exactly the live-root checksum and filename')
+    return match[1]
+
+
+def live_account_records(records):
+    """Validate immutable account data before erasure; remove the live identity.
+
+    This pure transform never invokes account tools against live PIDs, prints
+    shadow contents, or accepts a caller-chosen username to delete.
+    """
+    columns = {'passwd': 7, 'shadow': 9, 'group': 4, 'gshadow': 4}
+    if set(records) != set(columns):
+        raise Refused('Incomplete immutable account databases')
+    tables = {}
+    for name, count in columns.items():
+        raw = records[name]
+        if not isinstance(raw, str) or len(raw.encode('utf-8')) > 128 * 1024 or '\0' in raw:
+            raise Refused('Invalid immutable account database')
+        rows = [line.split(':') for line in raw.splitlines() if line]
+        if (not rows or any(len(row) != count or not row[0] for row in rows) or
+                len({row[0] for row in rows}) != len(rows)):
+            raise Refused('Malformed or duplicate immutable account records')
+        tables[name] = rows
+    users = {row[0]: row for row in tables['passwd']}
+    root, live = users.get('root'), users.get('liveuser')
+    if (not root or root[2:4] != ['0', '0'] or not live or
+            live[2:4] != ['1000', '1000'] or live[5] != '/home/liveuser'):
+        raise Refused('Unexpected root/live account identities')
+    for row in users.values():
+        if not all(re.fullmatch(r'[0-9]+', row[i]) for i in (2, 3)):
+            raise Refused('Invalid immutable account IDs')
+        uid = int(row[2])
+        if ((uid == 0 and row[0] != 'root') or
+                (uid >= 1000 and row[0] not in ('liveuser', 'nobody')) or
+                (row[0] == 'nobody' and uid != 65534)):
+            raise Refused('Unexpected regular or privileged account in immutable image')
+    shadows = {row[0]: row for row in tables['shadow']}
+    if not set(users).issubset(shadows):
+        raise Refused('Immutable account/shadow identities differ')
+    for row in tables['shadow']:
+        if row[0] != 'liveuser' and (not row[1] or row[1][0] not in ('!', '*')):
+            raise Refused('Reusable password or unlocked account in immutable image')
+    groups = {row[0]: row for row in tables['group']}
+    if (groups.get('root', [None] * 4)[2] != '0' or
+            groups.get('liveuser', [None] * 4)[2] != '1000'):
+        raise Refused('Unexpected root/live group identities')
+    for row in tables['group']:
+        if not re.fullmatch(r'[0-9]+', row[2]):
+            raise Refused('Invalid immutable group ID')
+    output = {}
+    for name, rows in tables.items():
+        kept = []
+        for row in rows:
+            if row[0] == 'liveuser':
+                continue
+            row = row.copy()
+            for column in ((3,) if name == 'group' else (2, 3) if name == 'gshadow' else ()):
+                row[column] = ','.join(user for user in row[column].split(',')
+                                       if user and user != 'liveuser')
+            kept.append(':'.join(row))
+        output[name] = '\n'.join(kept) + '\n'
+    return output
+
+
+def installed_pacman_config(raw):
+    """Keep normal mirrors; discard only the live project's local repo stanza."""
+    if not isinstance(raw, str) or len(raw.encode('utf-8')) > 128 * 1024 or '\0' in raw:
+        raise Refused('Invalid immutable package-manager configuration')
+    kept, skipping, occurrences = [], False, 0
+    for line in raw.splitlines(keepends=True):
+        meaningful = line.split('#', 1)[0].strip()
+        section = re.fullmatch(r'\[([^\]]+)\]', meaningful)
+        if section:
+            skipping = section[1] == 'platinum-reality'
+            occurrences += skipping
+        if not skipping:
+            if 'file://' in meaningful:
+                raise Refused('Unexpected local package repository in immutable image')
+            kept.append(line)
+    if occurrences > 1:
+        raise Refused('Duplicate live repository configuration')
+    result = ''.join(kept)
+    if not re.search(r'(?m)^\s*\[core\]\s*(?:#.*)?$', result):
+        raise Refused('Installed Arch repository configuration is absent')
+    return result
+
+
+def bounded_regular(path, limit):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+            raise Refused('Expected a bounded regular installation-source record')
+        raw = stream.read(limit + 1)
+        if len(raw) > limit:
+            raise Refused('Installation-source record grew during reading')
+        return raw
+
+
+def image_policy(raw):
+    try:
+        policy = json.loads(raw, object_pairs_hook=unique_object)
+    except (ValueError, UnicodeDecodeError) as error:
+        raise Refused('Invalid immutable image policy') from error
+    if type(policy) is not dict or type(policy.get('version')) is not int:
+        raise Refused('Missing immutable image policy version')
+    return policy
+
+
+def installation_source_kind(path=None):
+    try:
+        policy = image_policy(bounded_regular(path or IMAGE_RECORD, 16384))
+    except FileNotFoundError:
+        return 'offline-repository'  # Retains the original fixture/legacy API.
+    if policy['version'] == 1 and 'installation_source' not in policy:
+        return 'offline-repository'
+    if policy['version'] == 2 and policy.get('installation_source') == 'live-squashfs-v1':
+        return 'live-squashfs'
+    raise Refused('Unsupported installation-source policy; no fallback')
+
+
+def live_root_inventory(listing):
+    """Read numeric unsquashfs metadata, keeping regular-file names and sizes."""
+    if len(listing) > 32 * 1024**2:
+        raise Refused('Unexpectedly large immutable filesystem inventory')
+    files = {}
+    for line in listing.decode('utf-8').splitlines():
+        if not line.startswith('-'):
+            continue
+        fields = line.split(maxsplit=5)
+        if (len(fields) != 6 or not fields[2].isdigit() or
+                not fields[5].startswith('squashfs-root/')):
+            raise Refused('Unrecognized immutable filesystem inventory')
+        name = fields[5].removeprefix('squashfs-root/')
+        if (name in files or name.startswith('/') or
+                any(part in ('', '.', '..') for part in name.split('/'))):
+            raise Refused('Invalid or duplicate immutable filesystem path')
+        files[name] = int(fields[2])
+    if not files:
+        raise Refused('Immutable filesystem inventory has no regular files')
+    return files
+
+
+def live_path_excluded(name):
+    return any(name == path or name.startswith(path + '/') for path in LIVE_ROOT_EXCLUDES)
+
+
+@contextmanager
+def authenticated_live_root(boot=None, engine_path=None):
+    """Keep the authenticated immutable source FD alive through installation."""
+    boot = boot or BOOT_MOUNT
+    for name in ('arch', 'arch/x86_64'):
+        parent = boot/name
+        if parent.is_symlink() or not parent.is_dir():
+            raise Refused('Unsupported live-root source path')
+    directory = boot/'arch/x86_64'
+    expected = live_root_checksum(bounded_regular(directory/'airootfs.sha512', 256))
+    fd = os.open(directory/'airootfs.sfs', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    with os.fdopen(fd, 'rb') as image:
+        info = os.fstat(image.fileno())
+        if (not stat.S_ISREG(info.st_mode) or not 4096 <= info.st_size <= 8 * 1024**3 or
+                image.read(4) != b'hsqs'):
+            raise Refused('Unsupported immutable live-root file')
+        image.seek(0)
+        if hashlib.file_digest(image, 'sha512').hexdigest() != expected:
+            raise Refused('Immutable live-root checksum mismatch; nothing erased')
+        image.seek(0)
+        descriptor = image.fileno()
+        name = '/proc/self/fd/' + str(descriptor)
+
+        def read(path, limit=128 * 1024):
+            raw = tool(['unsquashfs', '-cat', name, path], capture=True, pass_fds=(descriptor,))
+            if len(raw) > limit:
+                raise Refused('Unexpectedly large immutable source metadata')
+            return raw
+
+        policy = image_policy(read('opt/platinum-reality/image.json', 16384))
+        pin = policy.get('native_source', {})
+        if (policy['version'] != 2 or policy.get('installation_source') != 'live-squashfs-v1' or
+                type(pin) is not dict or
+                any(not isinstance(pin.get(k), str) or not re.fullmatch(r'[0-9a-f]{40}', pin[k])
+                    for k in ('commit', 'distribution_commit'))):
+            raise Refused('Live root does not declare the expected immutable source policy')
+        engine_bytes = read('usr/lib/platinum-reality/installer-engine', 1024**2)
+        running_engine = bounded_regular(engine_path or Path(__file__), 1024**2)
+        if (hashlib.sha256(engine_bytes).hexdigest() != pin.get('engine_sha256') or
+                engine_bytes != running_engine):
+            raise Refused('Running engine differs from the immutable installation source')
+        wrapper = read('usr/bin/platinum-reality-install')
+        if hashlib.sha256(wrapper).hexdigest() != pin.get('wrapper_sha256'):
+            raise Refused('Immutable installer wrapper provenance differs')
+        accounts = {key: read('etc/' + key).decode('utf-8')
+                    for key in ('passwd', 'shadow', 'group', 'gshadow')}
+        sanitized_accounts = live_account_records(accounts)
+        pacman = installed_pacman_config(read('etc/pacman.conf').decode('utf-8'))
+        listing = tool(['unsquashfs', '-lln', name], capture=True, pass_fds=(descriptor,))
+        files = live_root_inventory(listing)
+        if not SDDM_THEME_FILES.issubset(files.keys()):
+            raise Refused('Immutable live root lacks the target login theme')
+        paths = sorted(path for path in files if re.fullmatch(r'var/lib/pacman/local/[^/]+/desc', path))
+        if not paths or len(paths) > 4096:
+            raise Refused('Immutable installed package database is missing or unbounded')
+        descriptions = tool(['unsquashfs', '-cat', name, *paths], capture=True, pass_fds=(descriptor,))
+        if len(descriptions) > 16 * 1024**2:
+            raise Refused('Immutable installed package records are unbounded')
+        packages = re.findall(rb'(?m)^%NAME%\n([^\n]+)', descriptions)
+        if len(packages) != len(paths) or len(set(packages)) != len(packages):
+            raise Refused('Immutable installed package identities differ from their inventory')
+        names = {package.decode('ascii') for package in packages}
+        if not set(TARGET_PACKAGES).issubset(names) or 'networkmanager' in names:
+            raise Refused('Immutable live root lacks required target packages or has an unsupported network stack')
+        validate_boot_assets()
+        yield {'fd': descriptor, 'identity': (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns),
+               'accounts_original': accounts, 'accounts': sanitized_accounts,
+               'pacman_config': pacman, 'policy': policy, 'packages': names,
+               'files': {path: size for path, size in files.items() if not live_path_excluded(path)}}
+
+
+def live_target_path(root, name):
+    """Fixed target-relative paths only; never follow ancestors into the live OS."""
+    if (not isinstance(name, str) or name.startswith('/') or
+            any(part in ('', '.', '..') for part in name.split('/')) or
+            root.is_symlink() or not root.is_dir() or root.resolve() == Path('/')):
+        raise Refused('Invalid new-target path')
+    parent = root
+    for part in name.split('/')[:-1]:
+        parent = parent/part
+        if parent.is_symlink() or (parent.exists() and not parent.is_dir()):
+            raise Refused('Unexpected symlink or object in target path')
+    return root/name
+
+
+def unlink_live_target_file(root, name):
+    path = live_target_path(root, name)
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if not (stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)):
+        raise Refused('Unexpected object in live-only target cleanup')
+    path.unlink()  # A leaf symlink itself, never its destination.
+
+
+def sanitize_live_target(root, source):
+    # Check copied account bytes before changing them. No source/overlay paths
+    # are written, and a bad exclusion cannot silently retain a live home.
+    for name in ('passwd', 'shadow', 'group', 'gshadow'):
+        path = live_target_path(root, 'etc/' + name)
+        if bounded_regular(path, 128 * 1024).decode('utf-8') != source['accounts_original'][name]:
+            raise Refused('Copied account data differs from its immutable preflight')
+    for name, mode in (('home', 0o755), ('root', 0o700), ('dev', 0o755), ('proc', 0o755),
+                       ('sys', 0o755), ('run', 0o755), ('tmp', 0o1777),
+                       ('var/tmp', 0o1777), ('var/log', 0o755)):
+        path = live_target_path(root, name)
+        if path.is_symlink() or (path.exists() and (not path.is_dir() or any(path.iterdir()))):
+            raise Refused('Live home/runtime exclusion did not leave an empty target directory')
+        path.mkdir(parents=True, exist_ok=True, mode=mode)
+        os.chmod(path, mode)
+    sudoers = live_target_path(root, 'etc/sudoers')
+    directory = live_target_path(root, 'etc/sudoers.d')
+    if directory.is_symlink():
+        raise Refused('Unexpected target sudo-policy directory link')
+    policies = [sudoers] + (list(directory.iterdir()) if directory.is_dir() else [])
+    for path in policies:
+        if not path.exists() and not path.is_symlink():
+            continue
+        if path == root/'etc/sudoers.d/10-platinum-live':
+            continue
+        content = bounded_regular(path, 128 * 1024).decode('utf-8')
+        if any(re.search(r'\bNOPASSWD\s*:', line.split('#', 1)[0]) for line in content.splitlines()):
+            raise Refused('Unexpected inherited passwordless sudo policy')
+    for name in LIVE_ONLY_FILES:
+        unlink_live_target_file(root, name)
+    units = live_target_path(root, 'etc/systemd/system')
+    if units.is_symlink():
+        raise Refused('Unexpected system-service directory link')
+    if units.is_dir():
+        for path in list(units.rglob('*')):
+            if path.name in LIVE_UNITS:
+                unlink_live_target_file(root, path.relative_to(root).as_posix())
+    ssh = live_target_path(root, 'etc/ssh')
+    if ssh.is_symlink():
+        raise Refused('Unexpected SSH identity directory link')
+    if ssh.is_dir():
+        for path in ssh.glob('ssh_host_*'):
+            unlink_live_target_file(root, path.relative_to(root).as_posix())
+    for name, data in source['accounts'].items():
+        live_target_path(root, 'etc/' + name)
+        write_target(root, 'etc/' + name, data, 0o600 if name in ('shadow', 'gshadow') else 0o644)
+    for name in ('subuid', 'subgid'):
+        unlink_live_target_file(root, 'etc/' + name)
+        write_target(root, 'etc/' + name, '')
+    for name in ('etc/machine-id', 'var/lib/dbus/machine-id', 'var/lib/systemd/random-seed'):
+        unlink_live_target_file(root, name)
+    write_target(root, 'etc/machine-id', '', 0o444)
+    dbus = live_target_path(root, 'var/lib/dbus/machine-id')
+    dbus.parent.mkdir(parents=True, exist_ok=True)
+    dbus.symlink_to('../../../etc/machine-id')
+    live_target_path(root, 'etc/pacman.conf')
+    write_target(root, 'etc/pacman.conf', source['pacman_config'])
+    live_target_path(root, 'etc/crypttab')
+    write_target(root, 'etc/crypttab', '# Root unlock is described by the target-specific UKI.\n')
+    write_target(root, 'etc/motd', 'Platinum Reality\n')
+
+
+def copy_live_root(root, source):
+    descriptor = source['fd']
+    info = os.fstat(descriptor)
+    if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != source['identity']:
+        raise Refused('Immutable source identity changed after preflight')
+    # Unlike mksquashfs -e, unsquashfs needs -excludes BEFORE the archive;
+    # names after it then denote exclusions, not a selected subset to extract.
+    tool(['unsquashfs', '-force', '-no-progress', '-processors', '4', '-d', root,
+          '-excludes', '/proc/self/fd/' + str(descriptor), *LIVE_ROOT_EXCLUDES], pass_fds=(descriptor,))
+    after = os.fstat(descriptor)
+    if (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) != source['identity']:
+        raise Refused('Immutable source changed during extraction')
+    # A valid tool exit alone does not prove that it extracted the whole root.
+    # In particular, a mistaken selection option can produce a tiny valid tree.
+    for name, size in source['files'].items():
+        path = live_target_path(root, name)
+        try:
+            info = path.lstat()
+        except FileNotFoundError as error:
+            raise Refused('Immutable root extraction is incomplete') from error
+        if not stat.S_ISREG(info.st_mode) or info.st_size != size:
+            raise Refused('Immutable root extraction differs from its inventory')
+    for name in LIVE_ROOT_EXCLUDES:
+        path = live_target_path(root, name)
+        # The ESP is deliberately mounted before copying. Nothing else excluded
+        # may have been extracted, including empty directory entries or links.
+        if name != 'boot' and (path.exists() or path.is_symlink()):
+            raise Refused('Live-only source exclusion failed')
+    sanitize_live_target(root, source)
+    # All privileged commands operate on the fresh target. Do not copy live
+    # machine identity or a live signing key into the installed system.
+    tool(['systemd-machine-id-setup', '--root', root])
+    tool(['arch-chroot', root, 'pacman-key', '--init'])
+    tool(['arch-chroot', root, 'pacman-key', '--populate', 'archlinux'])
 
 
 def locale_definitions(locale_gen=Path('/etc/locale.gen'), supported=Path('/usr/share/i18n/SUPPORTED')):
@@ -547,7 +929,7 @@ def configure_target(root, config, credentials, root_uuid, esp_uuid, luks_uuid):
     install_boot_theme(root)
 
 
-def perform_install(config, expected, credentials, progress):
+def perform_install(config, expected, credentials, progress, *, source=None):
     # Temporary paths contain NO password/passphrase. All mounts/mappers are
     # invocation-owned and cleaned in reverse order, including on exceptions.
     mapper = None
@@ -586,13 +968,24 @@ def perform_install(config, expected, credentials, progress):
             progress.update('mount', .3, 'Mounting the new destination')
             tool(['mount', root_device, root]); mounted_root = True
             (root/'boot').mkdir(); tool(['mount', parts[1], root/'boot']); mounted_esp = True
-            pacman = work/'pacman.conf'
-            pacman.write_text('[options]\nArchitecture=auto\nSigLevel=Required DatabaseOptional\n\n'
-                              '[platinum-reality]\nSigLevel=Optional TrustAll\nServer=file://'+str(REPO)+'\n')
-            progress.update('packages', .4, 'Installing exclusively from the offline repository')
-            tool(['pacstrap', '-K', '-C', pacman, root, *TARGET_PACKAGES])
+            if source is None:
+                pacman = work/'pacman.conf'
+                pacman.write_text('[options]\nArchitecture=auto\nSigLevel=Required DatabaseOptional\n\n'
+                                  '[platinum-reality]\nSigLevel=Optional TrustAll\nServer=file://'+str(REPO)+'\n')
+                progress.update('packages', .4, 'Installing exclusively from the offline repository')
+                tool(['pacstrap', '-K', '-C', pacman, root, *TARGET_PACKAGES])
+            else:
+                progress.update('packages', .4, 'Installing from the checked immutable live image')
+                copy_live_root(root, source)
             progress.update('configure', .7, 'Creating the account and system settings')
             configure_target(root, config, credentials, root_uuid, esp_uuid, luks_uuid)
+            if source is not None:
+                remove = sorted(source['packages'] & LIVE_ONLY_PACKAGES)
+                if remove:
+                    # Run hooks only after the target's kernel/configuration is
+                    # ready; never ask a package script to stop live PID 1 units.
+                    tool(['arch-chroot', root, 'env', 'SYSTEMD_OFFLINE=1', 'pacman',
+                          '-Rns', '--noconfirm', *remove])
             progress.update('bootloader', .85, 'Building the installed UKI and systemd-boot')
             tool(['arch-chroot', root, 'mkinitcpio', '-P'])
             tool(['arch-chroot', root, 'bootctl', '--esp-path=/boot', '--no-variables', 'install'])
@@ -644,9 +1037,15 @@ def install(config, confirm, progress):
     credentials = read_secrets(sys.stdin.buffer, config['encrypt'])
     try:
         validate_locale_and_keymap(config)
-        progress.update('validate', 0., 'Checking offline package integrity before erasing anything')
-        validate_repo()
-        perform_install(config, expected, credentials, progress)
+        kind = installation_source_kind()
+        if kind == 'offline-repository':
+            progress.update('validate', 0., 'Checking offline package integrity before erasing anything')
+            validate_repo()
+            perform_install(config, expected, credentials, progress)
+        else:
+            progress.update('validate', 0., 'Checking the immutable live image before erasing anything')
+            with authenticated_live_root() as source:
+                perform_install(config, expected, credentials, progress, source=source)
     finally:
         credentials.clear()  # Lifetime reduction, not a claim of Python memory zeroization.
 

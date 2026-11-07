@@ -1,5 +1,38 @@
 # R2 installer engine — encrypted VM installation and password login proved
 
+## Immutable live-root mode (new source; image qualification pending)
+
+The November 6 distribution draft adds a second **offline** source, while
+keeping the public configuration/secret/progress interface at version 1.
+New images declare `version: 2` and
+`installation_source: "live-squashfs-v1"` in their immutable image policy.
+Existing version-1 images retain repository/pacstrap installation. Unknown
+policies refuse; a failed live copy never falls back to a network or repository.
+
+Before erasure the engine verifies the boot medium's detached Squashfs SHA512,
+its embedded source/engine/wrapper policy, account databases, installed package
+inventory and login/boot assets. It holds the verified source descriptor through
+copying. This checksum checks same-media integrity; it is not a release signature.
+The running overlay and its users, settings and test transports are not sources.
+
+The copier excludes the ESP, homes, runtime trees, repository and live-only
+installer payload. It checks every expected regular file's presence/type/size
+against the immutable archive inventory before accepting extraction, then
+sanitizes accounts, autologin, sudo, SSH and machine/package-keyring identity.
+Existing target account, network, encrypted UKI and greeter setup are reused.
+Live-only package removal runs after target kernel/configuration setup, inside
+the target with `SYSTEMD_OFFLINE=1`. Mount failure handling remains unchanged.
+
+`python3 -I distro/installer-engine/live-root-checks.py` covers the new source
+boundaries with synthetic files and captured commands; `checks.py` retains the
+legacy engine contracts. See [the design](../docs/live-root-install-design.md).
+These checks do **not** qualify a live-copy installation. All earlier actual
+install receipts below used the legacy repository source. A newly pinned image,
+encrypted GUI install, detached login and installed/reboot checks remain required.
+The QEMU-only guard remains on.
+
+## Existing repository-mode contract and evidence
+
 The source implements Sammy's version-1 disks/plan/install interface. It is
 **not ready for physical installation or public deployment**. Root execution
 is refused outside QEMU/KVM Arch live media. No host sudo, real disks or host

@@ -21,6 +21,41 @@ def digest(path):
         return hashlib.file_digest(source, 'sha256').hexdigest()
 
 
+def repository_config(work, profile):
+    """The acquisition cache is a builder input, never part of the live root."""
+    repo = work/'package-repository'
+    embedded = profile/'airootfs/opt/platinum-reality/repo'
+    if embedded.exists() or embedded.is_symlink():
+        raise RuntimeError('Refusing an embedded legacy repository in live-copy mode')
+    repo.mkdir()
+    upstream = (profile/'pacman.conf').read_text()
+    lines = upstream.splitlines(keepends=True)
+    active = [line.split('#', 1)[0].strip() for line in lines]
+    if active.count('[core]') != 1 or any('file://' in line for line in active):
+        raise RuntimeError('Expected official upstream package configuration')
+    local = f'\n[platinum-reality]\nSigLevel = Optional TrustAll\nServer = file://{repo}\n\n'
+    # Releng documents a commented file:// custom-repo example. Neither that
+    # example nor a commented #[core] enables a repository or an insertion site.
+    lines[active.index('[core]')] = local + lines[active.index('[core]')]
+    (profile/'pacman.conf').write_text(''.join(lines))
+    # Installed/live package management uses normal Arch mirrors. This does not
+    # make installation online: the installer extracts the immutable Squashfs.
+    target = profile/'airootfs/etc/pacman.conf'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(upstream)
+    return repo
+
+
+def write_image_policy(profile, pin, package):
+    path = profile/'airootfs/opt/platinum-reality/image.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        'version': 2, 'installation_source': 'live-squashfs-v1',
+        'native_source': pin, 'package_sha256': digest(package),
+        'scope': 'VM-only unsigned prototype; immutable live-root installation; '
+                 'live engine and passwordless wrapper are not target packages.'}, indent=2)+'\n')
+
+
 def main():
     if os.geteuid() != 0 or socket.gethostname() != 'pr-iso-builder':
         raise SystemExit('Guest root in pr-iso-builder is required; never run on a host.')
@@ -33,19 +68,10 @@ def main():
     pin = json.loads((work/'pin.json').read_text())
     environment = dict(os.environ, SOURCE_DATE_EPOCH=str(pin['source_date_epoch']))
     profile = work/'profile'
-    repo = profile/'airootfs/opt/platinum-reality/repo'
-    repo.mkdir(parents=True)
+    repo = repository_config(work, profile)
     shutil.copy2(package, repo/package.name)
     db = repo/'platinum-reality.db.tar.gz'
     run(['repo-add', db, repo/package.name], env=environment)
-    local = f'\n[platinum-reality]\nSigLevel = Optional TrustAll\nServer = file://{repo}\n\n'
-    upstream = (profile/'pacman.conf').read_text()
-    # Custom repo BEFORE official repos; signature policy is scoped to this
-    # unsigned prototype repo, not official package downloads.
-    config = upstream.replace('[core]', local+'[core]', 1)
-    (profile/'pacman.conf').write_text(config)
-    (profile/'airootfs/etc/pacman.conf').write_text(upstream.replace(
-        '[core]', local.replace(str(repo), '/opt/platinum-reality/repo')+'[core]', 1))
     # Empty installed-package DB is essential: -Sw must include the entire
     # closure, even dependencies already present in the build guest.
     download_db = work/'download-db'
@@ -63,11 +89,9 @@ def main():
             sha = hashlib.file_digest(stream, 'sha256').hexdigest()
         inventory.append({'file': path.name, 'size_bytes': path.stat().st_size, 'sha256': sha})
     record = {'native_source': pin, 'archiso': subprocess.check_output(['pacman', '-Q', 'archiso'], text=True).strip(),
-              'repo_signing': 'UNSIGNED R1 prototype; local repo Optional TrustAll only',
+              'repo_signing': 'UNSIGNED builder-only prototype repo; Optional TrustAll local cache only',
               'packages': inventory, 'assets': 'Original project splash only; no chime or user imports.'}
-    (profile/'airootfs/opt/platinum-reality/image.json').write_text(json.dumps({
-        'version': 1, 'native_source': pin, 'package_sha256': digest(package),
-        'scope': 'VM-only unsigned prototype; live engine and passwordless wrapper are not target packages.'}, indent=2)+'\n')
+    write_image_policy(profile, pin, package)
     (repo/'provenance.json').write_text(json.dumps(record, indent=2)+'\n')
     shutil.copy2(repo/'provenance.json', work/'provenance.json')
     # Rebrand date is an explicit input, rather than a clock read in profiledef.

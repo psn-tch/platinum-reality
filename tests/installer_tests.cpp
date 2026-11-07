@@ -11,7 +11,8 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
+#include <QDialog>
+#include <QStandardItemModel>
 #include <QPushButton>
 #include <QMessageBox>
 #include <QTimer>
@@ -46,15 +47,18 @@ class InstallerTests final : public QObject
         QVERIFY(!find<QPushButton>(window, "installer-back")->isEnabled());
         next->click();
         QCOMPARE(window.page(), InstallerWindow::Destination);
-        auto *disks = find<QListWidget>(window, "installer-disks");
+        auto *disks = find<QComboBox>(window, "installer-disks");
         QTRY_COMPARE(disks->count(), 2);
-        // The installation disk itself cannot be chosen.
-        QVERIFY(!(disks->item(0)->flags() & Qt::ItemIsEnabled));
-        QVERIFY(disks->item(0)->text().contains("the installation disk"));
-        QVERIFY(!next->isEnabled());
-        disks->setCurrentRow(1);
+        // The installation disk itself is listed dimmed and can't be chosen; as in 9.2.2, the first disk
+        // that can be is chosen to begin with, and the button is Select.
+        auto *model = qobject_cast<QStandardItemModel *>(disks->model());
+        QVERIFY(model && !model->item(0)->isEnabled());
+        QVERIFY(disks->itemText(0).contains("the installation disk"));
+        QCOMPARE(disks->currentIndex(), 1);
+        QVERIFY(disks->currentText().contains("Hard Disk — 64 GB (/dev/vda)"));
+        QCOMPARE(next->text(), QString("Select"));
         QVERIFY(next->isEnabled());
-        QVERIFY(disks->item(1)->text().contains("Hard Disk — 64 GB (/dev/vda)"));
+        QVERIFY(find<QLabel>(window, "installer-destination-note")->text().contains("erased when you click Start"));
         next->click();
         QCOMPARE(window.page(), InstallerWindow::Information);
         next->click();
@@ -107,7 +111,7 @@ class InstallerTests final : public QObject
         find<QLineEdit>(window, "installer-computer-name")->setText("platinum-g4");
         next->click();
         QCOMPARE(window.page(), InstallerWindow::Install);
-        QCOMPARE(next->text(), QString("Install"));
+        QCOMPARE(next->text(), QString("Start"));
         QVERIFY(find<QLabel>(window, "installer-summary")->text().contains("/dev/vda"));
         QVERIFY(find<QLabel>(window, "installer-summary")->text().contains("The disk will be encrypted"));
         // Go Back keeps every answer.
@@ -149,7 +153,7 @@ class InstallerTests final : public QObject
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
         find<QPushButton>(window, "installer-continue")->click(); // Destination starts disk discovery.
-        QTRY_COMPARE(find<QListWidget>(window, "installer-disks")->count(), 2);
+        QTRY_COMPARE(find<QComboBox>(window, "installer-disks")->count(), 2);
         bool observed = false, timedOut = false;
         QTimer poll, watchdog;
         poll.setInterval(10); watchdog.setSingleShot(true);
@@ -214,7 +218,8 @@ class InstallerTests final : public QObject
         next->click();
         QTRY_COMPARE(window.page(), InstallerWindow::Finished);
         QVERIFY(find<QPushButton>(window, "installer-restart")->isVisible());
-        QVERIFY(find<QLabel>(window, "installer-finished-text")->text().startsWith("Platinum Reality was installed."));
+        QVERIFY(find<QLabel>(window, "installer-finished-text")->text().startsWith("The installation process has finished."));
+        QVERIFY(find<QPushButton>(window, "installer-restart")->isDefault());
         const auto made = calls(log);
         QCOMPARE(made.size(), 4); // Disks, the cancelled plan, the plan, the installation.
         QCOMPARE(made[2].value("argv").toArray().first().toString(), QString("plan"));
@@ -262,8 +267,7 @@ class InstallerTests final : public QObject
         auto *next = find<QPushButton>(window, "installer-continue");
         snap("1-welcome");
         next->click();
-        QTRY_COMPARE(find<QListWidget>(window, "installer-disks")->count(), 2);
-        find<QListWidget>(window, "installer-disks")->setCurrentRow(1);
+        QTRY_COMPARE(find<QComboBox>(window, "installer-disks")->count(), 2);
         snap("2-destination");
         next->click();
         snap("3-information");
@@ -283,9 +287,16 @@ class InstallerTests final : public QObject
         QCOMPARE(window.page(), InstallerWindow::Install);
         snap("6-install");
         window.setConfirmationAnswers(true, true);
+        connect(&window, &InstallerWindow::pageChanged, &window, [&](InstallerWindow::Page shown) {
+            if (shown == InstallerWindow::Progress && !evidence.isEmpty())
+                window.grab().save(evidence + "/installer-6b-progress.png");
+        });
         next->click();
         QTRY_COMPARE(window.page(), InstallerWindow::Finished);
-        snap("7-finished");
+        auto *alert = window.findChild<QDialog *>("installer-finished");
+        QTRY_VERIFY(alert && alert->isVisible());
+        if (!evidence.isEmpty())
+            QVERIFY(alert->grab().save(evidence + "/installer-7-finished.png"));
     }
     void returnPressesContinueFromWhateverHasFocus()
     {
@@ -298,13 +309,12 @@ class InstallerTests final : public QObject
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
         auto *back = find<QPushButton>(window, "installer-back");
-        auto *disks = find<QListWidget>(window, "installer-disks");
+        auto *disks = find<QComboBox>(window, "installer-disks");
         QTest::keyClick(&window, Qt::Key_Return);
         QCOMPARE(window.page(), InstallerWindow::Destination);
-        QTRY_COMPARE(disks->count(), 2);
-        QTest::keyClick(disks, Qt::Key_Return); // No disk chosen yet: Continue is dimmed, nothing happens.
+        QTest::keyClick(&window, Qt::Key_Return); // Before the disks are listed, Select is dimmed.
         QCOMPARE(window.page(), InstallerWindow::Destination);
-        disks->setCurrentRow(1);
+        QTRY_COMPARE(disks->count(), 2);
         back->setFocus();
         QTest::keyClick(back, Qt::Key_Return); // Go Back has focus, but Return is Continue.
         QCOMPARE(window.page(), InstallerWindow::Information);
@@ -332,7 +342,7 @@ class InstallerTests final : public QObject
         find<QLineEdit>(window, "installer-computer-name")->setText("platinum-g4");
         QTest::keyClick(name, Qt::Key_Return);    // From a text field, too.
         QCOMPARE(window.page(), InstallerWindow::Install);
-        QTest::keyClick(&window, Qt::Key_Return); // Install asks first; the answer here is Cancel.
+        QTest::keyClick(&window, Qt::Key_Return); // Start asks first; the answer here is Cancel.
         QCOMPARE(window.page(), InstallerWindow::Install);
     }
     void keyboardOnlyTourUsesRealQuestionsAndReturnNeverInstalls()
@@ -365,11 +375,11 @@ class InstallerTests final : public QObject
         };
         key(Qt::Key_Return);
         QCOMPARE(window.page(),InstallerWindow::Destination);
-        auto *disks=find<QListWidget>(window,"installer-disks");
+        auto *disks=find<QComboBox>(window,"installer-disks");
         QTRY_COMPARE(disks->count(),2);
         QVERIFY(tabTo("installer-disks"));
-        key(Qt::Key_Down);
-        QCOMPARE(disks->currentRow(),1);
+        key(Qt::Key_Up); // The dimmed installation disk can't be chosen from the keyboard either.
+        QCOMPARE(disks->currentIndex(),1);
         key(Qt::Key_Return);
         QCOMPARE(window.page(),InstallerWindow::Information);
         QVERIFY(tabTo("installer-back"));
@@ -427,11 +437,7 @@ class InstallerTests final : public QObject
             key(Qt::Key_Home);key(Qt::Key_Down);
             QCOMPARE(combo->currentIndex(),1);
         }
-        QVERIFY(tabTo("installer-encrypt"));
-        auto *encrypt=find<QCheckBox>(window,"installer-encrypt");
-        QVERIFY(encrypt->isChecked());
-        key(Qt::Key_Space);QVERIFY(!encrypt->isChecked());
-        key(Qt::Key_Space);QVERIFY(encrypt->isChecked());
+        QVERIFY(find<QCheckBox>(window,"installer-encrypt")->isChecked()); // Destination ▸ Options…
         key(Qt::Key_Return);
         QCOMPARE(window.page(),InstallerWindow::Install);
         questionMode=1;poll.start();watchdog.start(3000);
@@ -454,7 +460,9 @@ class InstallerTests final : public QObject
         QVERIFY(config.value("encrypt").toBool());
         for(auto pair:{std::pair{"locale","installer-language"},{"timezone","installer-time-zone"},{"keymap","installer-keymap"}})
             QCOMPARE(config.value(pair.first).toString(),find<QComboBox>(window,pair.second)->currentData().toString());
-        if(QGuiApplication::platformName()=="offscreen"){window.activateWindow();QCoreApplication::processEvents();}
+        auto *alert=window.findChild<QDialog *>("installer-finished");
+        QTRY_VERIFY(alert && alert->isVisible());
+        if(QGuiApplication::platformName()=="offscreen"){alert->activateWindow();QCoreApplication::processEvents();}
         QVERIFY(tabTo("installer-restart")); // Reachability only: do not restart anything.
     }
     void tabMovesThroughTheAccountPageInReadingOrder()
@@ -470,8 +478,7 @@ class InstallerTests final : public QObject
         window.activateWindow();
         auto *next = find<QPushButton>(window, "installer-continue");
         next->click();
-        QTRY_COMPARE(find<QListWidget>(window, "installer-disks")->count(), 2);
-        find<QListWidget>(window, "installer-disks")->setCurrentRow(1);
+        QTRY_COMPARE(find<QComboBox>(window, "installer-disks")->count(), 2);
         next->click();
         next->click();
         window.setConfirmationAnswers(true, false);
@@ -487,8 +494,8 @@ class InstallerTests final : public QObject
         }
         QCOMPARE(visited, (QStringList{"installer-full-name", "installer-user-name", "installer-password",
                                        "installer-verify", "installer-computer-name", "installer-language",
-                                       "installer-time-zone", "installer-keymap", "installer-encrypt",
-                                       "installer-back"}));
+                                       "installer-time-zone", "installer-keymap", "installer-back",
+                                       "installer-full-name"})); // Start is dimmed until the account is filled in.
     }
     void aFailedInstallSaysWhereItStoppedAndOffersNoRestart()
     {
@@ -514,7 +521,8 @@ class InstallerTests final : public QObject
         const auto text = find<QLabel>(window, "installer-finished-text")->text();
         QVERIFY(text.contains("The disk could not be erased."));
         // It failed after erasing began: say so plainly, never "nothing was changed".
-        QVERIFY(text.contains("already started erasing /dev/vda, so what was on it before is gone"));
+        QVERIFY2(text.contains("already started erasing “Hard Disk — 64 GB (/dev/vda)”, so what was on it before is gone"),
+                 qPrintable(text));
         QVERIFY(!text.contains("Nothing was changed"));
     }
     void aRefusalBeforeErasingSaysTheDiskWasNotChanged()
@@ -531,7 +539,7 @@ class InstallerTests final : public QObject
         find<QPushButton>(window, "installer-continue")->click();
         QTRY_COMPARE(window.page(), InstallerWindow::Finished);
         const auto text = find<QLabel>(window, "installer-finished-text")->text();
-        QVERIFY2(text.contains("Nothing was changed: /dev/vda was not erased."), qPrintable(text));
+        QVERIFY2(text.contains("Nothing was changed: “Hard Disk — 64 GB (/dev/vda)” was not erased."), qPrintable(text));
         QVERIFY(!text.contains("already started erasing"));
     }
     void theAccountPageOffersWhatTheLiveImageCanInstall()
@@ -577,6 +585,36 @@ class InstallerTests final : public QObject
         QCOMPARE(find<QComboBox>(window, "installer-language")->count(), 1);
         QCOMPARE(find<QComboBox>(window, "installer-keymap")->count(), 8);
         QVERIFY(find<QLabel>(window, "installer-summary")->text().contains("/dev/vda")); // No error shown.
+    }
+    void destinationOptionsChooseEncryptionAndCancelKeepsTheChoice()
+    {
+        // 9.2.2's Select Destination ▸ Options… asked about a clean installation; here it is encryption.
+        QTemporaryDir root;
+        qputenv("FAKE_ENGINE_LOG", root.filePath("engine.jsonl").toLocal8Bit());
+        qunsetenv("FAKE_ENGINE_FAIL");
+        EngineClient engine(QFINDTESTDATA("fake_install_engine.py"));
+        InstallerWindow window(&engine, "Read me.", "MIT License");
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *options = find<QPushButton>(window, "installer-options");
+        QVERIFY(!options->isVisible());
+        find<QPushButton>(window, "installer-continue")->click();
+        QTRY_COMPARE(find<QComboBox>(window, "installer-disks")->count(), 2);
+        QVERIFY(options->isVisible());
+        auto *encrypt = find<QCheckBox>(window, "installer-encrypt");
+        const auto answer = [&](bool ok) {
+            QTimer::singleShot(50, &window, [&, ok] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                QVERIFY(dialog && encrypt->isVisible());
+                encrypt->click();
+                ok ? dialog->accept() : dialog->reject();
+            });
+            options->click();
+        };
+        answer(false); // Cancel: still encrypted.
+        QVERIFY(encrypt->isChecked());
+        answer(true);  // OK: not encrypted.
+        QVERIFY(!encrypt->isChecked());
     }
     void aMissingEngineIsReportedOnTheDestinationPage()
     {

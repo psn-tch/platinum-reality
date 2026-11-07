@@ -1,5 +1,30 @@
 # Owned VM proofs
 
+## New source controls: repeated login and live-copy hygiene
+
+`qualify-install.py IMAGE.iso --gui --greeter platinum --unlock-ui plymouth
+--repeat-login` adds a second startup after the first authenticated desktop.
+The controller activates Finder, recognizes the actual Special menu and its
+Sleep/Restart/Shut Down rows, and clicks Restart. It reuses the real encrypted
+unlock and password-login recognizers, with separate `reboot-*` frames and a
+`reboot_login` receipt. It never forces a QMP reset, adds installed SSH access,
+edits authentication or saves the synthetic credential for later use. The
+one-output 1280×800 fixture restriction remains. A missing/ambiguous menu or
+missing second unlock/login fails the requested proof rather than passing a
+reset in its place. Capture timings remain offsets within the same QEMU run.
+
+The read-only target helper also checks explicit live-copy images for leftover
+live identities, passwordless sudo/autologin, privileged installer/cache/cloud
+state, enabled live services, source-mode kernel parameters and live-only
+packages. It checks the installed machine identity, keyring and normal mirrors
+without printing shadow data. Legacy repository-image readback is unchanged.
+
+`repeat-login-checks.py` and `read-installed-checks.py` use synthetic captures
+and temporary files, with no VM or power operation. These are **new test
+capabilities, not completed acceptance**. Historical receipts below do not gain
+reboot or hygiene claims. A real image run and actual frame review are required;
+other installed-feature protocol checks remain separate.
+
 ## Latest acceptance (November 1)
 
 Canonical update-29 image **cc5ed36d** passed the real occupied-disk GUI control
