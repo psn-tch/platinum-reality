@@ -466,12 +466,17 @@ Rectangle {
             {separator:true,action:"separator"},
             {text:"About Platinum Reality…",action:"about"}]
     }
+    // A strip menu lays itself out under the still pointer as it appears; the row that passes under
+    // it isn't being pointed at. Until the pointer has had a moment, entering a row opens no submenu
+    // (every Handheld menu capture showed Charge Limit's open by itself, and a click there was lost).
+    property real stripMenuOpenedAt:0
     function openStripModule(module, anchor) {
         if(manager.shellModal)return
         if(stripModule===module){closeMenu();return}
         closeMenu(false);manager.beginMenu()
         let origin=anchor.mapToItem(desktop,0,0)
         stripAnchor=Qt.rect(origin.x,origin.y,anchor.width,anchor.height)
+        stripMenuOpenedAt=Date.now()
         stripModule=module
         if(["sound","monitors","wifi"].includes(module))quickControls.service.refresh()
         if(module==="handheld")manager.handheld.refresh()
@@ -1231,7 +1236,9 @@ Rectangle {
             Text{visible:Boolean(modelData.key);objectName:"menu-key-"+(modelData.text?modelData.text:"");anchors.right:parent.right;anchors.rightMargin:10;anchors.verticalCenter:parent.verticalCenter
                 text:modelData.key?modelData.key:"";textFormat:Text.PlainText;font.pixelSize:12;color:modelData.enabled===false?"#888":row.lit?"white":"black"}
             MouseArea{id:entryMouse;anchors.fill:parent;enabled:!modelData.separator && modelData.enabled!==false;hoverEnabled:true
-                onEntered:if(!row.submenuRow){if(modelData.children)desktop.openShellSubmenu(index,modelData.children,row.mapToItem(desktop,0,0).y);else desktop.openSubmenu=-1}
+                onEntered:if(!row.submenuRow && !(desktop.stripModule!=="" && Date.now()-desktop.stripMenuOpenedAt<300)){if(modelData.children)desktop.openShellSubmenu(index,modelData.children,row.mapToItem(desktop,0,0).y);else desktop.openSubmenu=-1}
+                onPositionChanged:if(!row.submenuRow && modelData.children && desktop.openSubmenu!==index && desktop.stripModule!=="" &&
+                                     Date.now()-desktop.stripMenuOpenedAt>=300)desktop.openShellSubmenu(index,modelData.children,row.mapToItem(desktop,0,0).y)
                 onClicked:if(modelData.children)desktop.openShellSubmenu(index,modelData.children,row.mapToItem(desktop,0,0).y);else desktop.chooseShellEntry(row.objectName,modelData.action,modelData.id)}
         }
     }

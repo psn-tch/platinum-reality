@@ -38,6 +38,9 @@ const char *const titles[] = {"Welcome", "Select Destination", "Important Inform
                               "Your Account", "Install Software", "Install Software", "Install Software"};
 const QColor bandColor("#ccccff"), pageColor("#eeeeee"), footerColor("#dddddd"), etchColor("#777777");
 
+// The install engine's own minimum (distro/installer-engine/engine.py MIN_DISK_BYTES).
+constexpr qint64 minimumDiskBytes = 16LL * 1024 * 1024 * 1024;
+
 QString sizeText(qint64 bytes)
 {
     const double gb = bytes / 1e9;
@@ -596,7 +599,7 @@ QWidget *InstallerWindow::destinationPage()
     label->setFont(font);
     m_disks = new PopupMenu;
     m_disks->setObjectName("installer-disks");
-    m_disks->setMinimumWidth(240);
+    m_disks->setMinimumWidth(330);
     headerRow->addWidget(label);
     headerRow->addWidget(m_disks);
     group->setHeader(header);
@@ -716,11 +719,14 @@ QWidget *InstallerWindow::accountPage()
     m_computerName->setObjectName("installer-computer-name");
     m_timeZone = new PopupMenu;
     m_timeZone->setObjectName("installer-time-zone");
+    // UTC first: the live disk's own clock, and the start when the computer's zone isn't known. Starting
+    // on the list's first zone (Africa/Abidjan) set strangers' clocks wrong (update-37 image, 2026-11-07).
+    m_timeZone->addItem("UTC");
     for (const auto &zone : QTimeZone::availableTimeZoneIds())
         if (zone.contains('/') && !zone.startsWith("Etc/"))
             m_timeZone->addItem(QString::fromLatin1(zone));
     const auto local = QString::fromLatin1(QTimeZone::systemTimeZoneId());
-    m_timeZone->setCurrentIndex(std::max(0, m_timeZone->findText(local.isEmpty() ? "America/Denver" : local)));
+    m_timeZone->setCurrentIndex(std::max(0, m_timeZone->findText(local)));
     m_keymap = new PopupMenu;
     m_keymap->setObjectName("installer-keymap");
     m_keymap->addItems({"us", "uk", "de", "fr", "es", "it", "dvorak", "colemak"});
@@ -968,7 +974,7 @@ void InstallerWindow::applyChoices(const QJsonObject &choices)
     };
     const auto same = [](const QString &item) { return item; };
     fill(m_language, names("locales", QRegularExpression("^[A-Za-z][A-Za-z0-9_@.-]{0,63}$")), "en_US.UTF-8", languageName);
-    fill(m_timeZone, names("timezones", QRegularExpression("^[A-Za-z0-9_+.-]+(/[A-Za-z0-9_+.-]+)*$")), "America/Denver", same);
+    fill(m_timeZone, names("timezones", QRegularExpression("^[A-Za-z0-9_+.-]+(/[A-Za-z0-9_+.-]+)*$")), "UTC", same);
     fill(m_keymap, names("keymaps", QRegularExpression("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")), "us", same);
 }
 
@@ -982,13 +988,17 @@ void InstallerWindow::showDisks(const QVariantList &disks)
     {
         const auto disk = value.toMap();
         const bool boot = disk.value("is_boot_medium").toBool();
+        // An empty CD drive or card reader (0 bytes) or a small stick can't take the installation.
+        const bool small = disk.value("size_bytes").toLongLong() < minimumDiskBytes;
         const auto model_ = disk.value("model").toString().trimmed();
-        m_disks->addItem(QString("%1 — %2 (%3)%4")
+        // The path before the size: it says which disk is erased, so it must never be cut off.
+        m_disks->addItem(QString("%1 (%3) — %2%4")
                              .arg(model_.isEmpty() ? QString("Disk") : model_, sizeText(disk.value("size_bytes").toLongLong()),
-                                  disk.value("path").toString(), boot ? "  — the installation disk" : ""),
+                                  disk.value("path").toString(),
+                                  boot ? "  — the installation disk" : small ? "  — too small" : ""),
                          disk);
-        // The disk this installer started from is listed dimmed, as a Mac menu shows what can't be chosen.
-        if (boot && model)
+        // What can't be chosen is listed dimmed, as a Mac menu shows it.
+        if ((boot || small) && model)
             model->item(m_disks->count() - 1)->setEnabled(false);
         else if (first < 0)
             first = m_disks->count() - 1;
@@ -1008,7 +1018,9 @@ void InstallerWindow::describeDisk()
     {
         m_diskContents->clear();
         m_diskSize->clear();
-        m_destinationNote->setText(m_disks->count() ? "There is no other disk to install on." : QString());
+        m_destinationNote->setText(m_disks->count() ? "There is no disk here that Platinum Reality can be installed on: "
+                                                      "it needs one of at least 16 GB, other than the installation disk."
+                                                    : QString());
         return;
     }
     const auto partitions = disk.value("partitions").toList();
@@ -1017,7 +1029,7 @@ void InstallerWindow::describeDisk()
                                                      : QString::number(partitions.size()) + " partitions");
     const auto bytes = disk.value("size_bytes").toLongLong();
     m_diskSize->setText(sizeText(bytes));
-    m_destinationNote->setText(bytes > 0 && bytes < 16LL * 1024 * 1024 * 1024
+    m_destinationNote->setText(bytes < minimumDiskBytes
                                    ? "This disk is too small. Platinum Reality needs at least 16 GB."
                                    : "This disk has enough space for Platinum Reality. Everything on it will be "
                                      "erased when you click Start.");

@@ -55,7 +55,7 @@ class InstallerTests final : public QObject
         QVERIFY(model && !model->item(0)->isEnabled());
         QVERIFY(disks->itemText(0).contains("the installation disk"));
         QCOMPARE(disks->currentIndex(), 1);
-        QVERIFY(disks->currentText().contains("Hard Disk — 64 GB (/dev/vda)"));
+        QVERIFY(disks->currentText().contains("Hard Disk (/dev/vda) — 64 GB"));
         QCOMPARE(next->text(), QString("Select"));
         QVERIFY(next->isEnabled());
         QVERIFY(find<QLabel>(window, "installer-destination-note")->text().contains("erased when you click Start"));
@@ -521,7 +521,7 @@ class InstallerTests final : public QObject
         const auto text = find<QLabel>(window, "installer-finished-text")->text();
         QVERIFY(text.contains("The disk could not be erased."));
         // It failed after erasing began: say so plainly, never "nothing was changed".
-        QVERIFY2(text.contains("already started erasing “Hard Disk — 64 GB (/dev/vda)”, so what was on it before is gone"),
+        QVERIFY2(text.contains("already started erasing “Hard Disk (/dev/vda) — 64 GB”, so what was on it before is gone"),
                  qPrintable(text));
         QVERIFY(!text.contains("Nothing was changed"));
     }
@@ -539,7 +539,7 @@ class InstallerTests final : public QObject
         find<QPushButton>(window, "installer-continue")->click();
         QTRY_COMPARE(window.page(), InstallerWindow::Finished);
         const auto text = find<QLabel>(window, "installer-finished-text")->text();
-        QVERIFY2(text.contains("Nothing was changed: “Hard Disk — 64 GB (/dev/vda)” was not erased."), qPrintable(text));
+        QVERIFY2(text.contains("Nothing was changed: “Hard Disk (/dev/vda) — 64 GB” was not erased."), qPrintable(text));
         QVERIFY(!text.contains("already started erasing"));
     }
     void theAccountPageOffersWhatTheLiveImageCanInstall()
@@ -558,7 +558,7 @@ class InstallerTests final : public QObject
         QCOMPARE(language->currentData().toString(), QString("en_US.UTF-8"));
         QVERIFY(language->currentText().startsWith("English (United States)"));
         QCOMPARE(find<QComboBox>(window, "installer-keymap")->count(), 2);
-        QCOMPARE(find<QComboBox>(window, "installer-time-zone")->count(), 2);
+        QCOMPARE(find<QComboBox>(window, "installer-time-zone")->count(), 3);
         find<QPushButton>(window, "installer-back")->click();
         language->setCurrentIndex(language->findData("de_DE.UTF-8"));
         find<QComboBox>(window, "installer-keymap")->setCurrentIndex(find<QComboBox>(window, "installer-keymap")->findText("de"));
@@ -615,6 +615,52 @@ class InstallerTests final : public QObject
         QVERIFY(encrypt->isChecked());
         answer(true);  // OK: not encrypted.
         QVERIFY(!encrypt->isChecked());
+    }
+    void disksTooSmallToInstallOnAreDimmedAndNeverChosenFirst()
+    {
+        // The update-37 image's first actual install run: QEMU listed an empty DVD-ROM drive first,
+        // and it was chosen to begin with ("too small", Select dimmed). Only a disk that can take the
+        // installation is chosen; the others are listed dimmed, as the installation disk is.
+        QTemporaryDir root;
+        qputenv("FAKE_ENGINE_LOG", root.filePath("engine.jsonl").toLocal8Bit());
+        qputenv("FAKE_ENGINE_SMALL_DISKS", "1");
+        qunsetenv("FAKE_ENGINE_FAIL");
+        const auto unset = qScopeGuard([] { qunsetenv("FAKE_ENGINE_SMALL_DISKS"); });
+        EngineClient engine(QFINDTESTDATA("fake_install_engine.py"));
+        InstallerWindow window(&engine, "Read me.", "MIT License");
+        window.show();
+        find<QPushButton>(window, "installer-continue")->click();
+        auto *disks = find<QComboBox>(window, "installer-disks");
+        QTRY_COMPARE(disks->count(), 4);
+        auto *model = qobject_cast<QStandardItemModel *>(disks->model());
+        QVERIFY(model);
+        QVERIFY(!model->item(0)->isEnabled()); // the installation disk
+        QVERIFY(!model->item(1)->isEnabled() && disks->itemText(1).contains("QEMU DVD-ROM") &&
+                disks->itemText(1).endsWith("too small"));
+        QVERIFY(!model->item(2)->isEnabled() && disks->itemText(2).endsWith("too small"));
+        QVERIFY(model->item(3)->isEnabled());
+        QCOMPARE(disks->currentIndex(), 3);
+        QVERIFY(disks->currentText().contains("/dev/vda"));
+        QVERIFY(find<QPushButton>(window, "installer-continue")->isEnabled());
+        QCOMPARE(window.config().value("disk").toString(), QString("/dev/vda"));
+    }
+    void theTimeZoneStartsOnTheComputersOwnOrUtcNeverTheFirstInTheList()
+    {
+        // On the live disk the clock is UTC: it used to start on Africa/Abidjan, the first zone.
+        QTemporaryDir root;
+        qputenv("FAKE_ENGINE_LOG", root.filePath("engine.jsonl").toLocal8Bit());
+        qunsetenv("FAKE_ENGINE_FAIL");
+        const auto zone = qgetenv("TZ");
+        qputenv("TZ", "UTC");
+        const auto restore = qScopeGuard([&] { zone.isNull() ? qunsetenv("TZ") : qputenv("TZ", zone); });
+        EngineClient engine(QFINDTESTDATA("fake_install_engine.py"));
+        InstallerWindow window(&engine, "Read me.", "MIT License");
+        window.show();
+        auto *zones = find<QComboBox>(window, "installer-time-zone");
+        QCOMPARE(zones->currentText(), QString("UTC"));
+        find<QPushButton>(window, "installer-continue")->click(); // the engine's own lists arrive
+        QTRY_COMPARE(zones->count(), 3);
+        QCOMPARE(zones->currentText(), QString("UTC"));
     }
     void aMissingEngineIsReportedOnTheDestinationPage()
     {

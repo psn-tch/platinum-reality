@@ -43,12 +43,20 @@ arguments = sys.argv[1:]
 command = arguments[0] if arguments else ""
 if command == "disks" and arguments[1:] == ["--json"]:
     note({"argv": arguments})
-    print(json.dumps([
+    disks = [
         {"path": "/dev/sda", "model": "Platinum USB", "size_bytes": 16_000_000_000, "removable": True,
          "transport": "usb", "is_boot_medium": True, "partitions": []},
         {"path": "/dev/vda", "model": "Hard Disk", "size_bytes": 64_000_000_000, "removable": False,
          "transport": "virtio", "is_boot_medium": False,
-         "partitions": [{"path": "/dev/vda1", "fstype": "ext4", "label": "old", "size_bytes": 64_000_000_000}]}]))
+         "partitions": [{"path": "/dev/vda1", "fstype": "ext4", "label": "old", "size_bytes": 64_000_000_000}]}]
+    if os.environ.get("FAKE_ENGINE_SMALL_DISKS"):
+        # As QEMU lists them (the update-37 image's first actual R3): an empty CD drive, then a stick
+        # too small to install on, both before the hard disk.
+        disks[1:1] = [{"path": "/dev/sr0", "model": "QEMU DVD-ROM", "size_bytes": 0, "removable": True,
+                       "transport": "sata", "is_boot_medium": False, "partitions": []},
+                      {"path": "/dev/sdb", "model": "Small Stick", "size_bytes": 8_000_000_000, "removable": True,
+                       "transport": "usb", "is_boot_medium": False, "partitions": []}]
+    print(json.dumps(disks))
     sys.exit(0)
 config = {}
 if "--config" in arguments:
@@ -57,7 +65,7 @@ if "--config" in arguments:
 if command == "choices" and arguments[1:] == ["--json"] and os.environ.get("FAKE_ENGINE_NO_CHOICES") != "1":
     time.sleep(0.3)  # Long enough for the window to ask for something else meanwhile.
     print(json.dumps({"locales": ["de_DE.UTF-8", "en_GB.UTF-8", "en_US.UTF-8", "bad locale!"],
-                      "timezones": ["America/Denver", "Europe/Berlin"], "keymaps": ["de", "us"]}))
+                      "timezones": ["America/Denver", "Europe/Berlin", "UTC"], "keymaps": ["de", "us"]}))
     sys.exit(0)
 if command == "plan":
     note({"argv": arguments, "config": config})

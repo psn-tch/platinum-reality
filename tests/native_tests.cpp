@@ -6182,6 +6182,9 @@ class NativeTests : public QObject
         QTRY_VERIFY(menu->isVisible());
         QQuickItem *open = nullptr;
         QTRY_VERIFY((open = visualItem(scene.view.contentItem(), "desktop-command-handheld-panel")) && open->isVisible());
+        // Opening the menu under a still pointer opens no submenu by itself (Charge Limit's did).
+        QTest::qWait(100);
+        QVERIFY(!visualItem(scene.view.contentItem(), "desktop-submenu")->isVisible());
         QTRY_COMPARE(visualItem(scene.view.contentItem(), "desktop-command-handheld-builtin")
                          ->property("modelData").toMap().value("text").toString(), QString("Turn Built-in Controller Off"));
         click(open);
