@@ -2143,6 +2143,80 @@ class DesktopTests : public QObject
         QTest::keyClick(&view, Qt::Key_Escape);
         QTRY_VERIFY(!panel->property("visible").toBool());
     }
+    void eachMonitorHasItsOwnDesktopPictureNeverOneSpreadAcrossThem()
+    {
+        // psn_tch, 2026-11-06: "i'd like my wallpaper to not be stretched across two monitors", and
+        // different pictures on each monitor. Two outputs side by side, as in the Extend session.
+        QTemporaryDir root;
+        QVERIFY(QDir().mkpath(root.filePath("profile")));
+        const auto picture = [&](const QString &name, const QColor &colour) {
+            QImage image(400, 300, QImage::Format_RGB32);
+            image.fill(colour);
+            const auto path = root.filePath(name);
+            return image.save(path) ? path : QString();
+        };
+        const auto red = picture("red.png", QColor("#cc2020")), blue = picture("blue.png", QColor("#2040cc"));
+        QVERIFY(!red.isEmpty() && !blue.isEmpty());
+        QQuickView view;
+        view.setResizeMode(QQuickView::SizeRootObjectToView);
+        view.resize(1920, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.path() + "/profile", {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        manager.setDisplayLayout(*DisplayLayout::create({{"DP-3", QRect(0, 0, 1120, 760), 1.5, "normal"},
+                                                         {"eDP-1", QRect(1120, 0, 800, 500), 2, "normal"}},
+                                                        "DP-3", DisplayLayout::Mode::Extend));
+        auto *appearance = qobject_cast<AppearanceSettings *>(manager.appearance());
+        QVERIFY(appearance && appearance->applyMonitorPicture("", red, "fill"));
+        QQuickItem *first = nullptr, *second = nullptr;
+        QTRY_VERIFY((first = visualItem(view.contentItem(), "desktop-wallpaper")) &&
+                    (second = visualItem(view.contentItem(), "desktop-wallpaper-eDP-1")));
+        // Each monitor's own copy, the size of that monitor.
+        QCOMPARE(QRectF(first->x(), first->y(), first->width(), first->height()), QRectF(0, 0, 1120, 760));
+        QCOMPARE(QRectF(second->x(), second->y(), second->width(), second->height()), QRectF(1120, 0, 800, 500));
+        QCOMPARE(first->property("source").toUrl().toLocalFile(), red);
+        QCOMPARE(second->property("source").toUrl().toLocalFile(), red);
+        QTRY_COMPARE(second->property("status").toInt(), 1);
+        // A picture for the built-in display only.
+        QVERIFY(appearance->applyMonitorPicture("eDP-1", blue, "fit"));
+        QTRY_COMPARE(second->property("source").toUrl().toLocalFile(), blue);
+        QCOMPARE(second->property("fillMode").toInt(), 1); // Image.PreserveAspectFit
+        QCOMPARE(first->property("source").toUrl().toLocalFile(), red);
+        QTRY_COMPARE(second->property("status").toInt(), 1);
+        QTRY_COMPARE(view.grabWindow().pixelColor(560, 380), QColor("#cc2020"));
+        QTRY_COMPARE(view.grabWindow().pixelColor(1520, 250), QColor("#2040cc"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/desktop-picture-per-monitor.png"));
+        {
+            AppearanceSettings restored(root.path() + "/profile");
+            const auto own = restored.monitorPictures().value("eDP-1").toMap();
+            QCOMPARE(own.value("path").toString(), blue);
+            QCOMPARE(own.value("layout").toString(), QString("fit"));
+            QCOMPARE(restored.wallpaperPath(), red);
+        }
+        // The panel offers the monitors and starts each from what it shows.
+        auto *panel = view.rootObject()->findChild<QObject *>("desktop-picture-dialog");
+        QVERIFY(panel);
+        QVERIFY(QMetaObject::invokeMethod(panel, "edit"));
+        QTRY_VERIFY(panel->property("opened").toBool());
+        QTRY_VERIFY(visualItem(view.contentItem(), "picture-monitor-row")->isVisible());
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/desktop-picture-monitor-popup.png"));
+        QVERIFY(QMetaObject::invokeMethod(panel, "chooseMonitor", Q_ARG(QVariant, QVariant("eDP-1"))));
+        QCOMPARE(panel->property("draftPath").toString(), blue);
+        QVERIFY(QMetaObject::invokeMethod(panel, "chooseMonitor", Q_ARG(QVariant, QVariant(QString()))));
+        QCOMPARE(panel->property("draftPath").toString(), red);
+        QVERIFY(panel->property("changed").toBool()); // Setting it for all would replace eDP-1's own.
+        // All Monitors forgets the monitors' own pictures.
+        QVERIFY(appearance->applyMonitorPicture("", red, "fill"));
+        QVERIFY(appearance->monitorPictures().isEmpty());
+        QTRY_COMPARE(second->property("source").toUrl().toLocalFile(), red);
+        // Nothing outside a monitor name or a readable picture is accepted.
+        QVERIFY(!appearance->applyMonitorPicture("../DP-3", blue, "fill"));
+        QVERIFY(!appearance->applyMonitorPicture("DP-3", root.filePath("missing.png"), "fill"));
+    }
     void monitorsPanelArrangesDisplaysAndAsksTheSupervisorForTheMainOne()
     {
         // Mac OS 9 Monitors → Arrange: drag the menu bar to choose the main display. The request

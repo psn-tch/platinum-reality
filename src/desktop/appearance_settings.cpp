@@ -93,6 +93,12 @@ QUrl pictureUrl(const QString &path, bool decode = false)
     }
     return QUrl::fromLocalFile(file.absoluteFilePath());
 }
+// A display output's name as the compositor reports it ("eDP-1", "DP-2", "HDMI-A-1").
+const QRegularExpression &monitorName()
+{
+    static const QRegularExpression name("^[A-Za-z0-9._-]{1,32}$");
+    return name;
+}
 } // namespace
 AppearanceSettings::AppearanceSettings(QString profile, QObject *parent)
     : QObject(parent), m_profile(QDir(profile).absolutePath()), m_emblem(localEmblem(m_profile)),
@@ -128,6 +134,15 @@ AppearanceSettings::AppearanceSettings(QString profile, QObject *parent)
             // Missing pictures use the solid desktop; retain the user's path.
             m_wallpaper = pictureUrl(m_wallpaperPath);
         }
+    }
+    const auto monitors = object.value("monitorPictures").toObject();
+    for (auto it = monitors.begin(); it != monitors.end() && m_monitorPictures.size() < 8; ++it)
+    {
+        const auto entry = it.value().toObject();
+        const auto path = entry.value("path").toString(), layout = entry.value("layout").toString();
+        if (monitorName().match(it.key()).hasMatch() && entry.value("path").isString() && validLayout(layout) &&
+            (path.isEmpty() || !absolutePicturePath(path).isEmpty()))
+            m_monitorPictures.insert(it.key(), {path.isEmpty() ? QString() : absolutePicturePath(path), layout});
     }
     if (const auto accent = object.value("accent").toString(); accent == "blue" || accent == "graphite")
         m_accent = accent;
@@ -176,6 +191,9 @@ bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x,
     QJsonObject clock;
     for (auto it = m_clock.cbegin(); it != m_clock.cend(); ++it)
         clock.insert(it.key(), it.value());
+    QJsonObject monitors;
+    for (auto it = m_monitorPictures.cbegin(); it != m_monitorPictures.cend(); ++it)
+        monitors.insert(it.key(), QJsonObject{{"path", it->first}, {"layout", it->second}});
     const auto bytes = QJsonDocument(QJsonObject{{"version", 1},
                                                  {"shadeDuration", duration},
                                                  {"stripVisible", visible},
@@ -185,6 +203,7 @@ bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x,
                                                  {"stripModules", m_stripModules},
                                                  {"wallpaperPath", picture},
                                                  {"wallpaperLayout", layout},
+                                                 {"monitorPictures", monitors},
                                                  {"accent", m_accent},
                                                  {"highlight", m_highlight},
                                                  {"doubleClickCollapse", m_doubleClickCollapse},
@@ -419,6 +438,44 @@ QString AppearanceSettings::defaultWallpaperPath() const
 QUrl AppearanceSettings::previewDesktopPicture(QString path) const
 {
     return pictureUrl(absolutePicturePath(path));
+}
+QVariantMap AppearanceSettings::monitorPictures() const
+{
+    QVariantMap result;
+    for (auto it = m_monitorPictures.cbegin(); it != m_monitorPictures.cend(); ++it)
+        result.insert(it.key(), QVariantMap{{"path", it->first}, {"layout", it->second},
+                                            {"url", pictureUrl(it->first)}});
+    return result;
+}
+bool AppearanceSettings::applyMonitorPicture(QString monitor, QString path, QString layout)
+{
+    const auto before = m_monitorPictures;
+    if (monitor.isEmpty())
+    {
+        m_monitorPictures.clear();
+        if (applyDesktopPicture(path, layout))
+            return true;
+        m_monitorPictures = before;
+        return false;
+    }
+    const auto normalized = absolutePicturePath(path);
+    if (!monitorName().match(monitor).hasMatch() || !validLayout(layout) ||
+        (!path.isEmpty() && (normalized.isEmpty() || pictureUrl(normalized, true).isEmpty())))
+    {
+        emit errorOccurred(
+            "Choose a readable PNG, JPEG or WebP picture (up to 64 MB and 32 megapixels).");
+        return false;
+    }
+    if (!m_monitorPictures.contains(monitor) && m_monitorPictures.size() >= 8)
+    {
+        emit errorOccurred("Up to eight monitors can have a picture of their own.");
+        return false;
+    }
+    m_monitorPictures.insert(monitor, {normalized, layout});
+    if (save(m_duration, m_stripVisible, m_stripCollapsed, m_stripX, m_stripY, m_wallpaperPath, m_wallpaperLayout))
+        return true;
+    m_monitorPictures = before;
+    return false;
 }
 bool AppearanceSettings::applyDesktopPicture(QString path, QString layout)
 {

@@ -2,7 +2,8 @@ import QtQuick
 import QtQuick.Controls
 
 // Desktop Picture, a panel of the Control Panels window. Choosing a picture previews it here;
-// Set Desktop (or Return in the file field) puts it on the desktop.
+// Set Desktop (or Return in the file field) puts it on the desktop. With more than one monitor,
+// the Monitor pop-up chooses where: every monitor (each its own copy), or one monitor by itself.
 Item {
     id: panel
     required property var settings
@@ -28,7 +29,22 @@ Item {
     property string notice: ""
     readonly property url preview: settings.previewDesktopPicture(draftPath)
     readonly property bool canSet: draftPath === "" || preview.toString() !== ""
-    readonly property bool changed: draftPath !== settings.wallpaperPath || draftLayout !== settings.wallpaperLayout
+    // "" is every monitor; otherwise an output name from the Monitors panel's list.
+    property string monitor: ""
+    readonly property var outputs: typeof manager !== "undefined" && manager ? manager.displayOutputs : []
+    readonly property var monitorChoices: [{name: "All Monitors", value: ""}].concat(
+        outputs.map(function(o) { return {name: o.label || o.name, value: o.name} }))
+    readonly property var monitorOwn: monitor !== "" ? settings.monitorPictures[monitor] : undefined
+    readonly property string currentPath: monitorOwn ? monitorOwn.path : settings.wallpaperPath
+    readonly property string currentLayout: monitorOwn ? monitorOwn.layout : settings.wallpaperLayout
+    // Every monitor gets the choice when set for all of them, so it is new if any monitor differs.
+    readonly property bool changed: draftPath !== currentPath || draftLayout !== currentLayout ||
+                                    (monitor === "" && Object.keys(settings.monitorPictures).length > 0)
+    function chooseMonitor(name) {
+        monitor = name
+        draftPath = currentPath
+        draftLayout = currentLayout
+    }
 
     function readFolder() {
         let result = settings.listDesktopPictures(folder.text)
@@ -44,11 +60,12 @@ Item {
         pictures.positionViewAtIndex(index, ListView.Contain)
     }
     function edit() { if (host) host.show(panelId) }
-    function setDesktop() { if (canSet) settings.applyDesktopPicture(draftPath, draftLayout) }
+    function setDesktop() { if (canSet) settings.applyMonitorPicture(monitor, draftPath, draftLayout) }
     // Each time the panel comes on screen it starts from the desktop as it is.
     onShownChanged: if (shown) {
-        draftPath = settings.wallpaperPath
-        draftLayout = settings.wallpaperLayout
+        if (!outputs.some(function(o) { return o.name === monitor })) monitor = ""
+        draftPath = currentPath
+        draftLayout = currentLayout
         folder.text = settings.picturesFolder
         collections = settings.pictureCollections(personalPictures)
         readFolder()
@@ -58,6 +75,19 @@ Item {
         id: body
         width: parent.width
         spacing: 10
+        Row {
+            objectName: "picture-monitor-row"
+            visible: panel.outputs.length > 1
+            spacing: 8
+            Text {text: "Monitor:"; font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter}
+            PlatinumPopup {
+                objectName: "picture-monitor"
+                implicitWidth: 220
+                choices: panel.monitorChoices
+                current: panel.monitor
+                onChosen: function(value) { panel.chooseMonitor(value) }
+            }
+        }
         Row {
             width: parent.width; spacing: 8
             TextField {

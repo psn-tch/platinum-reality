@@ -1782,9 +1782,19 @@ class NativeTests : public QObject
         // Monitor one's right edge, next to monitor two: the menu stays on monitor one.
         manager.moveWindow(id,1120-370,100);
         QTRY_COMPARE(first(manager,"Native Probe Popups").value("x").toInt(),1120-370);
+        // As before the first click: closing the menu can leave the desktop active, and a click on an
+        // inactive window only brings it forward (Mac OS 9), so the client would not see it (gates 38b/38c).
+        manager.activate(id);
+        QTRY_VERIFY(first(manager,"Native Probe Popups").value("active").toBool());
         const auto presses=QDBusReply<int>(api.call("MousePresses")).value();
-        QVERIFY(clickWindow());
-        QTRY_VERIFY(QDBusReply<int>(api.call("MousePresses")).value()>presses);
+        // The move reaches the screen a frame later; a click sent before then lands on the desktop
+        // where the window was. This test is about the menu's place, so click again until it counts.
+        bool pressed=false;
+        for(int attempt=0;attempt<4 && !pressed;++attempt){
+            QVERIFY(clickWindow());
+            pressed=QTest::qWaitFor([&]{return QDBusReply<int>(api.call("MousePresses")).value()>presses;},1500);
+        }
+        QVERIFY(pressed);
         api.call("ShowFileMenuAt",350,30);
         QTRY_VERIFY(!menuRect().isEmpty());
         QTest::qWait(150);

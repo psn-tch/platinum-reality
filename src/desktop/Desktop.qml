@@ -58,17 +58,29 @@ Rectangle {
     // Mac OS 9 highlights menu titles and items with the Appearance accent: blue-violet by
     // default, or the graphite variation (sampled from 9.2 captures; historical review F01/F10).
     readonly property color menuAccent: desktop.appearance.accentColor
-    Image {
-        objectName:"desktop-wallpaper";anchors.fill:parent
-        source:desktop.appearance.wallpaper
-        fillMode:desktop.appearance.wallpaperLayout==="fit" ? Image.PreserveAspectFit
-                 : desktop.appearance.wallpaperLayout==="center" ? Image.Pad
-                 : desktop.appearance.wallpaperLayout==="tile" ? Image.Tile : Image.PreserveAspectCrop
-        asynchronous:true
-        // A tiled pattern keeps its dots sharp.
-        smooth:desktop.appearance.wallpaperLayout!=="tile"
-        sourceSize:desktop.appearance.wallpaperLayout==="center" || desktop.appearance.wallpaperLayout==="tile"
-                   ? Qt.size(0,0) : Qt.size(Math.min(4096,desktop.width*manager.hostScale),Math.min(4096,desktop.height*manager.hostScale))
+    // The desktop picture on each monitor by itself (psn_tch, 2026-11-06: one picture spread across
+    // two monitors looked wrong), or the monitor's own picture (AppearanceSettings.monitorPictures).
+    // The first is "desktop-wallpaper"; the others add their output's name.
+    readonly property var wallpaperScreens: manager.displayOutputs.length > 0 ? manager.displayOutputs
+        : [{name:"",x:0,y:0,width:desktop.width,height:desktop.height}]
+    Repeater {
+        model:desktop.wallpaperScreens
+        Image {
+            required property var modelData
+            required property int index
+            readonly property var own: modelData.name ? desktop.appearance.monitorPictures[modelData.name] : undefined
+            readonly property string layout: own ? own.layout : desktop.appearance.wallpaperLayout
+            objectName:index===0 ? "desktop-wallpaper" : "desktop-wallpaper-"+modelData.name
+            x:modelData.x;y:modelData.y;width:modelData.width;height:modelData.height;clip:true
+            source:own ? own.url : desktop.appearance.wallpaper
+            fillMode:layout==="fit" ? Image.PreserveAspectFit : layout==="center" ? Image.Pad
+                     : layout==="tile" ? Image.Tile : Image.PreserveAspectCrop
+            asynchronous:true
+            // A tiled pattern keeps its dots sharp.
+            smooth:layout!=="tile"
+            sourceSize:layout==="center" || layout==="tile"
+                       ? Qt.size(0,0) : Qt.size(Math.min(4096,width*manager.hostScale),Math.min(4096,height*manager.hostScale))
+        }
     }
     property var barEntries: [{label:"◆",kind:"apple"}].concat(manager.desktopActive ? [{label:"File",kind:"desktop-file"},{label:"Edit",kind:"desktop-edit"},{label:"View",kind:"desktop-view"},{label:"Window",kind:"window"},{label:"Special",kind:"special"},{label:"Help",kind:"help"}] : broker.menus.length > 0 ? broker.menus.filter(function(m){return m.visible && !m.separator}).map(function(m){return {label:m.label,kind:"export",id:m.id,children:m.children,enabled:m.enabled && !broker.interactionBlocked}}) : [{label:"Edit",kind:"app-edit"},{label:"Window",kind:"window"},{label:"Special",kind:"special"},{label:"Help",kind:"help"}])
     function updateDesktopSize(){if(desktopFiles)desktopFiles.setViewport(width,height)}

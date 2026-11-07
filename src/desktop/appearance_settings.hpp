@@ -1,6 +1,7 @@
 #pragma once
 #include "appearance/interface_font.hpp"
 #include <QColor>
+#include <QMap>
 #include <QObject>
 #include <QUrl>
 #include <QVariantMap>
@@ -20,6 +21,10 @@ class AppearanceSettings final : public QObject
     Q_PROPERTY(QUrl wallpaper READ wallpaper NOTIFY changed)
     Q_PROPERTY(QString wallpaperPath READ wallpaperPath NOTIFY changed)
     Q_PROPERTY(QString wallpaperLayout READ wallpaperLayout NOTIFY changed)
+    // A picture of its own for a monitor (psn_tch, 2026-11-06), by output name ("DP-2"):
+    // {name: {path, layout, url}}; path "" is the solid desktop colour there. Every other monitor
+    // shows the desktop picture above, each monitor its own copy, never one spread across them.
+    Q_PROPERTY(QVariantMap monitorPictures READ monitorPictures NOTIFY changed)
     // The Control Panel's desktop pattern in use: 16 hex digits, a byte a row (top first, high bit
     // left, set = black), or "" while the desktop shows a picture instead.
     Q_PROPERTY(QString desktopPattern READ desktopPattern NOTIFY changed)
@@ -113,6 +118,9 @@ class AppearanceSettings final : public QObject
     QVariantMap switcher() const;
     int caretFlashTime() const;
     QString defaultWallpaperPath() const;
+    QVariantMap monitorPictures() const;
+    // monitor "" sets the picture for every monitor and forgets their own ones.
+    Q_INVOKABLE bool applyMonitorPicture(QString monitor, QString path, QString layout);
     QString picturesFolder() const;
     Q_INVOKABLE bool apply(int duration, bool stripVisible);
     Q_INVOKABLE bool applyOptions(QString accent, bool doubleClickCollapse);
@@ -151,6 +159,7 @@ class AppearanceSettings final : public QObject
     QString m_profile;
     QUrl m_emblem, m_wallpaper;
     QString m_wallpaperPath, m_wallpaperLayout = "fill";
+    QMap<QString, std::pair<QString, QString>> m_monitorPictures; // name → (path, layout)
     int m_duration = 240, m_stripX = 8, m_stripY = -1, m_stripModules = 0;
     bool m_stripVisible = true, m_stripCollapsed = false;
     QString m_accent = "blue";

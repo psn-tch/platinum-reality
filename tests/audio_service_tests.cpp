@@ -295,9 +295,11 @@ class AudioServiceTests final : public QObject
             // run): gone, like a failed open. Counting it as running made this check flicker.
             return lastStatus.isEmpty() || lastStatus.mid(lastStatus.lastIndexOf(')') + 2, 1) == "Z";
         };
+        // It must stop, not stop fast: under a full sanitized gate the killed child was gone just
+        // after five seconds ("5000 ms would have been sufficient", gate 38), 12/12 alone.
         QTRY_VERIFY2_WITH_TIMEOUT(stopped(),
             qPrintable(QString("helper/child: %1; last child /proc/stat: %2")
-                .arg(QString::fromUtf8(recorded), QString::fromUtf8(lastStatus))), 5000);
+                .arg(QString::fromUtf8(recorded), QString::fromUtf8(lastStatus))), 15000);
     }
     void oversizedRepliesStopBeforeTheHelperFinishes()
     {
