@@ -28,6 +28,60 @@ class PolicyTests : public QObject
 {
     Q_OBJECT
   private slots:
+    void outlineMoveDefersGeometryUntilCommit()
+    {
+        auto s = initial(); addApp(s,1,1); dispatch(s,ActivateWindow{{1}});
+        const auto original = s.windows.at({1}).geometry;
+        dispatch(s,BeginWindowMove{{1}});
+        auto preview = transition(s,{s.session,UpdateWindowMove{{1},{-250,120}}});
+        QCOMPARE(preview.next.windows.at({1}).geometry,original);
+        QCOMPARE(preview.next.move->preview,(Point{-250,120}));
+        QCOMPARE(preview.effects.size(),std::size_t(1));
+        QVERIFY(std::holds_alternative<PublishMoveOutline>(preview.effects.front()));
+        s=preview.next;
+        dispatch(s,ObserveContentSize{{1},original.observed_size});
+        QVERIFY(s.move); // Equal size acknowledgement must not abort the grab.
+        dispatch(s,EndWindowMove{{1},true});
+        QVERIFY(!s.move);
+        QCOMPARE(s.windows.at({1}).geometry.position,(Point{-250,120}));
+        QCOMPARE(s.windows.at({1}).geometry.observed_size,original.observed_size);
+        auto late=transition(s,{s.session,EndWindowMove{{1},true}});
+        QCOMPARE(late.rejection,Rejection::stale_window_move); QCOMPARE(late.next,s);
+    }
+    void cancelledAndInvalidatedMovesNeverCommitPreview()
+    {
+        for (int action=0;action<7;++action) {
+            auto s=initial();addApp(s,1,1);addApp(s,2,2);dispatch(s,ActivateWindow{{1}});
+            const auto original=s.windows.at({1}).geometry.position;
+            dispatch(s,BeginWindowMove{{1}});dispatch(s,UpdateWindowMove{{1},{1600,80}});
+            switch(action) {
+            case 0:dispatch(s,EndWindowMove{{1},false});break;
+            case 1:dispatch(s,ActivateWindow{{2}});break;
+            case 2:dispatch(s,HideApplication{{1}});break;
+            case 3:dispatch(s,RemoveWindow{{1}});break;
+            case 4:dispatch(s,ObserveContentSize{{1},{800,500}});break;
+            case 5:dispatch(s,BeginMenuTracking{{1}});break;
+            case 6:dispatch(s,SetCollapsed{{1},true});break;
+            }
+            QVERIFY(!s.move);
+            if(s.windows.contains({1}))QCOMPARE(s.windows.at({1}).geometry.position,original);
+        }
+    }
+    void moveGrabRejectsOtherWindowsAndUnselectedParents()
+    {
+        auto s=initial();addApp(s,1,1);addApp(s,2,2);dispatch(s,ActivateWindow{{1}});
+        auto bad=transition(s,{s.session,BeginWindowMove{{2}}});
+        QCOMPARE(bad.rejection,Rejection::blocked_by_modal);QCOMPARE(bad.next,s);
+        dispatch(s,BeginWindowMove{{1}});
+        bad=transition(s,{s.session,UpdateWindowMove{{2},{300,300}}});
+        QCOMPARE(bad.rejection,Rejection::stale_window_move);QCOMPARE(bad.next,s);
+        dispatch(s,RegisterWindow{{3},{1},{{100,100},{200,100}},false,WindowId{1},true});
+        QVERIFY(!s.move);
+        bad=transition(s,{s.session,BeginWindowMove{{1}}});
+        QCOMPARE(bad.rejection,Rejection::blocked_by_modal);
+        dispatch(s,BeginWindowMove{{3}}); // The modal itself can still be moved.
+        dispatch(s,RemoveApplication{{1}});QVERIFY(!s.move);
+    }
     void desktopOwnsContextWithoutFocusingAnOldFolderWindow()
     {
         auto s = initial();

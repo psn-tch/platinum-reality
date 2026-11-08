@@ -2,6 +2,7 @@
 #include <QDBusContext>
 #include <QDBusObjectPath>
 #include <QObject>
+#include <QTimer>
 #include <QVariantList>
 class QDBusServiceWatcher;
 
@@ -64,6 +65,10 @@ class MenuBroker final : public QObject
 
   private:
     void load(qulonglong generation);
+    void revalidateRoots();
+    QTimer m_rootRefresh;
+    qulonglong m_rootRefreshSequence = 0;
+    bool m_rootRefreshPending = false;
     void disconnectProvider();
     void advanceRevision();
     QVariantMap findItem(const QVariantList &items, int id) const;

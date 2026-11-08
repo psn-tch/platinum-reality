@@ -133,6 +133,11 @@ MenuBroker::MenuBroker(bool enabled, QObject *parent) : QObject(parent), m_busEn
 {
     if (!enabled)
         return;
+    // Qt's DBus menubar syncMenu updates its cached root label without emitting
+    // ItemsPropertiesUpdated/LayoutUpdated. Recheck only shallow root properties,
+    // for the selected authenticated provider, with one bounded request in flight.
+    m_rootRefresh.setInterval(1000);
+    connect(&m_rootRefresh, &QTimer::timeout, this, &MenuBroker::revalidateRoots);
     auto bus = QDBusConnection::sessionBus();
     m_ownerWatcher = new QDBusServiceWatcher(this);
     m_ownerWatcher->setConnection(bus);
@@ -170,6 +175,9 @@ MenuBroker::~MenuBroker()
 }
 void MenuBroker::disconnectProvider()
 {
+    m_rootRefresh.stop();
+    ++m_rootRefreshSequence;
+    m_rootRefreshPending = false;
     if (!m_uniqueOwner.isEmpty())
     {
         auto bus = QDBusConnection::sessionBus();
@@ -246,6 +254,7 @@ void MenuBroker::select(qulonglong window, QString service, QString path, qint64
                                                           "ItemsPropertiesUpdated", this,
                                                           SLOT(refresh()));
                     load(ticket);
+                    m_rootRefresh.start();
                 });
         });
 }
@@ -327,6 +336,40 @@ void MenuBroker::load(qulonglong ticket)
                 m_menus = menus;
                 emit changed();
             });
+}
+void MenuBroker::revalidateRoots()
+{
+    if (m_uniqueOwner.isEmpty() || busy() || m_rootRefreshPending) return;
+    m_rootRefreshPending = true;
+    const auto ticket = m_generation;
+    const auto sequence = ++m_rootRefreshSequence;
+    const auto loadSequence = m_loadSequence;
+    auto call = QDBusMessage::createMethodCall(m_uniqueOwner, m_path, "com.canonical.dbusmenu", "GetLayout");
+    call << 0 << 1 << QStringList{"label", "enabled", "visible", "type", "toggle-type", "toggle-state", "children-display"};
+    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(call, 1000), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher, ticket, sequence, loadSequence] {
+        auto reply = watcher->reply();
+        watcher->deleteLater();
+        if (sequence != m_rootRefreshSequence) return;
+        m_rootRefreshPending = false;
+        if (ticket != m_generation || loadSequence != m_loadSequence ||
+            reply.type() == QDBusMessage::ErrorMessage || reply.arguments().size() != 2) return;
+        bool valid = true;
+        int count = 0, bytes = 0;
+        const auto root = decodeLayout(reply.arguments()[1], 0, count, bytes, valid);
+        if (!valid) return;
+        const auto properties = [](const QVariantList &menus) {
+            QVariantList result;
+            for (const auto &entry : menus) {
+                auto item = entry.toMap();
+                item.remove("children");
+                result.push_back(item);
+            }
+            return result;
+        };
+        if (properties(root.value("children").toList()) != properties(m_menus))
+            load(ticket); // Normal snapshot/revision validation retires stale menu commands.
+    });
 }
 void MenuBroker::refresh()
 {

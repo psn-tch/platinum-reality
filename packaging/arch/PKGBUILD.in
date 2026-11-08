@@ -1,7 +1,7 @@
 # Platinum Reality for Arch Linux. scripts/package-arch.py writes this recipe beside a pinned source
 # snapshot; build it with makepkg (makepkg itself installs nothing unless asked to).
 pkgname=platinum-reality
-pkgver=0.1.0
+pkgver=@VERSION@
 pkgrel=1
 pkgdesc='A classic Platinum desktop for Linux: a whole session, or a window inside your current one'
 arch=('x86_64')
@@ -43,7 +43,7 @@ optdepends=('pipewire-audio: interface and alert sounds, the startup chime'
             'kwallet: saved sign-ins through the KDE wallet'
             'konsole: the Terminal command')
 _bridge=b83eab900644e4c7c77982ce3d44cb490f0c5e1d
-source=('platinum-reality-0.1.0.tar.gz'
+source=("platinum-reality-$pkgver.tar.gz"
         "xwayland-satellite-$_bridge.tar.gz::https://codeload.github.com/Supreeeme/xwayland-satellite/tar.gz/$_bridge")
 noextract=("xwayland-satellite-$_bridge.tar.gz")
 sha256sums=('@SOURCE_SHA256@'

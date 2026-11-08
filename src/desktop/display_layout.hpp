@@ -5,6 +5,9 @@
 #include <QVector>
 #include <optional>
 
+// Measured native Mac OS 9.2.2 menu bar, including its lower border.
+inline constexpr int platinumMenuBarHeight = 20;
+
 struct DisplayOutput
 {
     QString name;

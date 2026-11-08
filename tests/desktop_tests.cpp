@@ -13,6 +13,9 @@
 #include "desktop/energy_settings.hpp"
 #include "desktop/input_settings.hpp"
 #include "desktop/manager.hpp"
+#include "desktop/software_update.hpp"
+#include "desktop/window_move_outline.hpp"
+#include "desktop/printer_selector.hpp"
 #include "desktop/sticky_notes.hpp"
 #include "desktop/note_pad.hpp"
 #include "desktop/scrapbook.hpp"
@@ -35,6 +38,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QCryptographicHash>
+#include <QProcess>
 #include <QQmlComponent>
 #include <QRegularExpression>
 #include <QQmlContext>
@@ -80,8 +85,223 @@ class DesktopTests : public QObject
         return nullptr;
     }
   private slots:
+    void iconReadsDoNotStartDiscoveryBeforeApplicationsExist()
+    {
+        QTemporaryDir root;QQuickView view;view.resize(1120,760);
+        const auto apps=root.filePath("applications");
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{},{apps});
+        auto *catalog=qobject_cast<ApplicationCatalog*>(manager.applicationCatalog());QVERIFY(catalog);
+        QSignalSpy refreshed(catalog,&ApplicationCatalog::refreshed);
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status()!=QQuickView::Error);
+        const auto clear=qScopeGuard([&]{view.setSource({});});
+        view.show();QVERIFY(QTest::qWaitForWindowExposed(&view));
+        manager.applicationIcon("org.frankenstein.Finder");
+        manager.applicationIcon("org.example.Late");
+        manager.applications();
+        QVERIFY(!catalog->busy());QVERIFY(!catalog->ready());QCOMPARE(refreshed.count(),0);
+        // Native qualification and late application installation both populate the
+        // directory after the shell exists. Only the explicit refresh owns discovery.
+        QVERIFY(QDir().mkpath(apps));
+        QFile entry(apps+"/org.example.Late.desktop");QVERIFY(entry.open(QIODevice::WriteOnly));
+        entry.write("[Desktop Entry]\nType=Application\nName=Late catalog fixture\nExec=/usr/bin/true --owned\n");
+        entry.close();
+        catalog->setQuery("Late catalog fixture");catalog->refresh();
+        QTRY_VERIFY(catalog->ready() && !catalog->busy());QCOMPARE(refreshed.count(),1);
+        QCOMPARE(catalog->count(),1);
+        QCOMPARE(catalog->item(0).value("id").toString(),QString("org.example.Late.desktop"));
+        const auto plan=catalog->launchPlan("org.example.Late.desktop",{},QProcessEnvironment::systemEnvironment());
+        QVERIFY2(bool(plan),qPrintable(plan.error));
+        QCOMPARE(plan.program,QString("/usr/bin/true"));QCOMPARE(plan.arguments,QStringList{"--owned"});
+    }
+    void applicationIconsUseIdentityPrivateArtworkAndRefresh()
+    {
+        QTemporaryDir root;
+        const auto previousData = qgetenv("XDG_DATA_HOME");
+        qputenv("XDG_DATA_HOME", root.filePath("data").toLocal8Bit());
+        const auto restore = qScopeGuard([&] {
+            if (previousData.isNull()) qunsetenv("XDG_DATA_HOME");
+            else qputenv("XDG_DATA_HOME", previousData);
+        });
+        const auto apps = root.filePath("apps");
+        const auto icons = root.filePath("data/platinum-reality/assets/icons");
+        QVERIFY(QDir().mkpath(apps));QVERIFY(QDir().mkpath(icons));
+        const auto paint = root.filePath("paint.png");
+        QImage image(16,16,QImage::Format_ARGB32);image.fill(Qt::red);QVERIFY(image.save(paint));
+        image.fill(Qt::green);QVERIFY(image.save(icons+"/finder-16.png"));
+        QFile entry(apps+"/org.example.Paint.desktop");QVERIFY(entry.open(QIODevice::WriteOnly));
+        entry.write("[Desktop Entry]\nType=Application\nName=Paint\nExec=/usr/bin/true\nIcon="+paint.toUtf8()+"\n");entry.close();
+        QQuickView view;
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{},{apps});
+        auto *catalog=qobject_cast<ApplicationCatalog *>(manager.applicationCatalog());QVERIFY(catalog);
+        catalog->refresh();QTRY_VERIFY(catalog->ready());
+        const auto decoded=[](QUrl url) {
+            return QImage::fromData(QByteArray::fromBase64(url.toString().section(',',1).toLatin1()));
+        };
+        auto native=manager.applicationIcon("org.example.Paint");
+        QVERIFY(native.scheme()=="data");QCOMPARE(decoded(native).pixelColor(8,8),QColor(Qt::red));
+        QCOMPARE(decoded(manager.applicationIcon("org.example.Paint.desktop")).pixelColor(8,8),QColor(Qt::red));
+        QVERIFY(manager.applicationIcon("Paint").isEmpty());
+        QVERIFY(manager.applicationIcon("org.example.Missing").isEmpty());
+        QCOMPARE(decoded(manager.applications().first().toMap().value("icon").toUrl()).pixelColor(8,8),QColor(Qt::green));
+        image.fill(Qt::blue);QVERIFY(image.save(paint));
+        QCOMPARE(manager.applicationIcon("org.example.Paint"),native); // Stable until an explicit refresh.
+        manager.refreshApplicationIcons();
+        QCOMPARE(decoded(manager.applicationIcon("org.example.Paint")).pixelColor(8,8),QColor(Qt::blue));
+        image.fill(Qt::yellow);QVERIFY(image.save(paint));
+        QSignalSpy refreshed(catalog,&ApplicationCatalog::refreshed);
+        catalog->refresh();QTRY_COMPARE(refreshed.count(),1);
+        QCOMPARE(decoded(manager.applicationIcon("org.example.Paint")).pixelColor(8,8),QColor(Qt::yellow));
+    }
+
+    void switcherUsesApplicationIconsAndKeepsFallbackAndTargetIdentity()
+    {
+        QTemporaryDir root;QQuickView view;view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status()!=QQuickView::Error);
+        const auto clear=qScopeGuard([&]{view.setSource({});});
+        view.show();QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QImage image(16,16,QImage::Format_ARGB32);image.fill(Qt::red);
+        QByteArray bytes;QBuffer buffer(&bytes);QVERIFY(buffer.open(QIODevice::WriteOnly));QVERIFY(image.save(&buffer,"PNG"));
+        const QUrl source("data:image/png;base64,"+QString::fromLatin1(bytes.toBase64()));
+        auto *switcher=visualItem(view.contentItem(),"application-switcher");QVERIFY(switcher);
+        QVariantList apps{
+            QVariantMap{{"id",45},{"name","Paint"},{"icon",source},{"active",true},{"hidden",false}},
+            QVariantMap{{"id",99},{"name","No Icon"},{"icon",QUrl()},{"active",false},{"hidden",true}}
+        };
+        QVERIFY(switcher->setProperty("applications",apps));
+        auto *settings=qobject_cast<AppearanceSettings*>(manager.appearance());QVERIFY(settings);
+        QVERIFY(settings->setSwitcher(true,80,120));QTRY_VERIFY(switcher->isVisible());
+        QCOMPARE(switcher->size(),QSizeF(158,68));
+        QCOMPARE(switcher->property("rowHeight").toInt(),24);
+        auto *icon=visualItem(switcher,"application-switcher-icon-Paint");QVERIFY(icon);
+        QTRY_VERIFY(!icon->property("useFallback").toBool());
+        QCOMPARE(icon->size(),QSizeF(16,16));
+        QCOMPARE(icon->property("source").toUrl(),source);
+        auto *fallback=visualItem(switcher,"application-switcher-icon-No Icon");QVERIFY(fallback);
+        QVERIFY(fallback->property("useFallback").toBool());QCOMPARE(fallback->opacity(),qreal(.5));
+        auto *active=visualItem(switcher,"application-switcher-Paint");QVERIFY(active);
+        QVERIFY(active->property("down").toBool());
+        const auto capture=view.grabWindow();QVERIFY(!capture.isNull());
+        QVERIFY(capture.save(QCoreApplication::applicationDirPath()+"/artifacts/application-switcher-icons.png"));
+        const auto at=icon->mapToScene(QPointF(8,8))*capture.devicePixelRatio();
+        QCOMPARE(capture.pixelColor(at.toPoint()),QColor(Qt::red));
+        QSignalSpy chosen(switcher,SIGNAL(chosen(QVariant)));QVERIFY(chosen.isValid());
+        auto *row=visualItem(switcher,"application-switcher-No Icon");QVERIFY(row);
+        QTest::mouseClick(&view,Qt::LeftButton,{},row->mapToScene({row->width()/2,row->height()/2}).toPoint());
+        QTRY_COMPARE(chosen.count(),1);QCOMPARE(chosen.first().first().toInt(),99);
+        // An unreadable image restores the independent glyph rather than leaving an empty row.
+        apps[0]=QVariantMap{{"id",45},{"name","Paint"},{"icon",QUrl("file:///nonexistent/platinum-icon.png")},{"active",true}};
+        QVERIFY(switcher->setProperty("applications",apps));
+        icon=visualItem(switcher,"application-switcher-icon-Paint");QVERIFY(icon);
+        QTRY_VERIFY(icon->property("useFallback").toBool());
+    }
+    void menuBarUsesMeasuredHeightAndExplicitKeyboardAccess()
+    {
+        QTemporaryDir root;QQuickView view;view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status()!=QQuickView::Error);
+        const auto clearView=qScopeGuard([&]{view.setSource({});});
+        view.show();QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop=view.rootObject();auto *bar=visualItem(desktop,"desktop-menu-bar");
+        QVERIFY(bar);QCOMPARE(bar->height(),qreal(20));
+        QVariant menuRoots;
+        QVariant provider=QVariantList{QVariantMap{{"id",77},{"label","File"},{"visible",true},{"enabled",true},
+            {"children",QVariantList{QVariantMap{{"id",701},{"label","Provider Save"}}}}}};
+        QVERIFY(QMetaObject::invokeMethod(desktop,"applicationMenuRoots",Q_RETURN_ARG(QVariant,menuRoots),
+            Q_ARG(QVariant,provider),Q_ARG(QVariant,false)));
+        QCOMPARE(menuRoots.toList().size(),1);
+        QCOMPARE(menuRoots.toList().first().toMap().value("kind").toString(),QString("export"));
+        QCOMPARE(menuRoots.toList().first().toMap().value("id").toInt(),77);
+        QCOMPARE(menuRoots.toList().first().toMap().value("children").toList().first().toMap().value("id").toInt(),701);
+        provider=QVariantList{QVariantMap{{"id",88},{"label","Actions"},{"visible",true},{"enabled",true}}};
+        QVERIFY(QMetaObject::invokeMethod(desktop,"applicationMenuRoots",Q_RETURN_ARG(QVariant,menuRoots),
+            Q_ARG(QVariant,provider),Q_ARG(QVariant,false)));
+        QCOMPARE(menuRoots.toList().size(),2);
+        QCOMPARE(menuRoots.toList().first().toMap().value("kind").toString(),QString("app-file"));
+        QCOMPARE(menuRoots.toList().at(1).toMap().value("id").toInt(),88);
+        auto *file=visualItem(desktop,"bar-entry-1");QVERIFY(file);
+        QCOMPARE(file->x(),qreal(29)); // Apple starts at row x8 and occupies 29px.
+        QTest::mouseClick(&view,Qt::LeftButton,{},file->mapToScene({file->width()/2,8}).toPoint());
+        QTRY_VERIFY(manager.menuOpen());
+        auto *popup=visualItem(desktop,"desktop-menu-popup");QVERIFY(popup);
+        QCOMPARE(popup->y(),qreal(19));
+        const auto menuEvidence=qEnvironmentVariable("FRANKENSTEIN_EVIDENCE_DIR");
+        if(!menuEvidence.isEmpty()){QDir().mkpath(menuEvidence);QVERIFY(view.grabWindow().save(menuEvidence+"/menu-file-open.png"));}
+        // Pointer-open menus keep the measured sticky-menu key-to-dismiss behavior.
+        QTest::keyClick(&view,Qt::Key_Down);QTRY_VERIFY(!manager.menuOpen());
+        QTest::keyClick(&view,Qt::Key_F10);QTRY_VERIFY(manager.menuOpen());
+        QVERIFY(desktop->property("menuKeyboardMode").toBool());
+        QTest::keyClick(&view,Qt::Key_Down);QTRY_COMPARE(desktop->property("menuSelection").toInt(),0);
+        QTest::keyClick(&view,Qt::Key_Right);QTRY_COMPARE(desktop->property("openMenu").toInt(),1);
+        QTest::keyClick(&view,Qt::Key_Down);QTRY_COMPARE(desktop->property("menuSelection").toInt(),0);
+        QTest::keyClick(&view,Qt::Key_End);
+        QVERIFY(desktop->property("menuSelection").toInt()>0);
+        QTest::keyClick(&view,Qt::Key_Escape);QTRY_VERIFY(!manager.menuOpen());
+        QTest::keyClick(&view,Qt::Key_F10);QTRY_VERIFY(manager.menuOpen());
+        QTest::keyClick(&view,Qt::Key_Down);QTest::keyClick(&view,Qt::Key_Return);
+        auto *about=visualItem(desktop,"about-computer-window");QVERIFY(about);
+        QTRY_VERIFY(about->isVisible());
+        QTRY_VERIFY(about->property("front").toBool());
+        QVariant entries;
+        QVERIFY(QMetaObject::invokeMethod(desktop,"shellMenuEntries",Q_RETURN_ARG(QVariant,entries),Q_ARG(QVariant,1)));
+        QCOMPARE(entries.toList().size(),1);
+        QCOMPARE(entries.toList().first().toMap().value("action").toString(),QString("close-active-window"));
+        QVERIFY(entries.toList().first().toMap().value("enabled").toBool());
+        QTest::keyClick(&view,Qt::Key_F10);QTRY_COMPARE(desktop->property("openMenu").toInt(),0);
+        QTRY_VERIFY(desktop->property("menuKeyboardMode").toBool());
+        QTest::keyClick(&view,Qt::Key_Right);QTRY_COMPARE(desktop->property("openMenu").toInt(),1);
+        QTest::keyClick(&view,Qt::Key_Down);QTRY_COMPARE(desktop->property("menuSelection").toInt(),0);
+        QVariant closeEntries;
+        QVERIFY(QMetaObject::invokeMethod(desktop,"shellMenuEntries",Q_RETURN_ARG(QVariant,closeEntries),Q_ARG(QVariant,1)));
+        QCOMPARE(closeEntries.toList().size(),1);
+        QTest::keyClick(&view,Qt::Key_Return);
+        QTRY_VERIFY(!about->isVisible()); // Menu blink retains the accessory object target.
+        QTest::keyClick(&view,Qt::Key_F10);QTRY_VERIFY(manager.menuOpen());
+        QTest::keyClick(&view,Qt::Key_Down);QTRY_COMPARE(desktop->property("menuSelection").toInt(),0);
+        QTest::keyClick(&view,Qt::Key_Return);
+        QTRY_VERIFY(about->isVisible());QTRY_VERIFY(about->property("front").toBool());
+        QTest::keyClick(&view,Qt::Key_W,Qt::MetaModifier);
+        QTRY_VERIFY(!about->isVisible());
+        const auto evidence=qEnvironmentVariable("FRANKENSTEIN_EVIDENCE_DIR");
+        if(!evidence.isEmpty()){QDir().mkpath(evidence);QVERIFY(view.grabWindow().save(evidence+"/menu-bar-measured.png"));}
+    }
+    void outlineStripsInvertCheckerPixelsAndRejectStaleSnapshots()
+    {
+        auto snapshot=std::make_shared<WindowMoveSnapshot>();
+        snapshot->image=QImage(12,12,QImage::Format_RGB32);
+        snapshot->image.fill(QColor("#63639c"));snapshot->generation=4;
+        auto strip=windowMoveStrip(*snapshot,{2,3,6,2});
+        QCOMPARE(strip.size(),QSize(6,2));
+        QCOMPARE(strip.pixelColor(0,0),QColor("#9c9c63"));
+        QCOMPARE(strip.pixelColor(1,0).alpha(),0);
+        QCOMPARE(strip.pixelColor(0,1).alpha(),0);
+        QCOMPARE(strip.pixelColor(1,1),QColor("#9c9c63"));
+        auto clipped=windowMoveStrip(*snapshot,{-1,0,2,4});
+        QCOMPARE(clipped.pixelColor(0,0).alpha(),0);
+        WindowMoveOutlineProvider provider(snapshot);QSize size;
+        QVERIFY(provider.requestImage("3/2/3/6/2",&size,{}).isNull());
+        QVERIFY(provider.requestImage("4/0/0/500/500",&size,{}).isNull());
+        QCOMPARE(provider.requestImage("4/2/3/6/2",&size,{}),strip);
+        snapshot->scale=2;
+        auto scaled=windowMoveStrip(*snapshot,{1,2,2,2});
+        QCOMPARE(scaled.size(),QSize(4,4));
+        QCOMPARE(scaled.pixelColor(0,0),QColor("#9c9c63"));
+        QCOMPARE(scaled.pixelColor(1,1),QColor("#9c9c63"));
+        QCOMPARE(scaled.pixelColor(2,0).alpha(),0);
+        snapshot->image={};
+        auto fallback=windowMoveStrip(*snapshot,{0,0,2,2});
+        QCOMPARE(fallback.pixelColor(0,0),QColor(Qt::black));
+        QCOMPARE(fallback.pixelColor(2,0),QColor(Qt::white));
+    }
     void initTestCase()
     {
+        QVERIFY(QDir().mkpath(QCoreApplication::applicationDirPath()+"/artifacts"));
         QGuiApplication::setFont(classicInterfaceFont());
     }
     void commandChordsBecomeTheApplicationsOwnShortcuts()
@@ -448,25 +668,39 @@ class DesktopTests : public QObject
         QVERIFY(volume->hasActiveFocus());
         QTest::keyClick(&view,Qt::Key_Escape);
         QTRY_VERIFY(!panel->property("opened").toBool());
-        // The Sound module refreshes on opening and checks the nearest volume step.
-        QVERIFY(click("control-strip-sound"));
-        QTRY_COMPARE(lastCall(),QByteArray("status"));
-        auto *seventyFive=shown("desktop-command-volume-75");
-        QVERIFY(seventyFive);
-        QVERIFY(seventyFive->property("modelData").toMap().value("checked").toBool());
-        QVERIFY(!visualItem(view.contentItem(),"desktop-command-volume-50")->property("modelData").toMap().value("checked").toBool());
-        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath()+"/artifacts/control-strip-sound.png"));
-        QVERIFY(choose("desktop-command-mute"));
-        QTRY_COMPARE(lastCall(),QByteArray("set mute 1"));
-        QTRY_VERIFY(!controls.busy());
-        QVERIFY(!visualItem(view.contentItem(),"control-strip-menu")->isVisible());
-        QVERIFY(click("control-strip-sound"));
-        QTRY_VERIFY(!controls.busy());
-        QVERIFY(shown("desktop-command-mute"));
-        QVERIFY(visualItem(view.contentItem(),"desktop-command-mute")->property("modelData").toMap().value("checked").toBool());
-        QVERIFY(choose("desktop-command-volume-25"));
-        QTRY_COMPARE_WITH_TIMEOUT(lastCall(),QByteArray("set volume 25"),8000);
-        QTRY_VERIFY_WITH_TIMEOUT(!controls.busy(),8000);
+        // Sound Volume is a slider, as in 9.2.2: held down, it shows the level (75 here); dragging
+        // the pointer up and releasing sets the new level; a click that doesn't move sets nothing.
+        {
+            auto *module=visualItem(view.contentItem(),"control-strip-sound");
+            QVERIFY(module);
+            const QPoint at=module->mapToScene(QPointF(module->width()/2,module->height()/2)).toPoint();
+            auto *slider=visualItem(view.contentItem(),"control-strip-volume-slider");
+            auto *thumb=visualItem(view.contentItem(),"control-strip-volume-thumb");
+            QVERIFY(slider && thumb && !slider->isVisible());
+            QTest::mousePress(&view,Qt::LeftButton,{},at);
+            QTRY_VERIFY(slider->isVisible());
+            QTRY_COMPARE(lastCall(),QByteArray("status"));
+            // 21 px wide, its top 63 px above the strip, 5 px in from the module's left.
+            auto *strip=visualItem(view.contentItem(),"control-strip");
+            QCOMPARE(qRound(slider->y()),qRound(strip->y())-63);
+            QCOMPARE(qRound(slider->x()),qRound(module->mapToScene(QPointF(0,0)).x())+5);
+            QCOMPARE(qRound(thumb->y()),3+qRound(46*25/100.0));
+            QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath()+"/artifacts/control-strip-sound.png"));
+            QTest::mouseRelease(&view,Qt::LeftButton,{},at);
+            QTRY_VERIFY(!slider->isVisible());
+            QTest::qWait(200);
+            QCOMPARE(lastCall(),QByteArray("status"));
+            QTest::mousePress(&view,Qt::LeftButton,{},at);
+            QTRY_VERIFY(slider->isVisible());
+            QTest::mouseMove(&view,at-QPoint(0,40),20);
+            QTest::mouseMove(&view,at-QPoint(0,200),20);
+            QTRY_COMPARE(qRound(thumb->y()),3);
+            QTest::mouseRelease(&view,Qt::LeftButton,{},at-QPoint(0,200),20);
+            QTRY_COMPARE_WITH_TIMEOUT(lastCall(),QByteArray("set volume 100"),8000);
+            QTRY_VERIFY_WITH_TIMEOUT(!controls.busy(),8000);
+            QVERIFY(!slider->isVisible());
+            QVERIFY(!visualItem(view.contentItem(),"control-strip-menu")->isVisible());
+        }
         // Wi-Fi was turned off from the panel above; the module offers the opposite state.
         QVERIFY(click("control-strip-wifi"));
         QTRY_VERIFY(!controls.busy());
@@ -695,6 +929,173 @@ class DesktopTests : public QObject
         QTRY_VERIFY(!window->isVisible());
         Scrapbook saved(profile);
         QCOMPARE(saved.count(), 1);
+    }
+    void assetImporterFindsAMacDiskImportsAndReportsEachKind()
+    {
+        QTemporaryDir root;
+        // Personal assets go under XDG_DATA_HOME: keep them in this test's folder.
+        const auto previousData = qgetenv("XDG_DATA_HOME");
+        const auto restoreData = qScopeGuard([&] { qputenv("XDG_DATA_HOME", previousData); });
+        qputenv("XDG_DATA_HOME", (root.path() + "/data").toUtf8());
+        // A stand-in Mac disk: a System Folder whose System file carries an empty resource fork,
+        // copied the AppleDouble way ("._System"). No Apple data.
+        const auto disk = root.path() + "/disks/Test HD";
+        QVERIFY(QDir().mkpath(disk + "/System Folder"));
+        QByteArray fork(256, '\0');
+        QDataStream(&fork, QIODevice::WriteOnly) << quint32(256) << quint32(256) << quint32(0) << quint32(30);
+        QByteArray map(30, '\0');
+        map[25] = 28; map[27] = 30; map[28] = char(0xFF); map[29] = char(0xFF);
+        fork += map;
+        QByteArray dbl;
+        {
+            QDataStream out(&dbl, QIODevice::WriteOnly);
+            out << quint32(0x00051607) << quint32(0x00020000);
+            out.writeRawData(QByteArray(16, '\0').constData(), 16);
+            out << quint16(1) << quint32(2) << quint32(38) << quint32(fork.size());
+        }
+        dbl += fork;
+        QFile system(disk + "/System Folder/System"), apple(disk + "/System Folder/._System");
+        QVERIFY(system.open(QIODevice::WriteOnly) && apple.open(QIODevice::WriteOnly));
+        apple.write(dbl); apple.close(); system.close();
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.path() + "/profile", {});
+        QVERIFY(manager.personalAssets().startsWith(root.path()));
+        auto *service = manager.assetImporter();
+        QVERIFY(service->setProperty("searchRoots", QStringList{root.path() + "/disks"}));
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY2(view.status() != QQuickView::Error,
+                 qPrintable(view.errors().isEmpty() ? QString() : view.errors().first().toString()));
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QVariant("asset-importer")), Q_ARG(QVariant, QVariant(0))));
+        auto *window = visualItem(view.contentItem(), "asset-importer-window");
+        QVERIFY(window);
+        QTRY_VERIFY(window->isVisible());
+        // It finds the disk by its System Folder; choosing it fills in the path.
+        QTRY_VERIFY_WITH_TIMEOUT(visualItem(view.contentItem(), "asset-importer-source-0"), 20000);
+        QCOMPARE(service->property("sources").toList().size(), 1);
+        QCOMPARE(service->property("sources").toList().first().toMap().value("path").toString(), disk);
+        auto *row = visualItem(view.contentItem(), "asset-importer-source-0");
+        QTest::mouseClick(&view, Qt::LeftButton, {}, row->mapToScene(QPointF(40, 10)).toPoint());
+        QTRY_COMPARE(visualItem(view.contentItem(), "asset-importer-path")->property("text").toString(), disk);
+        auto *import = visualItem(view.contentItem(), "asset-importer-import");
+        QTRY_VERIFY(import->isEnabled());
+        QTest::mouseClick(&view, Qt::LeftButton, {}, import->mapToScene(QPointF(10, 10)).toPoint());
+        // Every kind is reported; this disk has none of them, and nothing went wrong.
+        QTRY_VERIFY_WITH_TIMEOUT(visualItem(view.contentItem(), "asset-importer-section-6"), 30000);
+        QCOMPARE(service->property("error").toString(), QString());
+        const auto sections = service->property("sections").toList();
+        QCOMPARE(sections.size(), 7);
+        QCOMPARE(sections.first().toMap().value("name").toString(), QString("Alert sounds"));
+        QVERIFY(visualItem(view.contentItem(), "asset-importer-section-0")->property("text").toString()
+                    .endsWith("not on this disk"));
+        QVERIFY(QDir(manager.personalAssets()).exists());
+        // A folder without a System Folder is refused with the importer's own reason.
+        QVERIFY(QMetaObject::invokeMethod(service, "importFrom", Q_ARG(QString, root.path() + "/disks"), Q_ARG(bool, false)));
+        QTRY_VERIFY_WITH_TIMEOUT(!service->property("busy").toBool(), 30000);
+        QVERIFY2(service->property("error").toString().startsWith("No Mac OS System Folder"),
+                 qPrintable(service->property("error").toString()));
+        QTRY_VERIFY(visualItem(view.contentItem(), "asset-importer-error")->isVisible());
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/asset-importer.png"));
+    }
+    void softwareUpdateChecksALocalPackageAndRefusesAChangedOne()
+    {
+        QTemporaryDir root;
+        // A throwaway signing key, never the real release key.
+        const auto gnupg = root.path() + "/gnupg";
+        QVERIFY(QDir().mkpath(gnupg));
+        QFile::setPermissions(gnupg, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        const auto gpg = [&](const QStringList &arguments) {
+            QProcess process;
+            process.start("gpg", QStringList{"--homedir", gnupg, "--batch", "--pinentry-mode", "loopback",
+                                             "--passphrase", ""} + arguments);
+            process.waitForFinished(60000);
+            return process.exitCode() == 0 ? process.readAllStandardOutput() : QByteArray();
+        };
+        QVERIFY(gpg({"--quick-gen-key", "Test <test@example.invalid>", "ed25519", "sign", "never"}).isEmpty());
+        const auto keyring = root.path() + "/keys.gpg";
+        {
+            QFile keys(keyring);
+            QVERIFY(keys.open(QIODevice::WriteOnly));
+            QVERIFY(keys.write(gpg({"--export"})) > 0);
+        }
+        // A release folder as on the external SSD: newer than anything installed.
+        const auto bundle = root.path() + "/SSD/platinum-reality-99.0";
+        QVERIFY(QDir().mkpath(bundle));
+        const QString name = "platinum-reality-99.0-1-x86_64.pkg.tar.zst";
+        const QByteArray payload("test package");
+        const auto write = [&](const QString &file, const QByteArray &data) {
+            QFile out(bundle + "/" + file);
+            return out.open(QIODevice::WriteOnly) && out.write(data) == data.size();
+        };
+        QVERIFY(write(name, payload));
+        QJsonObject release{{"format", 1}, {"name", "platinum-reality"}, {"version", "99.0-1"},
+                            {"date", "2026-11-09T00:00:00Z"}, {"valid_until", "2099-01-01T00:00:00Z"},
+                            {"arch", "x86_64"}, {"package", name},
+                            {"sha256", QString(QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex())},
+                            {"size", payload.size()}, {"notes", "Faster folders."}};
+        QVERIFY(write("release.json", QJsonDocument(release).toJson()));
+        gpg({"--detach-sign", "-o", bundle + "/" + name + ".sig", bundle + "/" + name});
+        gpg({"--detach-sign", "-o", bundle + "/release.json.sig", bundle + "/release.json"});
+        QVERIFY(QFileInfo::exists(bundle + "/release.json.sig"));
+
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.path() + "/profile", {});
+        SoftwareUpdate service(QCoreApplication::applicationDirPath() + "/platinum-software-update", keyring,
+                               root.path() + "/software-update.json");
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY2(view.status() != QQuickView::Error,
+                 qPrintable(view.errors().isEmpty() ? QString() : view.errors().first().toString()));
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        auto *window = view.rootObject()->findChild<QObject *>("software-update-window");
+        QVERIFY(window && window->setProperty("service", QVariant::fromValue(static_cast<QObject *>(&service))));
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QVariant("software-update")), Q_ARG(QVariant, QVariant(0))));
+        QTRY_VERIFY(visualItem(view.contentItem(), "software-update-window")->isVisible());
+        QTRY_VERIFY_WITH_TIMEOUT(!service.busy(), 20000);
+        const auto click = [&](const QString &objectName) {
+            auto *item = visualItem(view.contentItem(), objectName);
+            if (!item || !item->isVisible() || !item->isEnabled()) return false;
+            QTest::mouseClick(&view, Qt::LeftButton, {}, item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint());
+            return true;
+        };
+        // Install from Local Package: the folder is typed, checked, and offered with its notes.
+        QVERIFY(click("software-update-local"));
+        QTRY_VERIFY_WITH_TIMEOUT(!service.busy(), 20000);
+        auto *path = visualItem(view.contentItem(), "software-update-path");
+        QTRY_VERIFY(path && path->isVisible());
+        QVERIFY(path->setProperty("text", bundle));
+        QVERIFY(click("software-update-use"));
+        QTRY_VERIFY_WITH_TIMEOUT(!service.ready().isEmpty() || !service.error().isEmpty(), 20000);
+        QVERIFY2(service.error().isEmpty(), qPrintable(service.error()));
+        QTRY_VERIFY(visualItem(view.contentItem(), "software-update-install")->isVisible());
+        QCOMPARE(visualItem(view.contentItem(), "software-update-result")->property("text").toString(),
+                 QString("Platinum Reality 99.0-1 is ready to install."));
+        QCOMPARE(visualItem(view.contentItem(), "software-update-notes")->property("text").toString(),
+                 QString("Faster folders."));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/software-update.png"));
+        // The same folder with a changed package is refused, and Install goes away.
+        QVERIFY(write(name, "test packagf"));
+        service.useLocal(bundle);
+        QTRY_VERIFY_WITH_TIMEOUT(!service.busy(), 20000);
+        QVERIFY2(service.error().contains("checksum"), qPrintable(service.error()));
+        QVERIFY(service.ready().isEmpty());
+        QTRY_VERIFY(!visualItem(view.contentItem(), "software-update-install")->isVisible());
+        // Automatic checks are off until chosen, and the choice is kept.
+        QVERIFY(!service.automatic());
+        QVERIFY(click("software-update-automatic"));
+        QTRY_VERIFY(service.automatic());
+        SoftwareUpdate again(QCoreApplication::applicationDirPath() + "/platinum-software-update", keyring,
+                             root.path() + "/software-update.json");
+        QVERIFY(again.automatic());
     }
     void keyCapsShowWhatTheLayoutTypesWithShiftAndOption()
     {
@@ -2372,6 +2773,84 @@ class DesktopTests : public QObject
         QTRY_VERIFY(!panel->property("opened").toBool());
         QCOMPARE(commands.size(), 2);
     }
+    // The Printer Selector module (9.2.2's: desktop printers, the default checked, "No Desktop
+    // Printers" without any) over stand-in lpstat/lpoptions that keep the default in a file.
+    void printerSelectorListsPrintersAndSetsTheDefault()
+    {
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        const auto script = [&](const QString &name, const QByteArray &body) {
+            QFile file(root.filePath(name));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("#!/bin/sh\n" + body);
+            file.close();
+            file.setPermissions(file.permissions() | QFileDevice::ExeOwner);
+        };
+        const auto state = root.filePath("default");
+        script("lpstat", ("if [ \"$1\" = -e ]; then [ -f " + root.filePath("none") + " ] || printf 'Laser\\nInkjet\\n'; "
+                          "else printf 'system default destination: %s\\n' \"$(cat " + state + ")\"; fi\n").toUtf8());
+        script("lpoptions", ("[ \"$1\" = -d ] && printf %s \"$2\" > " + state + "\n").toUtf8());
+        QFile initial(state);
+        QVERIFY(initial.open(QIODevice::WriteOnly));
+        initial.write("Laser");
+        initial.close();
+        PrinterSelector printers(root.filePath("lpstat"), root.filePath("lpoptions"));
+        QVERIFY(printers.printers().isEmpty());
+        printers.refresh();
+        QTRY_COMPARE(printers.printers().size(), 2);
+        QTRY_VERIFY(!printers.busy());
+        QCOMPARE(printers.printers().at(0).toMap().value("name").toString(), QString("Laser"));
+        QVERIFY(printers.printers().at(0).toMap().value("default").toBool());
+        QVERIFY(!printers.setDefault("Missing"));
+        QVERIFY(printers.setDefault("Inkjet"));
+        QTRY_VERIFY(!printers.busy() && printers.printers().at(1).toMap().value("default").toBool());
+        QVERIFY(!printers.printers().at(0).toMap().value("default").toBool());
+        // Missing CUPS: no printers, no error.
+        PrinterSelector absent(root.filePath("no-lpstat"), root.filePath("no-lpoptions"));
+        absent.refresh();
+        QTRY_VERIFY(!absent.busy());
+        QVERIFY(absent.printers().isEmpty());
+        // In the desktop: the strip's menu.
+        QByteArray previous[2] = {qgetenv("FRANKENSTEIN_LPSTAT"), qgetenv("FRANKENSTEIN_LPOPTIONS")};
+        const auto restore = qScopeGuard([&] {
+            qputenv("FRANKENSTEIN_LPSTAT", previous[0]);
+            qputenv("FRANKENSTEIN_LPOPTIONS", previous[1]);
+        });
+        qputenv("FRANKENSTEIN_LPSTAT", root.filePath("lpstat").toUtf8());
+        qputenv("FRANKENSTEIN_LPOPTIONS", root.filePath("lpoptions").toUtf8());
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.filePath("ws"), root.filePath("desktop-profile"), {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QTRY_VERIFY(visualItem(view.contentItem(), "control-strip-printer"));
+        const auto entries = [&] {
+            QVariant result;
+            QMetaObject::invokeMethod(view.rootObject(), "stripMenuEntries", Q_RETURN_ARG(QVariant, result),
+                                      Q_ARG(QVariant, QString("printer")));
+            return result.toList();
+        };
+        auto *selector = qobject_cast<PrinterSelector *>(manager.printers());
+        QVERIFY(selector);
+        selector->refresh();
+        QTRY_VERIFY(!selector->busy() && entries().size() == 2);
+        QCOMPARE(entries().at(0).toMap().value("text").toString(), QString("Laser"));
+        QVERIFY(entries().at(1).toMap().value("checked").toBool()); // Inkjet, set above.
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QString("default-printer")), Q_ARG(QVariant, QString("Laser"))));
+        QTRY_VERIFY(!selector->busy() && entries().at(0).toMap().value("checked").toBool());
+        QFile none(root.filePath("none"));
+        QVERIFY(none.open(QIODevice::WriteOnly));
+        none.close();
+        selector->refresh();
+        QTRY_VERIFY(!selector->busy() && entries().size() == 1);
+        QCOMPARE(entries().at(0).toMap().value("text").toString(), QString("No Desktop Printers"));
+        QVERIFY(!entries().at(0).toMap().value("enabled").toBool());
+    }
     void monitorsPanelTurnsDisplaysOnAndOffAndAsksToKeepTheChange()
     {
         // A managed session (every real login): each connected display has an On box that takes
@@ -2497,6 +2976,32 @@ class DesktopTests : public QObject
         click(item("monitors-display-eDP-1"));
         QTRY_COMPARE(item("monitors-settings-title")->property("text").toString(), QString("Resolution of Built-in:"));
         QVERIFY(item("monitors-scale-200")->property("checked").toBool());
+        // The Control Strip's Monitor Resolution module, as 9.2.2's: Open Monitors Control Panel, a
+        // line, each display's name over its resolutions with a bullet on the current one.
+        QVariant resolution;
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "stripMenuEntries", Q_RETURN_ARG(QVariant, resolution),
+                                          Q_ARG(QVariant, QString("resolution"))));
+        const auto rows = resolution.toList();
+        QCOMPARE(rows.at(0).toMap().value("text").toString(), QString("Open Monitors Control Panel"));
+        QVERIFY(rows.at(1).toMap().value("separator").toBool());
+        QVariantMap heading, chosen;
+        int bullets = 0;
+        for (const auto &row : rows) {
+            const auto m = row.toMap();
+            if (m.value("name") == "resolution-display-DP-3") heading = m;
+            if (m.value("bullet").toBool()) ++bullets;
+            if (m.value("name") == "resolution-DP-3-1280x720@60000") chosen = m;
+        }
+        QVERIFY(heading.value("heading").toBool() && !heading.value("enabled").toBool());
+        QCOMPARE(heading.value("text").toString(), QString("PM1561P"));
+        QCOMPARE(bullets, 1); // The current mode; only DP-3 lists its modes here.
+        QCOMPARE(chosen.value("text").toString(), QString("1280 x 720, 60Hz"));
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand", Q_ARG(QVariant, chosen.value("action")),
+                                          Q_ARG(QVariant, chosen.value("id"))));
+        QTRY_COMPARE(commands.size(), 6);
+        QCOMPARE(commands.last(), QByteArray("display DP-3 mode 1280x720@60000\n"));
+        QTRY_VERIFY(!manager.displayRequestBusy());
+        commands.removeLast();
         QVERIFY(!manager.setDisplayMode("DP-3", 640, 480, 60000)); // Not one the monitor offers.
         QVERIFY(!manager.setDisplayRotation("DP-3", "flipped"));
         QVERIFY(!manager.setDisplayScale("DP-3", 9));
@@ -2621,7 +3126,7 @@ class DesktopTests : public QObject
         QCOMPARE(settings->accent(), QString("blue"));
         QVERIFY(settings->doubleClickCollapse());
         QVERIFY(!settings->keepScreenAwake());
-        QCOMPARE(view.rootObject()->property("menuAccent").value<QColor>(), QColor("#2c2994"));
+        QCOMPARE(view.rootObject()->property("menuAccent").value<QColor>(), QColor("#333399"));
 
         QVERIFY(open("Appearance"));
         for (const auto *tab : {"appearance", "fonts", "desktop", "sound", "options"})
@@ -3097,12 +3602,29 @@ class DesktopTests : public QObject
         // Drag the strip to move; drag the corner to resize; both are saved.
         auto *strip = item("sticky-strip-" + name);
         const auto from = at(strip, 60, 7);
+        const auto beforeMove=note->position();
         QTest::mousePress(&view, Qt::LeftButton, {}, from);
+        QTRY_VERIFY(manager.windowMoveActive());
         for (int step = 1; step <= 5; ++step)
             QTest::mouseMove(&view, from + QPoint(step * 20, step * 10));
+        QCOMPARE(note->position(),beforeMove);
+        QCOMPARE(notes->data(notes->index(0), StickyNotes::XRole).toInt(),qRound(beforeMove.x()));
         QTest::mouseRelease(&view, Qt::LeftButton, {}, from + QPoint(100, 50));
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QCOMPARE(note->position(),beforeMove+QPointF(100,50));
         QTRY_COMPARE(notes->data(notes->index(0), StickyNotes::XRole).toInt(), qRound(note->x()));
         const auto oldX = qRound(note->x());
+        const auto committedNote=note->position();
+        const auto cancelFrom=at(strip,60,7);
+        QTest::mousePress(&view,Qt::LeftButton,{},cancelFrom);
+        QTest::mouseMove(&view,cancelFrom+QPoint(40,20),30);
+        QTRY_VERIFY(manager.windowMoveActive());
+        QTest::keyClick(&view,Qt::Key_Escape);
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QTest::mouseRelease(&view,Qt::LeftButton,{},cancelFrom+QPoint(40,20));
+        QCOMPARE(note->position(),committedNote);
+        QCOMPARE(notes->data(notes->index(0), StickyNotes::XRole).toInt(),oldX);
+        QCOMPARE(notes->count(),1);
         auto *grow = item("sticky-grow-" + name);
         const auto corner = at(grow);
         QTest::mousePress(&view, Qt::LeftButton, {}, corner);
@@ -3164,11 +3686,23 @@ class DesktopTests : public QObject
     void controlStripAttachesToEdgesFoldsAndOpensPanelsFromModuleMenus()
     {
         QTemporaryDir root;
+        // Personal assets live under XDG_DATA_HOME: keep this test's stand-in icon in its own folder.
+        const auto previousData = qgetenv("XDG_DATA_HOME");
+        const auto restoreData = qScopeGuard([&] { qputenv("XDG_DATA_HOME", previousData); });
+        qputenv("XDG_DATA_HOME", (root.path() + "/data").toUtf8());
         QQuickView view;
         view.resize(1120, 760);
         NativeManager manager(nullptr, &view, root.path(), root.path() + "/profile", {});
+        QVERIFY(manager.personalAssets().startsWith(root.path()));
         auto *settings = qobject_cast<AppearanceSettings *>(manager.appearance());
         QVERIFY(settings);
+        // An icon imported from the user's own Mac OS 9 (here a stand-in) replaces our drawing.
+        QVERIFY(QDir().mkpath(manager.personalAssets() + "/icons/control-strip"));
+        {
+            QImage icon(16, 16, QImage::Format_ARGB32);
+            icon.fill(QColor("#336699"));
+            QVERIFY(icon.save(manager.personalAssets() + "/icons/control-strip/energy.png"));
+        }
         view.rootContext()->setContextProperty("manager", &manager);
         view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
         QVERIFY2(
@@ -3209,10 +3743,14 @@ class DesktopTests : public QObject
         QCOMPARE(strip->position(), QPointF(0, view.height() - strip->height()));
         QVERIFY(sceneX("control-strip-collapse") < sceneX("control-strip-sound"));
         QVERIFY(sceneX("control-strip-sound") < sceneX("control-strip-tab"));
+        // Measured in the 9.2.2 reference VM: 24 px tall; the edge line, collapse box, two arrow
+        // wells and end tab take 60 px, and each 30 px module 31 with its line.
+        QCOMPARE(strip->height(), 24);
         const auto expandedWidth = strip->width();
+        QCOMPARE(qRound(expandedWidth), 60 + 31 * int(strip->property("modules").toList().size()));
         QVERIFY(click("control-strip-collapse"));
         QTRY_VERIFY(settings->controlStripCollapsed());
-        QCOMPARE(strip->width(), 16);
+        QCOMPARE(strip->width(), 18);
         QCOMPARE(strip->x(), 0);
         QVERIFY(click("control-strip-tab"));
         QTRY_VERIFY(!settings->controlStripCollapsed());
@@ -3279,10 +3817,10 @@ class DesktopTests : public QObject
         QVERIFY(sceneX("control-strip-tab") < sceneX("control-strip-sound"));
         QVERIFY(sceneX("control-strip-sound") < sceneX("control-strip-collapse"));
         AppearanceSettings right(root.path() + "/profile");
-        QCOMPARE(right.controlStripX(), view.width() - 16);
+        QCOMPARE(right.controlStripX(), view.width() - 18);
         QVERIFY(click("control-strip-tab"));
         QTRY_VERIFY(settings->controlStripCollapsed());
-        QCOMPARE(strip->x(), view.width() - 16);
+        QCOMPARE(strip->x(), view.width() - 18);
         QVERIFY(click("control-strip-tab"));
         QTRY_VERIFY(!settings->controlStripCollapsed());
         QCOMPARE(strip->x(), view.width() - expandedWidth);
@@ -3290,16 +3828,16 @@ class DesktopTests : public QObject
         // and never the height.
         const int moduleCount = strip->property("modules").toList().size();
         QVERIFY(moduleCount >= 4);
-        drag(QPoint(2 * 36, -60));
+        drag(QPoint(2 * 31, -60));
         QTRY_COMPARE(settings->controlStripModules(), moduleCount - 2);
-        QCOMPARE(strip->width(), expandedWidth - 2 * 36);
+        QCOMPARE(strip->width(), expandedWidth - 2 * 31);
         QCOMPARE(strip->x(), view.width() - strip->width());
         QCOMPARE(strip->y(), old.y() - 100);
         QVERIFY(visualItem(view.contentItem(), "control-strip-scroll-forward")->property("active").toBool());
         // The length stays when the strip moves.
         drag(QPoint(-800, 0), Qt::AltModifier);
         QTRY_COMPARE(strip->x(), 0);
-        QCOMPARE(strip->width(), expandedWidth - 2 * 36);
+        QCOMPARE(strip->width(), expandedWidth - 2 * 31);
         {
             // While resizing, the strip keeps its length and the outline shows the new one.
             auto *tab = visualItem(view.contentItem(), "control-strip-tab");
@@ -3309,18 +3847,18 @@ class DesktopTests : public QObject
             QTest::mouseMove(&view, point + QPoint(-36, 0), 30);
             QTRY_VERIFY(outline->isVisible());
             QCOMPARE(qRound(outline->width()), qRound(strip->width() - 36 + 2));
-            QCOMPARE(strip->width(), expandedWidth - 2 * 36);
+            QCOMPARE(strip->width(), expandedWidth - 2 * 31);
             QTest::mouseRelease(&view, Qt::LeftButton, {}, point + QPoint(-36, 0), 30);
         }
         QTRY_COMPARE(settings->controlStripModules(), moduleCount - 3);
         // Dragged back to the edge it collapses; dragged out again it opens to that length.
         drag(QPoint(-2000, 0));
         QTRY_VERIFY(settings->controlStripCollapsed());
-        QCOMPARE(strip->width(), 16);
-        drag(QPoint(114, 40)); // 16 + 114: the fixed parts and two modules.
+        QCOMPARE(strip->width(), 18);
+        drag(QPoint(114, 40)); // 18 + 114: the fixed parts and two modules, nearly.
         QTRY_VERIFY(!settings->controlStripCollapsed());
         QCOMPARE(settings->controlStripModules(), 2);
-        QCOMPARE(strip->width(), 16 * 2 + 13 * 2 + 2 * 36);
+        QCOMPARE(strip->width(), 60 + 2 * 31);
         QCOMPARE(strip->x(), 0);
         // Long enough for every module, it shows them all again.
         drag(QPoint(2000, 0));
@@ -3335,7 +3873,10 @@ class DesktopTests : public QObject
         auto *menu = visualItem(view.contentItem(), "control-strip-menu");
         QVERIFY(menu);
         QTRY_VERIFY(menu->isVisible());
-        QCOMPARE(qRound(menu->y() + menu->height()), qRound(strip->y()));
+        // Its bottom edge overlaps the strip's top by 3 px, its left edge 1 px left of the module.
+        QCOMPARE(qRound(menu->y() + menu->height()), qRound(strip->y()) + 3);
+        QCOMPARE(qRound(menu->x()), qRound(visualItem(view.contentItem(), "control-strip-appearance")
+                                               ->mapToScene(QPointF(0, 0)).x()) - 1);
         QCOMPARE(strip->property("openModule").toString(), QString("appearance"));
         QVERIFY(choose("desktop-command-appearance"));
         auto *panel = view.rootObject()->findChild<QObject *>("appearance-dialog");
@@ -3378,6 +3919,7 @@ class DesktopTests : public QObject
         // The menu provides a way back when the strip is hidden: Apple menu >
         // Control Panels, which also shows the strip's state with a check mark.
         QTest::mouseClick(&view, Qt::LeftButton, {}, QPoint(25, 13));
+        QTRY_COMPARE(view.rootObject()->property("openMenu").toInt(), 0);
         auto *panels = visualItem(view.contentItem(), "desktop-command-control-panels");
         QVERIFY(panels);
         panels->parentItem()->ensurePolished();
@@ -3403,6 +3945,29 @@ class DesktopTests : public QObject
                 foundFont = true;
             }
         QVERIFY(foundFont);
+        QTest::keyClick(&view, Qt::Key_Escape);
+        QTRY_VERIFY(!panel->property("opened").toBool());
+        // Energy Settings, as 9.2.2's: its control panel, a line, Sleep Now (only where this
+        // session may sleep the computer; never chosen here).
+        {
+            auto *energyModule = visualItem(view.contentItem(), "control-strip-energy");
+            QVERIFY(energyModule);
+            auto *imported = visualItem(energyModule, "control-strip-personal-icon");
+            QTRY_VERIFY(imported && imported->isVisible());
+            auto *sound = visualItem(view.contentItem(), "control-strip-sound");
+            QVERIFY(!visualItem(sound, "control-strip-personal-icon")->isVisible());
+        }
+        QVERIFY(click("control-strip-energy"));
+        QTRY_VERIFY(menu->isVisible());
+        auto *sleepNow = visualItem(view.contentItem(), "desktop-command-sleep-now");
+        QTRY_VERIFY(sleepNow && sleepNow->isVisible());
+        QCOMPARE(sleepNow->property("modelData").toMap().value("enabled").toBool(), manager.powerAvailable());
+        QVERIFY(choose("desktop-command-energy"));
+        auto *energy = view.rootObject()->findChild<QObject *>("energy-panel");
+        QVERIFY(energy);
+        QTRY_VERIFY(energy->property("opened").toBool());
+        QTest::keyClick(&view, Qt::Key_Escape);
+        QTRY_VERIFY(!energy->property("opened").toBool());
     }
     void applicationBrowserSearchCancelAndPreviewLaunchGuard()
     {
@@ -3976,6 +4541,7 @@ class DesktopTests : public QObject
         QVERIFY2(
             view.status() != QQuickView::Error,
             qPrintable(view.errors().isEmpty() ? QString() : view.errors().first().toString()));
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
         view.show();
         QVERIFY(QTest::qWaitForWindowExposed(&view));
         auto *root = view.rootObject();
@@ -3983,13 +4549,17 @@ class DesktopTests : public QObject
         QCOMPARE(root->property("openMenu").toInt(), -1);
         QTest::mouseClick(&view, Qt::LeftButton, {}, QPoint(25, 13));
         QCOMPARE(root->property("openMenu").toInt(), 0);
-        QTest::mouseMove(&view, QPoint(70, 13));
+        auto *file = visualItem(view.contentItem(), "bar-entry-1");
+        QVERIFY(file);
+        file->parentItem()->ensurePolished();
+        const auto filePoint = file->mapToScene(QPointF(file->width()/2, 8)).toPoint();
+        QTest::mouseMove(&view, filePoint);
         QTRY_COMPARE(root->property("openMenu").toInt(), 1);
-        QTest::mouseMove(&view, QPoint(72, 13));
+        QTest::mouseMove(&view, filePoint + QPoint(1, 0));
         QCOMPARE(root->property("openMenu").toInt(), 1);
         QTest::mouseClick(&view, Qt::LeftButton, {}, QPoint(500, 500));
         QCOMPARE(root->property("openMenu").toInt(), -1);
-        QTest::mouseClick(&view, Qt::LeftButton, {}, QPoint(70, 13));
+        QTest::mouseClick(&view, Qt::LeftButton, {}, filePoint);
         QCOMPARE(root->property("openMenu").toInt(), 1);
         manager.hideApplication();
         QCOMPARE(root->property("openMenu").toInt(), -1);
@@ -4291,6 +4861,137 @@ class DesktopTests : public QObject
         QTest::qWait(1100);QCOMPARE(window->property("samples").toInt(),stopped);
         QVERIFY(open());
         QTest::keyClick(&view,Qt::Key_Escape);QTRY_VERIFY(!window->isVisible());
+    }
+    void accessoryOutlineDefersMovementAndCancelsWithoutClosing()
+    {
+        QTemporaryDir root; QQuickView view; view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status()!=QQuickView::Error);
+        const auto clearView=qScopeGuard([&]{view.setSource({});});
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(),"dispatchShellCommand",
+            Q_ARG(QVariant,QVariant("about")),Q_ARG(QVariant,QVariant(0))));
+        auto *window=visualItem(view.contentItem(),"about-computer-window"); QVERIFY(window);
+        QTRY_VERIFY(window->isVisible() && window->hasActiveFocus());
+        const auto origin=window->position();
+        const auto title=window->mapToScene(QPointF(60,12)).toPoint();
+        QTest::mousePress(&view,Qt::LeftButton,{},title);
+        QTRY_VERIFY(manager.windowMoveActive());
+        QTest::mouseMove(&view,title+QPoint(60,30),30);
+        QCOMPARE(window->position(),origin);
+        QCOMPARE(manager.windowMoveRect().topLeft(),origin.toPoint()+QPoint(60,30));
+        auto *outline=visualItem(view.contentItem(),"window-move-outline"); QVERIFY(outline);
+        QTRY_VERIFY(outline->isVisible());
+        QTest::mouseRelease(&view,Qt::LeftButton,{},title+QPoint(60,30));
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QCOMPARE(window->position(),origin+QPointF(60,30));
+        const auto committed=window->position();
+        const auto second=window->mapToScene(QPointF(60,12)).toPoint();
+        QTest::mousePress(&view,Qt::LeftButton,{},second);
+        QTest::mouseMove(&view,second+QPoint(30,20),30);
+        QTRY_VERIFY(manager.windowMoveActive());
+        QTest::keyClick(&view,Qt::Key_Escape);
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QVERIFY(window->isVisible()); // Escape cancels the move before accessory close.
+        QTest::mouseRelease(&view,Qt::LeftButton,{},second+QPoint(30,20));
+        QCOMPARE(window->position(),committed);
+        QTest::mousePress(&view,Qt::LeftButton,{},second);
+        QTRY_VERIFY(manager.windowMoveActive());
+        window->setWidth(window->width()+1);
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QTest::mouseRelease(&view,Qt::LeftButton,{},second);
+        QCOMPARE(window->position(),committed);
+        QTest::mousePress(&view,Qt::LeftButton,{},second);
+        QTRY_VERIFY(manager.windowMoveActive());
+        window->setVisible(false);
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QTest::mouseRelease(&view,Qt::LeftButton,{},second);
+        QCOMPARE(window->position(),committed);
+    }
+    void switcherOutlineCommitsSettingsOnlyOnRelease()
+    {
+        QTemporaryDir root; QQuickView view; view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status()!=QQuickView::Error);
+        const auto clearView=qScopeGuard([&]{view.setSource({});});
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *settings=qobject_cast<AppearanceSettings*>(manager.appearance()); QVERIFY(settings);
+        QVERIFY(settings->setSwitcher(true,80,120));
+        auto *palette=visualItem(view.contentItem(),"application-switcher"); QVERIFY(palette);
+        QTRY_VERIFY(palette->isVisible());
+        const auto origin=palette->position();
+        const auto title=palette->mapToScene(QPointF(60,8)).toPoint();
+        QTest::mousePress(&view,Qt::LeftButton,{},title);
+        QTRY_VERIFY(manager.windowMoveActive());
+        QTest::mouseMove(&view,title+QPoint(60,30),30);
+        QCOMPARE(palette->position(),origin);
+        QCOMPARE(settings->switcher().value("x").toInt(),80);
+        QTest::mouseRelease(&view,Qt::LeftButton,{},title+QPoint(60,30));
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QCOMPARE(palette->position(),origin+QPointF(60,30));
+        QCOMPARE(settings->switcher().value("x").toInt(),140);
+        QCOMPARE(settings->switcher().value("y").toInt(),150);
+        const auto committed=palette->position();
+        const auto second=palette->mapToScene(QPointF(60,8)).toPoint();
+        QTest::mousePress(&view,Qt::LeftButton,{},second);
+        QTest::mouseMove(&view,second+QPoint(40,20),30);
+        QTRY_VERIFY(manager.windowMoveActive());
+        QTest::keyClick(&view,Qt::Key_Escape);
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QTest::mouseRelease(&view,Qt::LeftButton,{},second+QPoint(40,20));
+        QCOMPARE(palette->position(),committed);
+        QCOMPARE(settings->switcher().value("x").toInt(),140);
+        // Restored bindings still respond to an independent saved placement change.
+        QVERIFY(settings->setSwitcher(true,180,190));
+        QTRY_COMPARE(palette->position(),origin+QPointF(100,70));
+    }
+    void separateAccessoryFramesUseOutlineDragging_data()
+    {
+        QTest::addColumn<QString>("componentName");
+        for (const auto &name : {"InfoWindow", "HelpWindow", "ControlPanelsWindow", "ClipboardWindow"})
+            QTest::newRow(name) << QString(name);
+    }
+    void separateAccessoryFramesUseOutlineDragging()
+    {
+        QFETCH(QString,componentName);
+        QTemporaryDir root; QQuickView view; view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        view.rootContext()->setContextProperty("manager",&manager);
+        QQmlComponent component(view.engine(), QUrl("qrc:/desktop/src/desktop/"+componentName+".qml"));
+        QVERIFY2(component.isReady(),qPrintable(component.errorString()));
+        QVariantMap properties;
+        if (componentName=="InfoWindow") properties["details"]=QVariantMap{
+            {"key","owned"},{"name","Owned"},{"kind","file"},{"kindLabel","Document"},
+            {"size","12 bytes"},{"where","/tmp"},{"created","Unavailable"},{"modified","Unavailable"}};
+        if (componentName=="ClipboardWindow") properties["clipboard"]=QVariantMap{{"kind","text"},{"text","owned"}};
+        std::unique_ptr<QObject> owned(component.createWithInitialProperties(properties));
+        auto *window=qobject_cast<QQuickItem*>(owned.get()); QVERIFY(window);
+        window->setParentItem(view.contentItem()); window->setPosition({80,80}); window->setVisible(true);
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view)); window->forceActiveFocus();
+        const auto origin=window->position();
+        const auto title=window->mapToScene(QPointF(60,12)).toPoint();
+        QTest::mousePress(&view,Qt::LeftButton,{},title);
+        QTRY_VERIFY(manager.windowMoveActive());
+        QTest::mouseMove(&view,title+QPoint(40,20),30);
+        QCOMPARE(window->position(),origin);
+        QTest::mouseRelease(&view,Qt::LeftButton,{},title+QPoint(40,20));
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QCOMPARE(window->position(),origin+QPointF(40,20));
+        const auto committed=window->position();
+        const auto second=window->mapToScene(QPointF(60,12)).toPoint();
+        QTest::mousePress(&view,Qt::LeftButton,{},second);
+        QTRY_VERIFY(manager.windowMoveActive());
+        QQuickItem other(view.contentItem());
+        other.forceActiveFocus();
+        QTRY_VERIFY(other.hasActiveFocus());
+        QTRY_VERIFY(!window->hasActiveFocus());
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QTest::mouseRelease(&view,Qt::LeftButton,{},second+QPoint(20,10));
+        QCOMPARE(window->position(),committed);
     }
     void classicControlPanelChangesTheRealSettings()
     {

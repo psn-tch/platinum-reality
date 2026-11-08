@@ -12,6 +12,8 @@ $XDG_DATA_HOME/platinum-reality/assets, which is never part of the repository or
   icons/about-banner.png, icons/about-logo.png  the Finder's About This Computer banner, and the
                              Mac OS face from it, shown in About This Computer
   desktop-pictures/<Collection>/<Name>.jpg  the Appearance desktop pictures (JPEG files)
+  icons/control-strip/<module>.png  16 px icons of the Control Strip modules Platinum Reality
+                            has equivalents for (sound, soundsource, energy)
   cursors/Platinum-MacOS9/  an Xcursor theme from the System file's cursors (the arrow lives in ROM,
                             so it and anything else missing come from the inherited theme)
 
@@ -29,12 +31,20 @@ import sys
 import tempfile
 import zlib
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hfs_classic  # noqa: E402
+
 SYSTEM = 'System Folder/System'
 PLATINUM = 'System Folder/Appearance/Sound Sets/Platinum Sounds'
 ICONS_FILE = 'System Folder/System Resources'  # Mac OS 9; older systems keep icons in System.
 FINDER = 'System Folder/Finder'
 ABOUT_BANNER = 4000  # The Finder's 'PICT' drawn at the top of About This Computer (Mac OS 9.2.2).
 PICTURES = 'System Folder/Appearance/Desktop Pictures'
+STRIP = 'System Folder/Control Strip Modules'
+# Control Strip modules with a Platinum Reality equivalent: file, the 'ics8'/'ics#' pair it draws on
+# the strip (found by matching a 9.2.2 strip capture, docs/fidelity/control-strip.md), and our name.
+STRIP_ICONS = {'Sound Volume': (256, 'sound'), 'SoundSource Strip': (669, 'soundsource'),
+               'Energy Settings': (256, 'energy')}
 MAX_PICTURE_BYTES = 16 * 1024 * 1024
 # Standard icon resource IDs (Icons.h) and the names the desktop looks for.
 ICONS = {-4000: 'document', -3999: 'folder', -3997: 'folder-open', -3996: 'application',
@@ -174,6 +184,20 @@ def icon_pixels(data, size=32):
         rgb = [(0, 0, 0) if v else (255, 255, 255) for v in one_bit(found[bits_kind], size, 0)]
     else:
         return None
+    return bytes(channel for (r, g, b), a in zip(rgb, alpha) for channel in (r, g, b, a))
+
+
+def small_icon(fork, identity):
+    """A 16x16 icon from separate 'ics8' (colour, Mac palette) and 'ics#' (bitmap then mask) resources."""
+    colour = {i: d for i, _, d in resources(fork, b'ics8')}.get(identity)
+    bitmap = {i: d for i, _, d in resources(fork, b'ics#')}.get(identity)
+    if bitmap is None or len(bitmap) < 64:
+        return None
+    alpha = one_bit(bitmap, 16, 32)
+    if colour is not None and len(colour) >= 256:
+        rgb = [PALETTE[index] for index in colour[:256]]
+    else:
+        rgb = [(0, 0, 0) if v else (255, 255, 255) for v in one_bit(bitmap, 16, 0)]
     return bytes(channel for (r, g, b), a in zip(rgb, alpha) for channel in (r, g, b, a))
 
 
@@ -347,55 +371,188 @@ def safe_name(name):
     return re.sub(r'[^A-Za-z0-9 ._-]', '_', name).strip(' .') or 'Sound'
 
 
-def extract_forks(disk, work):
-    """Resource forks of the two source files, through a private raw copy of the disk."""
-    raw = disk
-    if subprocess.run(['qemu-img', 'info', '--output=json', str(disk)], capture_output=True, text=True,
+class SevenZipVolume:
+    """An HFS+ volume (or a disk holding one) read through 7-Zip."""
+    def __init__(self, raw, work):
+        self.raw, self.work = raw, work
+        listing = subprocess.run(['7z', 'l', '-sns', '-ba', '-slt', str(raw)], capture_output=True,
+                                 text=True, check=True).stdout
+        self.paths = set(re.findall(r'^Path = (.+)$', listing, re.M))
+        self.files = {p for p in self.paths if ':' not in p.rsplit('/', 1)[-1]}
+
+    def forks(self, wanted, resource):
+        names = {path: path + (':rsrc' if resource else '') for path in wanted}
+        names = {path: name for path, name in names.items() if name in self.paths}
+        if not names:
+            return {}
+        folder = self.work / ('rsrc' if resource else 'data')
+        subprocess.run(['7z', 'x', '-sns', '-y', '-o' + str(folder), str(self.raw), *names.values()],
+                       check=True, stdout=subprocess.DEVNULL)
+        return {path: (folder / name).read_bytes() for path, name in names.items() if (folder / name).is_file()}
+
+
+class ClassicVolume:
+    """A classic HFS ("Mac OS Standard") volume, as on Mac OS 9 install CDs (hfs_classic)."""
+    def __init__(self, volume):
+        self.volume = volume
+        self.keys = volume.listing()
+        self.files = set(self.keys)
+
+    def forks(self, wanted, resource):
+        return {path: self.volume.read(self.keys[path], resource) for path in wanted if path in self.keys}
+
+
+class FolderVolume:
+    """A folder holding a Mac OS 9 System Folder: a mounted Mac disk, or one copied with its
+    resource forks (macOS "..namedfork/rsrc", Linux hfsplus "<file>/rsrc", AppleDouble "._<file>")."""
+    def __init__(self, root):
+        self.root = root
+        self.name = root.name
+        self.files = set()
+        for path in root.rglob('*'):
+            if path.is_file() and not path.name.startswith('._') and len(self.files) < 200000:
+                self.files.add(self.name + '/' + path.relative_to(root).as_posix())
+
+    def resource(self, file):
+        for candidate in (file / '..namedfork' / 'rsrc', file / 'rsrc'):
+            try:
+                data = candidate.read_bytes()
+                if data:
+                    return data
+            except OSError:
+                pass
+        double = file.with_name('._' + file.name)
+        if double.is_file():
+            data = double.read_bytes()
+            if data[:4] == b'\x00\x05\x16\x07':
+                count, = struct.unpack_from('>H', data, 24)
+                for index in range(count):
+                    entry, offset, length = struct.unpack_from('>III', data, 26 + 12 * index)
+                    if entry == 2:
+                        return data[offset:offset + length]
+        return None
+
+    def forks(self, wanted, resource):
+        found = {}
+        for path in wanted:
+            if path not in self.files:
+                continue
+            file = self.root / path.split('/', 1)[1]
+            data = self.resource(file) if resource else file.read_bytes()
+            if data:
+                found[path] = data
+        return found
+
+
+def open_volumes(source, work):
+    """The Mac volumes in `source`: a folder, a qcow2 or raw disk image, or a CD image."""
+    if source.is_dir():
+        return [FolderVolume(source)]
+    raw = source
+    if subprocess.run(['qemu-img', 'info', '--output=json', str(source)], capture_output=True, text=True,
                       check=True).stdout.find('"format": "qcow2"') >= 0:
         raw = work / 'disk.raw'
-        subprocess.run(['qemu-img', 'convert', '-O', 'raw', str(disk), str(raw)], check=True)
-    listing = subprocess.run(['7z', 'l', '-sns', '-ba', '-slt', str(raw)], capture_output=True,
-                             text=True, check=True).stdout
-    paths = re.findall(r'^Path = (.+)$', listing, re.M)
-    forks = {}
-    for wanted in (SYSTEM, PLATINUM, ICONS_FILE, FINDER):
-        matches = [p for p in paths if p.endswith('/' + wanted + ':rsrc') and p.count('/') == wanted.count('/') + 1]
-        if len(matches) != 1 and wanted in (ICONS_FILE, FINDER):
-            continue
-        if len(matches) != 1:
-            raise SystemExit(f'Expected one Mac OS 9 "{wanted}"; found {len(matches)}')
-        forks[wanted] = matches[0]
-    subprocess.run(['7z', 'x', '-sns', '-y', '-o' + str(work / 'forks'), str(raw), *forks.values()],
-                   check=True, stdout=subprocess.DEVNULL)
-    found = {key: (work / 'forks' / value).read_bytes() for key, value in forks.items()}
+        subprocess.run(['qemu-img', 'convert', '-O', 'raw', str(source), str(raw)], check=True)
+    # A disk may hold both kinds (a small classic HFS partition beside the HFS+ one): try them all.
+    volumes = [ClassicVolume(volume) for volume in hfs_classic.open_image(raw)]
+    try:
+        volumes.append(SevenZipVolume(raw, work))
+    except subprocess.CalledProcessError:
+        pass
+    if not volumes:
+        raise SystemExit(f'"{source.name}" is not a Mac disk or CD image this importer can read')
+    return volumes
+
+
+def extract_forks(source, work):
+    """The resource forks and pictures the import needs, from the first volume with a System Folder."""
+    for volume in open_volumes(source, work):
+        systems = sorted(p for p in volume.files if p.endswith('/' + SYSTEM) and p.count('/') == SYSTEM.count('/') + 1)
+        if systems:
+            break
+    else:
+        raise SystemExit('No Mac OS System Folder was found in ' + source.name)
+    root = systems[0].split('/', 1)[0]
+    wanted = {key: f'{root}/{key}' for key in (SYSTEM, PLATINUM, ICONS_FILE, FINDER)}
+    got = volume.forks(wanted.values(), True)
+    found = {key: got[path] for key, path in wanted.items() if path in got}
+    if SYSTEM not in found:
+        raise SystemExit('The System file has no resources (was it copied without its resource fork?)')
+    strip = {name: f'{root}/{STRIP}/{name}' for name in STRIP_ICONS}
+    got = volume.forks(strip.values(), True)
+    found['strip'] = {name: got[path] for name, path in strip.items() if path in got}
     # Desktop pictures: data forks one folder deep (<Collection>/<Name>), JPEG only.
-    volume = forks[SYSTEM].split('/', 1)[0]
-    pictures = [p for p in paths if p.startswith(volume + '/' + PICTURES + '/') and ':' not in p
-                and p.count('/') == (volume + '/' + PICTURES).count('/') + 2]
+    base = f'{root}/{PICTURES}/'
+    pictures = [p for p in volume.files if p.startswith(base) and p[len(base):].count('/') == 1]
     found['pictures'] = {}
-    if pictures:
-        subprocess.run(['7z', 'x', '-y', '-o' + str(work / 'pictures'), str(raw), *pictures],
-                       check=True, stdout=subprocess.DEVNULL)
-        for path in pictures:
-            file = work / 'pictures' / path
-            if file.is_file() and not file.is_symlink() and file.stat().st_size <= MAX_PICTURE_BYTES:
-                data = file.read_bytes()
-                if data.startswith(b'\xff\xd8\xff'):
-                    collection, name = path.split('/')[-2:]
-                    found['pictures'][(collection, name)] = data
+    for path, data in volume.forks(pictures, False).items():
+        if len(data) <= MAX_PICTURE_BYTES and data.startswith(b'\xff\xd8\xff'):
+            collection, name = path.split('/')[-2:]
+            found['pictures'][(collection, name)] = data
+    return found
+
+
+IMAGE_SUFFIXES = {'.iso', '.toast', '.cdr', '.img', '.dsk', '.hfv', '.hfs', '.dmg', '.qcow2', '.raw', '.image'}
+
+
+def find_sources(roots, depth=4, limit=60):
+    """Likely Mac OS 9 sources under `roots`: disk and CD images, and folders holding a System
+    Folder (a mounted Mac disk). Cheap checks only; nothing is opened beyond a directory listing."""
+    found, seen = [], set()
+
+    def visit(folder, level):
+        if len(found) >= limit or level > depth:
+            return
+        try:
+            entries = sorted(folder.iterdir(), key=lambda p: p.name.casefold())
+        except OSError:
+            return
+        if any(e.name == 'System Folder' and e.is_dir() for e in entries):
+            found.append({'path': str(folder), 'name': folder.name, 'kind': 'folder', 'size': 0})
+            return
+        for entry in entries:
+            if entry.name.startswith('.') or entry.is_symlink():
+                continue
+            try:
+                if entry.is_dir():
+                    visit(entry, level + 1)
+                elif entry.suffix.lower() in IMAGE_SUFFIXES and entry.stat().st_size >= 1 << 20:
+                    real = entry.resolve()
+                    if real not in seen:
+                        seen.add(real)
+                        found.append({'path': str(entry), 'name': entry.name, 'kind': 'image',
+                                      'size': entry.stat().st_size})
+            except OSError:
+                pass
+    for root in roots:
+        visit(Path(root), 0)
     return found
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('disk', type=Path, help='Mac OS 9 disk image (qcow2 or raw); never written')
+    parser.add_argument('disk', type=Path, nargs='?',
+                        help='Mac OS 9 disk or CD image (qcow2, raw, ISO), or a folder holding a System Folder; '
+                             'never written')
+    parser.add_argument('--find', action='store_true',
+                        help='list likely sources in the home folder and mounted disks as JSON, then stop')
+    parser.add_argument('--roots', type=Path, nargs='+', help='with --find: look here instead')
     data_home = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share')
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from session_support import adopt_previous_name
     adopt_previous_name(data_home)  # imports join a Platinum Dreams folder under its new name
     parser.add_argument('--assets', type=Path, default=data_home / 'platinum-reality/assets')
     parser.add_argument('--replace', action='store_true', help='overwrite files imported earlier')
+    parser.add_argument('--json', action='store_true', help='report each kind of asset as one JSON line')
     options = parser.parse_args()
+    if options.find:
+        user = os.environ.get('USER', '')
+        roots = options.roots or ([Path.home()] + [Path(p) for p in (f'/run/media/{user}', '/media', '/mnt')
+                                                   if Path(p).is_dir()])
+        print(json.dumps({'sources': find_sources(roots)}))
+        return 0
+    if options.disk is None:
+        parser.error('a disk image or folder is needed')
     disk = options.disk.expanduser().resolve(strict=True)
     before = disk.stat().st_mtime_ns
     with tempfile.TemporaryDirectory(prefix='platinum-macos9-import-') as temporary:
@@ -406,6 +563,13 @@ def main():
     platinum = sounds / 'platinum'
     platinum.mkdir(parents=True, exist_ok=True)
     written = kept = skipped = 0
+    report, marks = [], [0, 0, 0]
+
+    def close(name):
+        """Record what the section just finished found, under `name`."""
+        report.append({'name': name, 'imported': written - marks[0], 'kept': kept - marks[1],
+                       'skipped': skipped - marks[2]})
+        marks[:] = [written, kept, skipped]
     # Alert sounds: named System sounds below 100 (Simple Beep, Sosumi, Indigo, ...).
     for identity, name, data in resources(forks[SYSTEM], b'snd '):
         if not name or not 1 <= identity < 100:
@@ -420,8 +584,9 @@ def main():
             written += 1
         else:
             kept += 1
+    close('Alert sounds')
     manifest = {}
-    for identity, name, data in resources(forks[PLATINUM], b'snd '):
+    for identity, name, data in (resources(forks[PLATINUM], b'snd ') if PLATINUM in forks else ()):
         decoded = decode_sound(data)
         encoded = decoded and wav(*decoded)
         if not name or not encoded or len(encoded) > MAX_BYTES:
@@ -433,7 +598,9 @@ def main():
             written += 1
         else:
             kept += 1
-    write(platinum / 'manifest.json', (json.dumps(manifest, indent=2) + '\n').encode(), True)
+    if manifest:  # A source without the Platinum Sounds keeps an earlier import's set.
+        write(platinum / 'manifest.json', (json.dumps(manifest, indent=2) + '\n').encode(), True)
+    close('Platinum interface sounds')
     icons = options.assets.expanduser() / 'icons'
     icons.mkdir(parents=True, exist_ok=True)
     families = {}
@@ -450,6 +617,19 @@ def main():
                 written += 1
             else:
                 kept += 1
+    close('Finder icons')
+    strip_icons = icons / 'control-strip'
+    for module, (identity, name) in STRIP_ICONS.items():
+        pixels = module in forks['strip'] and small_icon(forks['strip'][module], identity)
+        if not pixels:
+            skipped += 1
+            continue
+        strip_icons.mkdir(parents=True, exist_ok=True)
+        if write(strip_icons / f'{name}.png', png(16, 16, pixels), options.replace):
+            written += 1
+        else:
+            kept += 1
+    close('Control Strip icons')
     cursors = {identity: data for identity, _, data in resources(forks[SYSTEM], b'CURS')}
     animations = {identity: data for identity, _, data in resources(forks[SYSTEM], b'acur')}
     theme = options.assets.expanduser() / 'cursors' / CURSOR_THEME
@@ -474,6 +654,7 @@ def main():
     if made:
         write(theme / 'index.theme', ('[Icon Theme]\nName=Platinum Mac OS 9\nComment=From the user\'s own '
                                       'Mac OS 9 System file\nInherits=' + inherited_theme() + '\n').encode(), True)
+    close('Cursors')
     # The About This Computer banner and the face from it (the Finder's 'PICT' 4000).
     banners = {identity: data for identity, _, data in resources(forks.get(FINDER) or b'', b'PICT')} if forks.get(FINDER) else {}
     banner = ABOUT_BANNER in banners and decode_pict(banners[ABOUT_BANNER])
@@ -485,6 +666,7 @@ def main():
             written += 1
         else:
             kept += 1
+    close('About This Computer picture')
     for (collection, name), data in sorted(forks['pictures'].items()):
         folder = options.assets.expanduser() / 'desktop-pictures' / safe_name(collection)
         folder.mkdir(parents=True, exist_ok=True)
@@ -492,7 +674,14 @@ def main():
             written += 1
         else:
             kept += 1
-    print(f'Imported {written}, kept {kept} existing, skipped {skipped}. Assets: {options.assets.expanduser()}')
+    close('Desktop pictures')
+    if options.json:
+        print(json.dumps({'assets': str(options.assets.expanduser()), 'sections': report}))
+    else:
+        for section in report:
+            if not section['imported'] and not section['kept']:
+                print(f'{section["name"]}: not on this disk')
+        print(f'Imported {written}, kept {kept} existing, skipped {skipped}. Assets: {options.assets.expanduser()}')
     return 0
 
 

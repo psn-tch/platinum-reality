@@ -217,6 +217,10 @@ bool valid_state(const State &state)
         (state.menu->id.value == 0 || state.menu->id.value > state.last_menu_tracking_id ||
          state.menu->captured_context != state.active))
         return false;
+    if (state.move && (state.active.window != state.move->window || state.menu ||
+                       !state.windows.contains(state.move->window) ||
+                       state.windows.at(state.move->window).geometry.position != state.move->origin))
+        return false;
     return true;
 }
 
@@ -415,6 +419,33 @@ Rejection apply_event(State &state, const Event &input)
                 if (it == state.windows.end())
                     return Rejection::unknown_window;
                 it->second.geometry.position = event.position;
+                if (state.move && state.move->window == event.window)
+                    state.move.reset();
+            }
+            else if constexpr (std::is_same_v<T, BeginWindowMove>)
+            {
+                const auto it = state.windows.find(event.window);
+                if (it == state.windows.end())
+                    return Rejection::unknown_window;
+                if (state.active.window != event.window || modal_target(state, event.window) != event.window)
+                    return Rejection::blocked_by_modal;
+                if (state.move || state.menu)
+                    return Rejection::invalid_state;
+                state.move = WindowMove{event.window, it->second.geometry.position, it->second.geometry.position};
+            }
+            else if constexpr (std::is_same_v<T, UpdateWindowMove>)
+            {
+                if (!state.move || state.move->window != event.window)
+                    return Rejection::stale_window_move;
+                state.move->preview = event.position;
+            }
+            else if constexpr (std::is_same_v<T, EndWindowMove>)
+            {
+                if (!state.move || state.move->window != event.window)
+                    return Rejection::stale_window_move;
+                if (event.commit)
+                    state.windows.at(event.window).geometry.position = state.move->preview;
+                state.move.reset();
             }
             else if constexpr (std::is_same_v<T, ObserveContentSize>)
             {
@@ -423,6 +454,9 @@ Rejection apply_event(State &state, const Event &input)
                     return Rejection::unknown_window;
                 if (!valid_size(event.size))
                     return Rejection::invalid_size;
+                if (state.move && state.move->window == event.window &&
+                    it->second.geometry.observed_size != event.size)
+                    state.move.reset();
                 it->second.geometry.observed_size = event.size;
             }
             else if constexpr (std::is_same_v<T, SetWindowRelationship>)
@@ -501,6 +535,8 @@ std::vector<Effect> effects_between(const State &before, const State &after)
     std::vector<Effect> effects;
     if (before.menu != after.menu && before.menu)
         effects.emplace_back(CloseTrackedMenu{before.menu->id});
+    if (before.move != after.move)
+        effects.emplace_back(PublishMoveOutline{after.move});
     for (const auto &[id, window] : before.windows)
     {
         (void)window;
@@ -566,6 +602,19 @@ Transition transition(const State &before, const EventEnvelope &input)
         return result;
     }
     result.rejection = apply_event(result.next, input.event);
+    // Focus changes, hiding/closing a client, menus and shade/relationship changes
+    // cancel a grab rather than leaving a stale outline or committing to a new target.
+    if (result.next.move)
+    {
+        const auto id = result.next.move->window;
+        const auto old = before.windows.find(id);
+        const auto now = result.next.windows.find(id);
+        if (result.next.active.window != id || result.next.menu || now == result.next.windows.end() ||
+            (old != before.windows.end() &&
+             (old->second.collapsed != now->second.collapsed || old->second.parent != now->second.parent ||
+              old->second.modal != now->second.modal)))
+            result.next.move.reset();
+    }
     if (result.rejection == Rejection::none && !valid_state(result.next))
         result.rejection = Rejection::invalid_state;
     if (result.rejection != Rejection::none)

@@ -331,3 +331,9 @@ QString ApplicationCatalog::applicationName(const QString &waylandId) const
     const auto *entry = find(waylandId.endsWith(".desktop") ? waylandId : waylandId + ".desktop");
     return entry ? entry->name : QString();
 }
+
+QString ApplicationCatalog::applicationIcon(const QString &waylandId) const
+{
+    const auto *entry = find(waylandId.endsWith(".desktop") ? waylandId : waylandId + ".desktop");
+    return entry ? entry->icon : QString();
+}

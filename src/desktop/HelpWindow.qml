@@ -6,6 +6,8 @@ import QtQuick.Controls
 // once, on a new account's first login. The words are our own, adapted from docs/first-session.md.
 FocusScope {
     id: help
+    property var moveManager: typeof manager === "undefined" ? null : manager
+    onActiveFocusChanged: if (!activeFocus && moveManager) moveManager.finishShellWindowMove(help, false)
     signal closeRequested()
     signal raised()
     objectName: "help-window"
@@ -233,8 +235,12 @@ FocusScope {
         }
         MouseArea {
             anchors.fill: parent
-            drag.target: help; drag.threshold: 2
-            onPressed: { help.raised(); help.forceActiveFocus() }
+            onPressed: function(mouse) {
+                help.raised(); help.forceActiveFocus()
+                if (help.moveManager) help.moveManager.beginShellWindowMove(help, mapToItem(null, mouse.x, mouse.y))
+            }
+            onReleased: if (help.moveManager) help.moveManager.finishShellWindowMove(help)
+            onCanceled: if (help.moveManager) help.moveManager.finishShellWindowMove(help, false)
         }
         Rectangle {
             objectName: "help-close"

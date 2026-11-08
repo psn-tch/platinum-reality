@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Mac OS 9 sound importer, on synthetic resources (no Apple data in the repository)."""
+"""The Mac OS 9 asset importer, on synthetic resources and volumes (no Apple data in the repository)."""
 import importlib.util
 from pathlib import Path
 import struct
@@ -41,7 +41,134 @@ def fork(kind, entries):
     return struct.pack('>IIII', 256, 256 + len(data), len(data), len(resource_map)) + bytes(240) + data + resource_map
 
 
+def forks(types):
+    """A resource fork holding several types: {kind: [(id, name, data)]}."""
+    payloads, references, offset = b'', {}, 0
+    for kind, entries in types.items():
+        for identity, _, data in entries:
+            references.setdefault(kind, b'')
+            references[kind] += struct.pack('>hHI4x', identity, 0xFFFF, offset)
+            payloads += struct.pack('>I', len(data)) + data
+            offset += 4 + len(data)
+    header = struct.pack('>H', len(types) - 1)
+    at = 2 + 8 * len(types)
+    listing = b''
+    for kind, entries in types.items():
+        header += struct.pack('>4sHH', kind, len(entries) - 1, at)
+        listing += references[kind]
+        at += len(references[kind])
+    type_list = header + listing
+    resource_map = bytes(24) + struct.pack('>HH', 28, 28 + len(type_list)) + type_list
+    return (struct.pack('>IIII', 256, 256 + len(payloads), len(payloads), len(resource_map)) + bytes(240)
+            + payloads + resource_map)
+
+
+def classic_hfs(files, volume='Test Disk'):
+    """A tiny classic HFS volume: `files` {(folder name or None, file name): (data, resource)}.
+    Allocation blocks of 512 bytes from sector 4; extents tree node 0..1, catalog nodes after."""
+    block, node = 512, 512
+    blocks, extents = [], {}
+
+    def allocate(data):
+        start, count = len(blocks), (len(data) + block - 1) // block
+        for i in range(count):
+            blocks.append(data[i * block:(i + 1) * block].ljust(block, b'\0'))
+        return start, count
+
+    def leaf(records):
+        body = struct.pack('>IIbBHH', 0, 0, -1, 1, len(records), 0)
+        offsets = []
+        for key, data in records:
+            offsets.append(len(body))
+            body += key + (b'\0' if len(key) % 2 else b'') + data
+            if len(body) % 2:
+                body += b'\0'
+        tail = b''.join(struct.pack('>H', o) for o in reversed(offsets + [len(body)]))
+        return body.ljust(node - len(tail), b'\0') + tail
+
+    def tree_header(first_leaf, total):
+        record = struct.pack('>HIIIIHHII', 1, first_leaf, 1, first_leaf, first_leaf, node, 37, total, 0)
+        body = struct.pack('>IIbBHH', 0, 0, 1, 0, 3, 0) + record
+        tail = struct.pack('>HHHH', 0, 0, 0, 14)
+        return body.ljust(node - len(tail), b'\0') + tail
+
+    def key(parent, name):
+        raw = name.encode('mac_roman')
+        return struct.pack('>BBIB', 6 + len(raw), 0, parent, len(raw)) + raw
+
+    folders, records, next_id = {}, [], 16
+    records.append((key(1, volume), struct.pack('>BBHHI', 1, 0, 0, 0, 2).ljust(70, b'\0')))
+    for (folder, name), (data, resource) in sorted(files.items(), key=lambda i: (i[0][0] or '', i[0][1])):
+        parent = 2
+        if folder:
+            if folder not in folders:
+                folders[folder] = next_id
+                records.append((key(2, folder), struct.pack('>BBHHI', 1, 0, 0, 0, next_id).ljust(70, b'\0')))
+                next_id += 1
+            parent = folders[folder]
+        file_id = next_id
+        next_id += 1
+        data_extent, resource_extent = allocate(data), allocate(resource)
+        record = struct.pack('>BBBB16sIHIIHII', 2, 0, 0, 0, b'', file_id, 0, len(data), data_extent[1] * block,
+                             0, len(resource), resource_extent[1] * block)
+        record = record.ljust(74, b'\0') + struct.pack('>HH8x', *data_extent) + struct.pack('>HH8x', *resource_extent)
+        records.append((key(parent, name), record.ljust(102, b'\0')))
+    records.sort(key=lambda r: (struct.unpack_from('>I', r[0], 2)[0], r[0][7:]))
+    extents_tree = tree_header(0, 1)
+    catalog_tree = tree_header(1, 2) + leaf(records)
+    extents_start = allocate(extents_tree)
+    catalog_start = allocate(catalog_tree)
+    mdb = bytearray(162)
+    mdb[0:2] = b'BD'
+    struct.pack_into('>I', mdb, 20, block)
+    struct.pack_into('>H', mdb, 28, 4)
+    raw = volume.encode('mac_roman')
+    mdb[36] = len(raw)
+    mdb[37:37 + len(raw)] = raw
+    struct.pack_into('>I', mdb, 130, len(extents_tree))
+    struct.pack_into('>HH', mdb, 134, *extents_start)
+    struct.pack_into('>I', mdb, 146, len(catalog_tree))
+    struct.pack_into('>HH', mdb, 150, *catalog_start)
+    return bytes(1024) + bytes(mdb).ljust(1024, b'\0') + b''.join(blocks)
+
+
+class ClassicHFSTests(unittest.TestCase):
+    def test_reads_both_forks_by_path(self):
+        image = classic_hfs({('System Folder', 'System'): (b'', b'resources' * 100),
+                             (None, 'Read Me'): (b'hello', b'')})
+        read = lambda at, length: image[at:at + length]
+        self.assertEqual(importer.hfs_classic.hfs_offsets(read), [0])
+        volume = importer.hfs_classic.Volume(read)
+        listing = volume.listing()
+        self.assertEqual(set(listing), {'Test Disk/System Folder/System', 'Test Disk/Read Me'})
+        self.assertEqual(volume.read(listing['Test Disk/System Folder/System'], True), b'resources' * 100)
+        self.assertEqual(volume.read(listing['Test Disk/Read Me']), b'hello')
+
+    def test_finds_hfs_inside_an_apple_partition_map(self):
+        volume = classic_hfs({(None, 'A'): (b'x', b'')})
+        driver = struct.pack('>2sH', b'ER', 512).ljust(512, b'\0')
+        entry = struct.pack('>2s2xIII32s32s', b'PM', 1, 4, len(volume) // 512, b'Test', b'Apple_HFS').ljust(512, b'\0')
+        image = driver + entry + bytes(1024) + volume
+        read = lambda at, length: image[at:at + length]
+        self.assertEqual(importer.hfs_classic.hfs_offsets(read), [4 * 512])
+
+    def test_other_data_is_not_hfs(self):
+        image = bytes(4096)
+        self.assertEqual(importer.hfs_classic.hfs_offsets(lambda at, length: image[at:at + length]), [])
+
+
 class ImporterTests(unittest.TestCase):
+    def test_strip_module_small_icon_uses_its_colours_and_mask(self):
+        # A synthetic 16x16 icon: colour index 5 everywhere, mask only on the top-left pixel.
+        bitmap = bytes(32)
+        mask = bytes([0x80]) + bytes(31)
+        fork_data = forks({b'ics8': [(256, '', bytes([5]) * 256)], b'ics#': [(256, '', bitmap + mask)]})
+        pixels = importer.small_icon(fork_data, 256)
+        self.assertEqual(len(pixels), 16 * 16 * 4)
+        self.assertEqual(tuple(pixels[:4]), importer.PALETTE[5] + (255,))
+        self.assertEqual(pixels[7], 0)  # the second pixel is outside the mask
+        self.assertIsNone(importer.small_icon(fork_data, 257))
+
     def test_standard_8_bit_sound_stays_unsigned_mono(self):
         self.assertEqual(importer.decode_sound(sound(standard(22050, bytes([128, 200, 56])))),
                          (1, 22050, 8, bytes([128, 200, 56])))

@@ -16,6 +16,7 @@
 #include <QProcess>
 #include <QQuickView>
 #include <QSet>
+#include <memory>
 #include <QWaylandQuickCompositor>
 #include <QWaylandXdgShell>
 class MenuBroker;
@@ -35,6 +36,7 @@ class NotificationServer;
 class StatusItems;
 class SessionControl;
 class IdleInhibition;
+struct WindowMoveSnapshot;
 struct wl_protocol_logger;
 
 class ManagedWindow final : public QObject
@@ -169,6 +171,10 @@ class NativeManager final : public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(QString activeApplication READ activeApplication NOTIFY contextChanged)
+    Q_PROPERTY(int menuBarHeight READ menuBarHeight CONSTANT)
+    Q_PROPERTY(bool canCloseActiveWindow READ canCloseActiveWindow NOTIFY contextChanged)
+    Q_PROPERTY(qulonglong activeWindowId READ activeWindowId NOTIFY contextChanged)
+    Q_PROPERTY(bool shellMenuKeyboardMode MEMBER m_shellMenuKeyboardMode)
     Q_PROPERTY(QVariantList applications READ applications NOTIFY contextChanged)
     Q_PROPERTY(QString workspace READ workspace CONSTANT)
     Q_PROPERTY(bool menuOpen READ menuOpen NOTIFY contextChanged)
@@ -210,6 +216,9 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(QObject *keyCaps READ keyCaps CONSTANT)
     Q_PROPERTY(QObject *screenshots READ screenshots CONSTANT)
     Q_PROPERTY(QObject *systemControls READ systemControls CONSTANT)
+    Q_PROPERTY(QObject *assetImporter READ assetImporter CONSTANT)
+    Q_PROPERTY(QObject *softwareUpdate READ softwareUpdate CONSTANT)
+    Q_PROPERTY(QObject *printers READ printers CONSTANT)
     Q_PROPERTY(QObject *audio READ audio CONSTANT)
     // BlueZ on the host's system bus (docs/bluetooth.md); unavailable without a compositor.
     Q_PROPERTY(QObject *bluetooth READ bluetooth CONSTANT)
@@ -230,6 +239,9 @@ class NativeManager final : public QAbstractListModel
     // One of the desktop's own menus is open (set by Desktop.qml): a key closes it.
     Q_PROPERTY(bool shellMenuOpen MEMBER m_shellMenuOpen)
     Q_PROPERTY(bool nativeDragging READ nativeDragging NOTIFY nativeDragChanged)
+    Q_PROPERTY(bool windowMoveActive READ windowMoveActive NOTIFY windowMoveChanged)
+    Q_PROPERTY(QRect windowMoveRect READ windowMoveRect NOTIFY windowMoveChanged)
+    Q_PROPERTY(qulonglong windowMoveGeneration READ windowMoveGeneration NOTIFY windowMoveChanged)
     Q_PROPERTY(QPoint nativeDragPosition READ nativeDragPosition NOTIFY nativeDragChanged)
     Q_PROPERTY(bool nativeDragCopy READ nativeDragCopy NOTIFY nativeDragChanged)
     Q_PROPERTY(bool nativeDragOnDesktop READ nativeDragOnDesktop NOTIFY nativeDragChanged)
@@ -276,6 +288,9 @@ class NativeManager final : public QAbstractListModel
     QHash<int, QByteArray> roleNames() const override;
     QString activeApplication() const;
     QVariantList applications() const;
+    // App identity, not a translated display name. Empty means use the independent glyph.
+    Q_INVOKABLE QUrl applicationIcon(QString identity, int size = 16) const;
+    Q_INVOKABLE void refreshApplicationIcons();
     QString workspace() const
     {
         return m_workspace;
@@ -296,6 +311,9 @@ class NativeManager final : public QAbstractListModel
     QObject *keyCaps() const;
     QObject *screenshots() const;
     QObject *systemControls() const { return m_systemControls; }
+    QObject *assetImporter() const { return m_assetImporter; }
+    QObject *softwareUpdate() const { return m_softwareUpdate; }
+    QObject *printers() const { return m_printers; }
     QObject *audio() const { return m_audio; }
     QObject *bluetooth() const { return m_bluetooth; }
     QObject *wifi() const { return m_wifi; }
@@ -332,10 +350,22 @@ class NativeManager final : public QAbstractListModel
     Q_INVOKABLE void shade(qulonglong id);
     Q_INVOKABLE void setShadeInMotion(qulonglong id, bool running);
     Q_INVOKABLE void moveWindow(qulonglong id, int x, int y);
+    Q_INVOKABLE void beginWindowMove(qulonglong id, QPointF pointer);
+    Q_INVOKABLE void finishWindowMove(qulonglong id, bool commit = true);
+    Q_INVOKABLE void beginShellWindowMove(QQuickItem *item, QPointF pointer);
+    Q_INVOKABLE void finishShellWindowMove(QQuickItem *item, bool commit = true);
+    Q_INVOKABLE void clientMovePosition(qulonglong id, int x, int y);
+    bool windowMoveActive() const { return m_state.move.has_value() || m_shellMoveItem; }
+    QRect windowMoveRect() const;
+    qulonglong windowMoveGeneration() const;
     Q_INVOKABLE void resizeWindow(qulonglong id, int width, int height);
     Q_INVOKABLE void zoom(qulonglong id);
     Q_INVOKABLE void fillScreen(qulonglong id);
     Q_INVOKABLE void closeWindow(qulonglong id);
+    Q_INVOKABLE void closeActiveWindow(qulonglong expected = 0);
+    bool canCloseActiveWindow() const;
+    qulonglong activeWindowId() const { return m_state.active.window ? m_state.active.window->value : 0; }
+    int menuBarHeight() const { return platinumMenuBarHeight; }
     Q_INVOKABLE void hideApplication();
     Q_INVOKABLE void hideOtherApplications();
     Q_INVOKABLE void showAllApplications();
@@ -425,10 +455,12 @@ class NativeManager final : public QAbstractListModel
     void focusWindow(qulonglong id);
     void focusDesktop();
     void shellMenuKeyPressed();
+    void shellMenuNavigation(int key);
     void errorOccurred(QString message);
     void openWithRequested(QString document);
     void controlPanelRequested(QString action);
     void nativeDragChanged();
+    void windowMoveChanged();
     void desktopDropTargetChanged();
     void recentApplicationsChanged();
     void pointerCaptureChanged();
@@ -483,6 +515,16 @@ class NativeManager final : public QAbstractListModel
     QString m_workspace, m_profile, m_stateFile;
     bool m_useAllDisplays = false;
     frankenstein::policy::State m_state;
+    QPointF m_movePointerOrigin;
+    qulonglong m_clientMoveWindow = 0;
+    quint64 m_clientMoveGeneration = 0;
+    std::shared_ptr<WindowMoveSnapshot> m_moveSnapshot;
+    QPointer<QQuickItem> m_shellMoveItem;
+    QRect m_shellMoveRect;
+    QPointF m_shellMoveOrigin;
+    QList<QMetaObject::Connection> m_shellMoveConnections;
+    void endShellWindowMove(bool commit);
+    void updateWindowMove(QPointF pointer);
     QList<ManagedWindow *> m_windows;
     QMap<QString, frankenstein::policy::ApplicationId> m_applicationIds;
     QMap<qulonglong, QString> m_applicationNames;
@@ -491,6 +533,7 @@ class NativeManager final : public QAbstractListModel
     MenuBroker *m_broker;
     DesktopItems *m_desktopItems;
     ApplicationCatalog *m_catalog;
+    mutable QHash<QString, QUrl> m_applicationIconCache;
     AppearanceSettings *m_appearance;
     InputSettings *m_input = nullptr;
     EnergySettings *m_energy = nullptr;
@@ -505,6 +548,9 @@ class NativeManager final : public QAbstractListModel
     void applyKeyboard();
     QObject *m_screenshots;
     QObject *m_systemControls;
+    QObject *m_assetImporter = nullptr;
+    QObject *m_softwareUpdate = nullptr;
+    QObject *m_printers = nullptr;
     QObject *m_audio;
     QObject *m_bluetooth;
     QObject *m_wifi;
@@ -533,6 +579,7 @@ class NativeManager final : public QAbstractListModel
     bool m_flushQueued = false;
     bool m_synchronizationDeferred = false;
     QSet<qulonglong> m_shellModals;
+    bool m_shellMenuKeyboardMode = false;
     qulonglong m_nextShellModal = 0;
     QProcess *m_dropProcess = nullptr;
     X11Bridge *m_x11 = nullptr; // Owner outlives manager and renderer retirement.

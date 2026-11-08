@@ -1252,7 +1252,7 @@ class NativeTests : public QObject
             auto *frameXdg=frameItem?qobject_cast<QWaylandXdgSurface *>(frameItem->shellSurface()):nullptr;
             QVERIFY(frameXdg && !frameXdg->windowGeometry().topLeft().isNull());
             QTRY_COMPARE(frameItem->mapToScene(frameItem->mapFromSurface(QPointF(frameXdg->windowGeometry().topLeft()))),
-                         QPointF(130,26));
+                         QPointF(130,20));
             manager.moveWindow(id,130,80);
         }
         // The content process has laid out and painted at the new size.
@@ -3772,7 +3772,7 @@ class NativeTests : public QObject
         QTRY_COMPARE(frame->position(),QPointF(150,90));
         const auto normal=xdg->windowGeometry().size();
         const auto origin=client->mapToScene(QPointF(0,0));
-        QVERIFY(origin.y()>=26+23); // Below the menu bar and inside the title bar chrome.
+        QVERIFY(origin.y()>=20+23); // Below the menu bar and inside the title bar chrome.
         QTest::qWait(300);
         QVERIFY(capture(scene.view,"native-fullscreen-before.png"));
         const auto isFull=[&]{const QDBusReply<bool> r=api.call("IsFullScreen");return r.isValid() && r.value();};
@@ -4462,9 +4462,9 @@ class NativeTests : public QObject
             QTest::qWait(50);
             return driver.send("button 272 1","ok") && driver.send("button 272 0","ok");
         };
-        // Edit is the first menu after the Apple menu for applications without menus of their own.
+        // File remains visible before Edit for applications without exported menus.
         const auto editMenu=[&](const QString &command) {
-            if(!clickItem("bar-entry-1"))return false;
+            if(!clickItem("bar-entry-2"))return false;
             QTest::qWait(150); // The menu's rows are laid out after it opens.
             // The chosen item blinks first (General Controls), then the menu closes.
             return clickItem("desktop-command-"+command) && QTest::qWaitFor([&]{return !manager.menuOpen();},3000);
@@ -4966,6 +4966,92 @@ class NativeTests : public QObject
         QTRY_COMPARE(text(),expected);
         api.call("Finish");
         QTRY_COMPARE(app.state(),QProcess::NotRunning);
+    }
+    void shellAccessoryOutlineDefersMovementAndCancelsCleanly()
+    {
+        NativeScene scene; QVERIFY(scene.show());
+        auto &manager=*scene.manager;
+        auto *root=scene.view.rootObject();
+        QVERIFY(QMetaObject::invokeMethod(root,"dispatchShellCommand",
+            Q_ARG(QVariant,QVariant("about")),Q_ARG(QVariant,QVariant(0))));
+        auto *window=visualItem(scene.view.contentItem(),"about-computer-window"); QVERIFY(window);
+        QTRY_VERIFY(window->isVisible() && window->hasActiveFocus());
+        const auto origin=window->position();
+        const auto title=window->mapToScene(QPointF(60,12)).toPoint();
+        QTest::mousePress(&scene.view,Qt::LeftButton,{},title);
+        QTRY_VERIFY(manager.windowMoveActive());
+        QTest::mouseMove(&scene.view,title+QPoint(50,30),30);
+        QCOMPARE(window->position(),origin);
+        QCOMPARE(manager.windowMoveRect().topLeft(),origin.toPoint()+QPoint(50,30));
+        QVERIFY(capture(scene.view,"shell-accessory-outline-preview.png"));
+        QTest::mouseRelease(&scene.view,Qt::LeftButton,{},title+QPoint(50,30));
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QCOMPARE(window->position(),origin+QPointF(50,30));
+        const auto committed=window->position();
+        const auto second=window->mapToScene(QPointF(60,12)).toPoint();
+        QTest::mousePress(&scene.view,Qt::LeftButton,{},second);
+        QTest::mouseMove(&scene.view,second+QPoint(30,20),30);
+        QTRY_VERIFY(manager.windowMoveActive());
+        QTest::keyClick(&scene.view,Qt::Key_Escape);
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QTest::mouseRelease(&scene.view,Qt::LeftButton,{},second+QPoint(30,20));
+        QCOMPARE(window->position(),committed);
+        QVERIFY(window->isVisible());
+    }
+    void fileMenuPreservesProvidersAndFallbackClosesTheActualWindow_data()
+    {
+        QTest::addColumn<bool>("shortcut");QTest::newRow("menu")<<false;QTest::newRow("command-w")<<true;
+    }
+    void fileMenuPreservesProvidersAndFallbackClosesTheActualWindow()
+    {
+        QFETCH(bool,shortcut);
+        NativeScene scene;QVERIFY(scene.show());auto &manager=*scene.manager;
+        QProcess probe;probe.setProcessEnvironment(scene.childEnvironment());
+        const auto stop=qScopeGuard([&]{if(probe.state()!=QProcess::NotRunning){probe.kill();probe.waitForFinished(3000);}});
+        probe.start(QCoreApplication::applicationDirPath()+"/native-probe",{"FileFallback"});
+        QVERIFY(probe.waitForStarted());QTRY_VERIFY(!first(manager,"Native Probe FileFallback").isEmpty());
+        auto *broker=qobject_cast<MenuBroker*>(manager.menuBroker());QVERIFY(broker);
+        QTRY_VERIFY(!broker->menus().isEmpty() && !broker->busy());
+        auto *root=scene.view.rootObject();
+        const auto expectedWindow=manager.activeWindowId();QVERIFY(expectedWindow);
+        manager.closeActiveWindow(expectedWindow+1000);QTest::qWait(30);
+        QCOMPARE(probe.state(),QProcess::Running); // Stale menu target cannot close a different active window.
+        const auto roots=[&]{return root->property("barEntries").toList();};
+        QTRY_COMPARE(roots().at(1).toMap().value("kind").toString(),QString("export"));
+        const auto providerId=roots().at(1).toMap().value("id");
+        QDBusInterface api("org.frankenstein.NativeProbeFileFallback","/Probe","org.frankenstein.NativeProbe");
+        QVERIFY(api.isValid());
+        QDBusPendingCallWatcher renameCall(api.asyncCall("RenameFileMenu", QString("Actions")));
+        QTRY_VERIFY(renameCall.isFinished());
+        const QDBusReply<QString> renamed = renameCall.reply();
+        QVERIFY2(renamed.isValid(), qPrintable(renamed.error().message()));
+        QCOMPARE(renamed.value(), QString("Actions"));
+        // Separate exporter/broker propagation from QML File-root classification.
+        QTRY_COMPARE(broker->menus().first().toMap().value("label").toString(), QString("Actions"));
+        QTRY_COMPARE(roots().at(1).toMap().value("kind").toString(),QString("app-file"));
+        QCOMPARE(roots().at(2).toMap().value("id"),providerId);
+        QCOMPARE(roots().at(2).toMap().value("label").toString(),QString("Actions"));
+        auto *file=visualItem(scene.view.contentItem(),"bar-entry-1");QVERIFY(file);
+        file->parentItem()->ensurePolished();
+        QTest::mouseClick(&scene.view,Qt::LeftButton,{},file->mapToScene({file->width()/2,8}).toPoint());
+        QTRY_VERIFY(manager.menuOpen());
+        auto *close=visualItem(scene.view.contentItem(),"desktop-command-file-close-window");
+        QTRY_VERIFY(close && close->isVisible() && close->isEnabled());
+        QVERIFY(capture(scene.view,"file-menu-real-close-fallback.png"));
+        if(shortcut){
+            QTest::keyClick(&scene.view,Qt::Key_Escape);QTRY_VERIFY(!manager.menuOpen());
+            QTRY_VERIFY(manager.canCloseActiveWindow());
+            QCOMPARE(manager.activeWindowId(), expectedWindow);
+            QVERIFY(!manager.desktopActive());
+            auto *binding = root->findChild<QObject *>("fallback-close-window-shortcut");
+            QVERIFY(binding);
+            QTRY_VERIFY(binding->property("enabled").toBool());
+            // Use the same hardware-shaped Meta chord as the other native shortcut
+            // tests: the compositor's XKB state needs real modifier scan codes.
+            commandKey(&scene.view,Qt::Key_W,17);
+        } else QTest::mouseClick(&scene.view,Qt::LeftButton,{},close->mapToScene({close->width()/2,8}).toPoint());
+        QTRY_COMPARE(probe.state(),QProcess::NotRunning);
+        QTRY_VERIFY(!manager.canCloseActiveWindow());
     }
     void shellMenusCloseOnAKeyLikeMacOS9()
     {
@@ -5945,6 +6031,52 @@ class NativeTests : public QObject
         api.call("Finish");
         QTRY_COMPARE(app.state(),QProcess::NotRunning);
     }
+    void outlineDraggingDefersPlacementAndCancelsCleanly()
+    {
+        NativeScene scene;QVERIFY(scene.show());auto &manager=*scene.manager;
+        QProcess probe;probe.setProcessEnvironment(scene.childEnvironment());
+        const auto cleanup=qScopeGuard([&]{if(probe.state()!=QProcess::NotRunning){probe.kill();probe.waitForFinished(3000);}});
+        probe.start(QCoreApplication::applicationDirPath()+"/native-probe",{"Outline"});
+        QVERIFY(probe.waitForStarted());
+        QTRY_VERIFY(!first(manager,"Native Probe Outline").isEmpty());
+        const auto id=first(manager,"Native Probe Outline").value("id").toULongLong();
+        manager.moveWindow(id,100,80);manager.activate(id);
+        QQuickItem *bar=nullptr;
+        QTRY_VERIFY((bar=visualItem(scene.view.contentItem(),"title-bar-"+QString::number(id))));
+        QTRY_COMPARE(first(manager,"Native Probe Outline").value("x").toInt(),100);
+        QTest::qWait(200);
+        const auto start=bar->mapToScene({60,8}).toPoint();
+        QTest::mousePress(&scene.view,Qt::LeftButton,{},start);
+        QTRY_VERIFY(manager.windowMoveActive());
+        QTest::mouseMove(&scene.view,start+QPoint(73,41));
+        QTRY_COMPARE(manager.windowMoveRect().topLeft(),QPoint(173,121));
+        QCOMPARE(first(manager,"Native Probe Outline").value("x").toInt(),100);
+        QCOMPARE(first(manager,"Native Probe Outline").value("y").toInt(),80);
+        QVERIFY(capture(scene.view,"classic-outline-drag-preview.png"));
+        QTest::mouseRelease(&scene.view,Qt::LeftButton,{},start+QPoint(73,41));
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QTRY_COMPARE(first(manager,"Native Probe Outline").value("x").toInt(),173);
+        QTRY_COMPARE(first(manager,"Native Probe Outline").value("y").toInt(),121);
+        const auto next=bar->mapToScene({60,8}).toPoint();
+        QTest::mousePress(&scene.view,Qt::LeftButton,{},next);
+        QTest::mouseMove(&scene.view,next+QPoint(-40,30));
+        QTRY_VERIFY(manager.windowMoveActive());QTest::keyClick(&scene.view,Qt::Key_Escape);
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QTest::mouseRelease(&scene.view,Qt::LeftButton,{},next+QPoint(-40,30));
+        QCOMPARE(first(manager,"Native Probe Outline").value("x").toInt(),173);
+        QCOMPARE(first(manager,"Native Probe Outline").value("y").toInt(),121);
+        QTest::mousePress(&scene.view,Qt::LeftButton,{},next);
+        QTest::mouseMove(&scene.view,next+QPoint(20,20));
+        QTRY_VERIFY(manager.windowMoveActive());
+        // A topology replacement cancels the pending position, then rescues real geometry.
+        manager.setDisplayLayout(DisplayLayout::single({1120,760}));
+        QTRY_VERIFY(!manager.windowMoveActive());
+        QTest::mouseRelease(&scene.view,Qt::LeftButton,{},next+QPoint(20,20));
+        QCOMPARE(first(manager,"Native Probe Outline").value("x").toInt(),173);
+        QVERIFY(capture(scene.view,"classic-outline-drag-cancelled.png"));
+        QDBusInterface("org.frankenstein.NativeProbeOutline","/Probe","org.frankenstein.NativeProbe").call("Finish");
+        QTRY_COMPARE(probe.state(),QProcess::NotRunning);
+    }
     void titleBarBoxesPressInAndCancelWhenDraggedOff()
     {
         // Mac OS 9.2.2 tracking (psn_tch, 2026-10-22): a box is drawn pressed in only while held over
@@ -6014,8 +6146,8 @@ class NativeTests : public QObject
         QTRY_VERIFY_WITH_TIMEOUT(!window().value("collapsed").toBool() &&
                                  window().value("width").toInt() == screen.width() - 6, 5000);
         QTRY_COMPARE(window().value("x").toInt(), screen.x());
-        QTRY_COMPARE(window().value("y").toInt(), screen.y() + 26);
-        QTRY_COMPARE(window().value("height").toInt(), screen.height() - 26 - 27);
+        QTRY_COMPARE(window().value("y").toInt(), screen.y() + 20);
+        QTRY_COMPARE(window().value("height").toInt(), screen.height() - 20 - 27);
         QVERIFY(capture(scene.view, "title-bar-triple-click-filled.png"));
         // Three again: back where and how big it was.
         QTRY_VERIFY(!window().value("shadeAnimating").toBool());
@@ -6344,7 +6476,7 @@ class NativeTests : public QObject
         // The whole frame (the position is its corner), title bar and resize box, is on the built-in display.
         const QRect frame(window().value("x").toInt(), window().value("y").toInt(),
                           window().value("width").toInt() + 6, window().value("height").toInt() + 27);
-        QVERIFY2(QRect(0, 26, 1120, 760 - 26).contains(frame),
+        QVERIFY2(QRect(0, 20, 1120, 760 - 20).contains(frame),
                  qPrintable(QString("frame %1,%2 %3x%4").arg(frame.x()).arg(frame.y()).arg(frame.width()).arg(frame.height())));
         QVERIFY(capture(scene.view, "unplugged-monitor-window.png"));
         api.call("Finish");
@@ -9666,7 +9798,7 @@ class NativeTests : public QObject
         QPointer<QQuickItem> item;
         QTRY_VERIFY((item = visualItem(view.contentItem(), itemName)) && item->isVisible() &&
                     item->isEnabled() && item->width() > 0 &&
-                    item->mapToScene(QPointF(0, 0)).y() >= 26);
+                    item->mapToScene(QPointF(0, 0)).y() >= 20);
         item->parentItem()->ensurePolished();
         QTest::mouseClick(
             &view, Qt::LeftButton, {},

@@ -293,7 +293,9 @@ class AudioServiceTests final : public QObject
             lastStatus = status.readAll();
             // An empty read is a zombie reaped between open and read (seen in gate 30's sanitized
             // run): gone, like a failed open. Counting it as running made this check flicker.
-            return lastStatus.isEmpty() || lastStatus.mid(lastStatus.lastIndexOf(')') + 2, 1) == "Z";
+            // "X" (dead, being released) is gone too: seen 2026-11-08 on potato, reparented to init.
+            const auto state = lastStatus.mid(lastStatus.lastIndexOf(')') + 2, 1);
+            return lastStatus.isEmpty() || state == "Z" || state == "X";
         };
         // It must stop, not stop fast: under a full sanitized gate the killed child was gone just
         // after five seconds ("5000 ms would have been sufficient", gate 38), 12/12 alone.

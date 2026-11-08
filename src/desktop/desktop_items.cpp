@@ -199,9 +199,9 @@ QPoint DesktopItems::fittedPosition(QPoint requested, QSize footprint) const
 bool DesktopItems::acceptsPoint(int x, int y) const
 {
     if (!m_displayLayout)
-        return x >= 0 && x < m_viewport.width() && y >= 26 && y < m_viewport.height();
+        return x >= 0 && x < m_viewport.width() && y >= platinumMenuBarHeight && y < m_viewport.height();
     const auto primary = m_displayLayout->primaryRect();
-    if (QRect(primary.topLeft(), QSize(primary.width(), 26)).contains(x, y))
+    if (QRect(primary.topLeft(), QSize(primary.width(), platinumMenuBarHeight)).contains(x, y))
         return false;
     if (m_displayLayout->mode() == DisplayLayout::Mode::Mirror)
         return primary.contains(x, y);
@@ -508,7 +508,7 @@ bool DesktopItems::beginSelection(int x, int y, bool extend)
     m_selectionBefore = m_selected;
     m_selectionBase = extend ? m_selected : QSet<QString>{};
     m_selectionOrigin = {std::clamp(x, 0, m_viewport.width() - 1),
-                         std::clamp(y, m_displayLayout ? 0 : 26, m_viewport.height() - 1)};
+                         std::clamp(y, m_displayLayout ? 0 : platinumMenuBarHeight, m_viewport.height() - 1)};
     m_selectionPointer = m_selectionOrigin;
     m_selecting = true;
     if (m_selected != m_selectionBase)
@@ -524,7 +524,7 @@ void DesktopItems::updateSelection(int x, int y)
     if (!m_selecting)
         return;
     m_selectionPointer = {std::clamp(x, 0, m_viewport.width() - 1),
-                          std::clamp(y, m_displayLayout ? 0 : 26, m_viewport.height() - 1)};
+                          std::clamp(y, m_displayLayout ? 0 : platinumMenuBarHeight, m_viewport.height() - 1)};
     QSet<QString> selected;
     const auto rectangle = selectionRect();
     for (const auto &entry : m_entries)

@@ -124,7 +124,7 @@ QPoint DisplayLayout::reachablePosition(QPoint requested, QSize contentSize, boo
     if(!fitWhole) {
         int covered=0;
         for(const auto &candidate:screens) {
-            const auto work=candidate.adjusted(0,candidate==primaryRect()?26:0,0,0);
+            const auto work=candidate.adjusted(0,candidate==primaryRect()?platinumMenuBarHeight:0,0,0);
             const auto overlap=work.intersected(grip);
             covered+=overlap.width()*overlap.height();
         }
@@ -135,7 +135,7 @@ QPoint DisplayLayout::reachablePosition(QPoint requested, QSize contentSize, boo
     auto screen=screenForWindow(grip);
     for(const auto &candidate:screens)
         if(candidate.contains(grip)) { screen=candidate; break; }
-    const int top=screen.y()+(screen==primaryRect()?26:0);
+    const int top=screen.y()+(screen==primaryRect()?platinumMenuBarHeight:0);
     const int right=screen.x()+screen.width()-(fitWhole?contentSize.width()+6:80);
     const int bottom=screen.y()+screen.height()-(fitWhole?contentSize.height()+27:25);
     return {std::clamp(requested.x(),screen.x(),std::max(screen.x(),right)),

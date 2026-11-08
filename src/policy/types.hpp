@@ -141,6 +141,17 @@ struct SetPosition
     WindowId window;
     Point position;
 };
+// A move previews geometry without changing the observed/presented window.
+struct WindowMove
+{
+    WindowId window;
+    Point origin;
+    Point preview;
+    auto operator<=>(const WindowMove &) const = default;
+};
+struct BeginWindowMove { WindowId window; };
+struct UpdateWindowMove { WindowId window; Point position; };
+struct EndWindowMove { WindowId window; bool commit; };
 struct ObserveContentSize
 {
     WindowId window;
@@ -170,7 +181,7 @@ using Event = std::variant<RegisterApplication, RemoveApplication, RegisterWindo
                            ActivateApplication, ActivateDesktop, ActivateWindow, HideApplication,
                            SetCollapsed, SetPosition, ObserveContentSize, SetWindowRelationship,
                            SetShadeEligibility, BeginMenuTracking, EndMenuTracking,
-                           ShowApplication>;
+                           ShowApplication, BeginWindowMove, UpdateWindowMove, EndWindowMove>;
 
 struct EventEnvelope
 {

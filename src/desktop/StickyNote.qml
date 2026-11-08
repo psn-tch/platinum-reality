@@ -8,6 +8,8 @@ import QtQuick.Controls
 // it has text). Right-click for colors, text size, Keep in Front and Delete Note….
 FocusScope {
     id: note
+    property var moveManager: typeof manager === "undefined" ? null : manager
+    onFrontChanged: if (!front && moveManager) moveManager.finishShellWindowMove(note, false)
     required property var notes
     required property int noteId
     required property string noteText
@@ -97,12 +99,19 @@ FocusScope {
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.LeftButton | Qt.RightButton
-            drag.target: note; drag.threshold: 2
             onPressed: function(mouse) {
                 note.bringForward(); note.forceActiveFocus()
                 if (mouse.button === Qt.RightButton) menu.popup()
+                else if (note.moveManager) note.moveManager.beginShellWindowMove(note, mapToItem(null, mouse.x, mouse.y))
             }
-            onReleased: if (drag.active || note.x !== note.noteX || note.y !== note.noteY) note.notes.move(note.noteId, Math.round(note.x), Math.round(note.y))
+            onReleased: {
+                if (note.moveManager) note.moveManager.finishShellWindowMove(note)
+                if (note.x !== note.noteX || note.y !== note.noteY)
+                    note.notes.move(note.noteId, Math.round(note.x), Math.round(note.y))
+                note.x = Qt.binding(function() { return note.noteX })
+                note.y = Qt.binding(function() { return note.noteY })
+            }
+            onCanceled: if (note.moveManager) note.moveManager.finishShellWindowMove(note, false)
             onDoubleClicked: note.notes.set(note.noteId, "collapsed", !note.noteCollapsed)
         }
         // The close box.

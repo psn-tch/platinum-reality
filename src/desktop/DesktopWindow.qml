@@ -8,6 +8,8 @@ FocusScope {
     signal closed()
     default property alias contents: page.data
     readonly property bool front: tracker.front
+    property var moveManager: typeof manager === "undefined" ? null : manager
+    onFrontChanged: if (!front && moveManager) moveManager.finishShellWindowMove(frame, false)
     property bool closeOnEscape: true
     // 9.2.2's Calculator style: a rounded black frame and title bar, white title and close box.
     property bool blackFrame: false
@@ -87,8 +89,14 @@ FocusScope {
             }
         }
         MouseArea {
-            anchors.fill:parent; drag.target:frame; drag.threshold:2
-            onPressed: { frame.raised(); frame.forceActiveFocus() }
+            anchors.fill:parent
+            onPressed: function(mouse) {
+                frame.raised(); frame.forceActiveFocus()
+                if (frame.moveManager)
+                    frame.moveManager.beginShellWindowMove(frame, mapToItem(null, mouse.x, mouse.y))
+            }
+            onReleased: if (frame.moveManager) frame.moveManager.finishShellWindowMove(frame)
+            onCanceled: if (frame.moveManager) frame.moveManager.finishShellWindowMove(frame, false)
             onDoubleClicked: frame.setCollapsed(!frame.collapsed)
         }
         // The zoom box, then the collapse box at the far right, as 9.2.2 draws them.

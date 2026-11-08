@@ -15,12 +15,16 @@ parser.add_argument("--output", type=Path, help="New output directory")
 options = parser.parse_args()
 destination = options.output or project / "build/packages" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 destination.mkdir(parents=True, exist_ok=False)
-inputs = [project / n for n in ("CMakeLists.txt", "LICENSE", "README.md", "docs/install.md", "docs/first-session.md", "docs/x11-integration.md")]
+# The release version (docs/software-update.md): update 41 is 0.41.
+version = (project / "VERSION").read_text().strip()
+if not version or not all(part.isdigit() for part in version.split(".")):
+    raise SystemExit(f"VERSION must be digits and dots, not {version!r}")
+inputs = [project / n for n in ("VERSION", "CMakeLists.txt", "LICENSE", "README.md", "docs/install.md", "docs/first-session.md", "docs/x11-integration.md")]
 for directory in ("src", "tests", "scripts", "packaging"):
     inputs.extend(p for p in sorted((project / directory).rglob("*"))
                   if p.is_file() and not p.is_symlink() and "__pycache__" not in p.parts)
 record = {}
-archive = destination / "platinum-reality-0.1.0.tar.gz"
+archive = destination / f"platinum-reality-{version}.tar.gz"
 with archive.open("xb") as output:
     with gzip.GzipFile(filename="", mode="wb", fileobj=output, mtime=0) as compressed:
         with tarfile.open(fileobj=compressed, mode="w") as tar:
@@ -28,13 +32,13 @@ with archive.open("xb") as output:
                 relative = str(path.relative_to(project))
                 contents = path.read_bytes()
                 record[relative] = hashlib.sha256(contents).hexdigest()
-                item = tarfile.TarInfo("platinum-reality-0.1.0/" + relative)
+                item = tarfile.TarInfo(f"platinum-reality-{version}/" + relative)
                 item.size = len(contents)
                 item.mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
                 tar.addfile(item, io.BytesIO(contents))
 digest = hashlib.sha256(archive.read_bytes()).hexdigest()
 template = (project / "packaging/arch/PKGBUILD.in").read_text()
-(destination / "PKGBUILD").write_text(template.replace("@SOURCE_SHA256@", digest))
+(destination / "PKGBUILD").write_text(template.replace("@SOURCE_SHA256@", digest).replace("@VERSION@", version))
 (destination / "source-manifest.json").write_text(json.dumps({
     "archive_sha256": digest, "inputs_sha256": record,
     "scope": "Source snapshot: no personal assets, build outputs or profiles."

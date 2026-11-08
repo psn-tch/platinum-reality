@@ -63,6 +63,7 @@ class FolderList final : public QTreeView
     void springOpen(QString folder);
 
   protected:
+    void drawBranches(QPainter *, const QRect &, const QModelIndex &) const override;
     void startDrag(Qt::DropActions) override;
     void dragEnterEvent(QDragEnterEvent *) override;
     void dragMoveEvent(QDragMoveEvent *) override;

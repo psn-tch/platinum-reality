@@ -27,7 +27,8 @@ enum class Rejection
     no_active_application,
     menu_already_tracking,
     stale_menu_tracking,
-    revision_exhausted
+    revision_exhausted,
+    stale_window_move
 };
 
 struct PresentWindow
@@ -61,8 +62,9 @@ struct CloseTrackedMenu
 {
     MenuTrackingId tracking;
 };
+struct PublishMoveOutline { std::optional<WindowMove> move; };
 using Effect = std::variant<PresentWindow, ForgetWindow, StackWindows, PublishActiveContext,
-                            RouteKeyboard, OpenTrackedMenu, CloseTrackedMenu>;
+                            RouteKeyboard, OpenTrackedMenu, CloseTrackedMenu, PublishMoveOutline>;
 
 struct Transition
 {

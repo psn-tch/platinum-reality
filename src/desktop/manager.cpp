@@ -1,10 +1,14 @@
 #include "manager.hpp"
+#include "window_move_outline.hpp"
 #include "scroll_bar_art.hpp"
 #include "applications/desktop_entry.hpp"
 #include <unistd.h>
 #include "appearance_settings.hpp"
 #include "system_controls.hpp"
 #include "audio_service.hpp"
+#include "asset_importer.hpp"
+#include "software_update.hpp"
+#include "printer_selector.hpp"
 #include "bluetooth.hpp"
 #include "wifi.hpp"
 #include "alert_sounds.hpp"
@@ -23,10 +27,12 @@
 #include "gtk_shell.hpp"
 #include "primary_selection.hpp"
 #include "command_keys.hpp"
+#include <QQmlProperty>
 #include "computer_info.hpp"
 #include "client_cursors.hpp"
 #include "session_control.hpp"
 #include "icon_store.hpp"
+#include <QBuffer>
 #include "idle_inhibition.hpp"
 #include "notifications.hpp"
 #include "status_items.hpp"
@@ -155,6 +161,17 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     if (!QDir::isAbsolutePath(data))
         data = QDir::homePath() + "/.local/share";
     m_personalAssets = data + "/platinum-reality/assets";
+    m_assetImporter = new AssetImporter(QCoreApplication::applicationDirPath() + "/import-macos9-assets.py",
+                                        m_personalAssets, this);
+    // The release key: the installed package's, or the copy beside a development build.
+    const auto appDir = QCoreApplication::applicationDirPath();
+    const auto keyring = QFileInfo::exists(appDir + "/release-keys.gpg")
+        ? appDir + "/release-keys.gpg" : QString("/usr/share/platinum-reality/release-keys.gpg");
+    m_softwareUpdate = new SoftwareUpdate(appDir + "/platinum-software-update", keyring,
+                                          m_profile + "/software-update.json", this);
+    // CUPS's own tools; tests name stand-ins.
+    m_printers = new PrinterSelector(qEnvironmentVariable("FRANKENSTEIN_LPSTAT", "lpstat"),
+                                     qEnvironmentVariable("FRANKENSTEIN_LPOPTIONS", "lpoptions"), this);
     // The real battery only in a real session, like sound; tests may name a fake sysfs tree.
     m_battery = new BatteryStatus(qEnvironmentVariable("FRANKENSTEIN_POWER_SUPPLY_ROOT",
                                                        audible ? "/sys/class/power_supply" : ""), this);
@@ -170,6 +187,7 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     m_catalog = new ApplicationCatalog(std::move(applicationDirectories), m_workspace, m_profile,
                                        QCoreApplication::applicationDirPath(), this);
     connect(m_catalog, &ApplicationCatalog::refreshed, this, &NativeManager::drainDocumentRequests);
+    connect(m_catalog, &ApplicationCatalog::refreshed, this, &NativeManager::refreshApplicationIcons);
     connect(this, &NativeManager::contextChanged, this, &NativeManager::drainDocumentRequests);
     if (m_compositor)
         new DesktopDocumentService(this);
@@ -222,7 +240,14 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     m_applicationNames[m_desktopApplication.value] = "Finder";
     dispatch(RegisterApplication{m_desktopApplication, true});
     dispatch(ActivateDesktop{m_desktopApplication});
+    m_moveSnapshot = std::make_shared<WindowMoveSnapshot>();
+    m_view->engine()->addImageProvider("window-move", new WindowMoveOutlineProvider(m_moveSnapshot));
     m_view->installEventFilter(this);
+    connect(this, &NativeManager::displayLayoutChanged, this, [this] { endShellWindowMove(false); });
+    connect(this, &NativeManager::contextChanged, this, [this] {
+        if (shellModal() || menuOpen())
+            endShellWindowMove(false);
+    });
     // Command editing keys in the shell's own text fields (command_keys.hpp).
     m_view->installEventFilter(new ShellTextCommands(this));
     // Display requests go to the private session supervisor; absent outside that session.
@@ -317,9 +342,10 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
                 &NativeManager::pointerCaptureChanged);
         // Menus, modal dialogs and desktop drags need the pointer: deactivate any capture.
         const auto permitCapture = [this]
-        { m_pointerConstraints->setPermitted(!shellModal() && !menuOpen() && !m_nativeDragging); };
+        { m_pointerConstraints->setPermitted(!shellModal() && !menuOpen() && !m_nativeDragging && !windowMoveActive()); };
         connect(this, &NativeManager::contextChanged, this, permitCapture);
         connect(this, &NativeManager::nativeDragChanged, this, permitCapture);
+        connect(this, &NativeManager::windowMoveChanged, this, permitCapture);
         connect(m_compositor, &QWaylandCompositor::surfaceCreated, this,
                 [this](QWaylandSurface *surface)
                 {
@@ -1026,6 +1052,8 @@ bool NativeManager::activateDesktop()
 }
 qulonglong NativeManager::beginShellModal()
 {
+    if (m_state.move)
+        finishWindowMove(m_state.move->window.value, false);
     const auto token = ++m_nextShellModal;
     m_shellModals.insert(token);
     if (m_state.menu)
@@ -1074,9 +1102,56 @@ QVariantList NativeManager::applications() const
     for (auto id : m_state.applications_back_to_front)
         result.push_back(QVariantMap{{"id", qulonglong(id.value)},
                                      {"name", m_applicationNames.value(id.value)},
+                                     {"icon", applicationIcon(m_applicationIds.key(id))},
                                      {"hidden", m_state.applications.at(id).hidden},
                                      {"active", m_state.active.application == id},
                                      {"attention", m_wantsAttention.contains(id.value)}});
+    return result;
+}
+void NativeManager::refreshApplicationIcons()
+{
+    m_applicationIconCache.clear();
+    emit contextChanged();
+}
+QUrl NativeManager::applicationIcon(QString identity, int size) const
+{
+    if (identity.isEmpty() || identity.size() > 4096) return {};
+    // QML reads this during construction. Discovery belongs to explicit catalog
+    // refreshes; a getter must not start a scan before applications are installed.
+    size = size == 32 ? 32 : 16;
+    const auto cacheKey = identity + '/' + QString::number(size);
+    if (const auto found = m_applicationIconCache.constFind(cacheKey); found != m_applicationIconCache.cend())
+        return *found;
+    // Only fixed classic identities may select private imported artwork. Modern apps retain
+    // their own desktop-entry icon; no guessing an application from its displayed title.
+    static const QMap<QString, QPair<QString, QString>> classic{
+        {"org.frankenstein.Finder", {"finder", "system-file-manager"}},
+        {"shell:control-panels-window", {"control-panels", "preferences-system"}},
+        {"shell:control-panel", {"control-panel", "preferences-system"}},
+        {"shell:calculator", {"calculator", "accessories-calculator"}},
+        {"shell:key-caps", {"key-caps", "input-keyboard"}},
+        {"shell:note-pad", {"note-pad", "accessories-text-editor"}},
+        {"shell:scrapbook", {"scrapbook", "edit-paste"}}
+    };
+    QImage image;
+    const auto known = classic.constFind(identity);
+    if (known != classic.cend()) {
+        const auto base = m_personalAssets + "/icons/" + known->first;
+        if (size == 16) image = IconStore::resolve(base + "-16.png", size);
+        if (image.isNull()) image = IconStore::resolve(base + ".png", size);
+    }
+    if (image.isNull()) image = IconStore::resolve(m_catalog->applicationIcon(identity), size);
+    if (image.isNull() && known != classic.cend()) image = IconStore::resolve(known->second, size);
+    // Return an in-memory image: no extra provider/thread, disk cache, or copied personal asset.
+    QUrl result;
+    if (!image.isNull()) {
+        QByteArray bytes;
+        QBuffer buffer(&bytes);
+        if (buffer.open(QIODevice::WriteOnly) && image.save(&buffer, "PNG"))
+            result = QUrl("data:image/png;base64," + QString::fromLatin1(bytes.toBase64()));
+    }
+    if (m_applicationIconCache.size() >= 512) m_applicationIconCache.clear();
+    m_applicationIconCache.insert(cacheKey, result);
     return result;
 }
 ManagedWindow *NativeManager::windowForSurface(QWaylandSurface *surface) const
@@ -1251,6 +1326,22 @@ void NativeManager::createWindow(QWaylandXdgToplevel *top, QWaylandXdgSurface *x
                                     parent, record->modal()});
             if (!shellModal())
                 dispatch(ActivateWindow{record->identity});
+            connect(top, &QWaylandXdgToplevel::startMove, record,
+                    [this, record](QWaylandSeat *seat)
+                    {
+                        // A client-side title bar requests the same compositor grab as our
+                        // own chrome. Require an actual pointer press on that client's surface.
+                        if (!m_compositor || seat != m_compositor->defaultSeat() || !seat->pointer() ||
+                            !seat->pointer()->isButtonPressed() || !seat->mouseFocus() ||
+                            seat->mouseFocus()->surface() != record->xdg->surface())
+                            return;
+                        beginWindowMove(record->id(), seat->pointer()->currentSpacePosition());
+                        if (m_state.move && m_state.move->window == record->identity)
+                        {
+                            ++m_clientMoveGeneration;
+                            m_clientMoveWindow = record->id();
+                        }
+                    });
             connect(top, &QWaylandXdgToplevel::titleChanged, record,
                     [this, record, key, application, root = !parent.has_value()]
                     {
@@ -1443,7 +1534,17 @@ void NativeManager::dispatch(Event event)
     }
     if (result.status == Status::no_change)
         return;
+    const bool moveChanged = m_state.move != result.next.move;
+    const bool previewOnly = result.effects.size() == 1 &&
+                            std::holds_alternative<PublishMoveOutline>(result.effects.front());
     m_state = std::move(result.next);
+    if (moveChanged && !m_state.move && m_moveSnapshot)
+        m_moveSnapshot->image = {};
+    if (moveChanged)
+        emit windowMoveChanged();
+    // Preview motion never changes a client, focus, stacking, menus or persisted placement.
+    if (previewOnly)
+        return;
     synchronize();
 }
 void NativeManager::synchronize()
@@ -1794,6 +1895,8 @@ void NativeManager::refitFullScreens()
 }
 void NativeManager::setDisplayLayout(const DisplayLayout &layout)
 {
+    if (m_state.move)
+        finishWindowMove(m_state.move->window.value, false);
     const auto previous=effectiveDisplayLayout();
     m_displayLayout=layout;
     m_desktopItems->setDisplayLayout(layout);
@@ -1855,6 +1958,124 @@ void NativeManager::moveWindow(qulonglong id, int x, int y)
     const auto position=effectiveDisplayLayout().reachablePosition({x,y},{window->width(),window->height()});
     dispatch(SetPosition{{id},{position.x(),position.y()}});
 }
+QRect NativeManager::windowMoveRect() const
+{
+    if (m_shellMoveItem)
+        return m_shellMoveRect;
+    if (!m_state.move)
+        return {};
+    const auto *window = find(m_state.move->window.value);
+    if (!window)
+        return {};
+    const bool chrome = window->serverDecorated() && !window->fullScreen;
+    return QRect(QPoint(m_state.move->preview.x, m_state.move->preview.y),
+                 QSize(window->width() + (chrome ? 6 : 0),
+                       chrome && window->collapsed() ? 23 : window->height() + (chrome ? 27 : 0)));
+}
+qulonglong NativeManager::windowMoveGeneration() const { return m_moveSnapshot->generation; }
+void NativeManager::beginWindowMove(qulonglong id, QPointF pointer)
+{
+    endShellWindowMove(false);
+    const auto *window = find(id);
+    if (!window || window->fullScreen || window->shadeInMotion || shellModal() || m_nativeDragging)
+        return;
+    activate(id);
+    if (!window->active() || m_state.move)
+        return;
+    // Snapshot before making the overlay visible. Its four thin strips invert the
+    // captured pixels; removing the overlay restores live rendering without XOR damage.
+    m_moveSnapshot->image = m_view->grabWindow();
+    m_moveSnapshot->scale = m_view->devicePixelRatio();
+    ++m_moveSnapshot->generation;
+    m_movePointerOrigin = pointer;
+    dispatch(BeginWindowMove{{id}});
+}
+void NativeManager::updateWindowMove(QPointF pointer)
+{
+    if (m_shellMoveItem)
+    {
+        const auto position = effectiveDisplayLayout().reachablePosition(
+            (m_shellMoveOrigin + pointer - m_movePointerOrigin).toPoint(), m_shellMoveRect.size());
+        m_shellMoveRect.moveTopLeft(position);
+        emit windowMoveChanged();
+        return;
+    }
+    if (!m_state.move)
+        return;
+    const auto *window = find(m_state.move->window.value);
+    if (!window)
+        return;
+    const QPoint origin(m_state.move->origin.x, m_state.move->origin.y);
+    const auto position = effectiveDisplayLayout().reachablePosition(
+        origin + (pointer - m_movePointerOrigin).toPoint(), {window->width(), window->height()});
+    dispatch(UpdateWindowMove{window->identity, {position.x(), position.y()}});
+}
+void NativeManager::finishWindowMove(qulonglong id, bool commit)
+{
+    if (!m_state.move || m_state.move->window != WindowId{id})
+        return;
+    dispatch(EndWindowMove{{id}, commit});
+    // A cancelled CSD grab remains suppressed until its physical release as Qt's
+    // shell integration still owns that grab. Its later moveItem writes are ignored.
+}
+void NativeManager::beginShellWindowMove(QQuickItem *item, QPointF pointer)
+{
+    if (!item || item->window() != m_view || !item->isVisible() || !item->parentItem() ||
+        shellModal() || menuOpen() || m_nativeDragging || windowMoveActive())
+        return;
+    m_moveSnapshot->image = m_view->grabWindow();
+    m_moveSnapshot->scale = m_view->devicePixelRatio();
+    ++m_moveSnapshot->generation;
+    m_shellMoveItem = item;
+    m_shellMoveOrigin = item->mapToScene(QPointF());
+    m_shellMoveRect = QRect(m_shellMoveOrigin.toPoint(), QSize(qRound(item->width()), qRound(item->height())));
+    m_movePointerOrigin = pointer;
+    const auto cancel = [this] { endShellWindowMove(false); };
+    m_shellMoveConnections = {
+        connect(this, &NativeManager::contextChanged, this, [this, active = activeWindowId()] {
+            if (activeWindowId() != active)
+                endShellWindowMove(false);
+        }),
+        connect(item, &QObject::destroyed, this, cancel),
+        connect(item, &QQuickItem::visibleChanged, this, cancel),
+        connect(item, &QQuickItem::parentChanged, this, cancel),
+        connect(item, &QQuickItem::widthChanged, this, cancel),
+        connect(item, &QQuickItem::heightChanged, this, cancel),
+        connect(item, &QQuickItem::xChanged, this, cancel),
+        connect(item, &QQuickItem::yChanged, this, cancel)};
+    emit windowMoveChanged();
+}
+void NativeManager::finishShellWindowMove(QQuickItem *item, bool commit)
+{
+    if (item && item == m_shellMoveItem)
+        endShellWindowMove(commit);
+}
+void NativeManager::endShellWindowMove(bool commit)
+{
+    if (m_shellMoveConnections.isEmpty())
+        return;
+    const auto item = m_shellMoveItem;
+    const auto position = m_shellMoveRect.topLeft();
+    for (const auto &connection : std::as_const(m_shellMoveConnections))
+        disconnect(connection);
+    m_shellMoveConnections.clear();
+    m_shellMoveItem.clear();
+    m_shellMoveRect = {};
+    m_moveSnapshot->image = {};
+    if (commit && item && item->parentItem())
+    {
+        const auto local = item->parentItem()->mapFromScene(position);
+        // A user move replaces initial centering bindings, as QML drag.target did.
+        QQmlProperty::write(item, "x", local.x());
+        QQmlProperty::write(item, "y", local.y());
+    }
+    emit windowMoveChanged();
+}
+void NativeManager::clientMovePosition(qulonglong id, int x, int y)
+{
+    if (m_clientMoveWindow != id)
+        moveWindow(id, x, y);
+}
 void NativeManager::resizeWindow(qulonglong id, int width, int height)
 {
     auto *w = find(id);
@@ -1914,13 +2135,15 @@ bool NativeManager::oversizedFixedWindow(const ManagedWindow *w) const
     if (size.isEmpty() || w->top->minSize() != size)
         return false;
     const auto screen = windowScreen(w);
-    const int chrome = (screen == effectiveDisplayLayout().primaryRect() ? 26 : 0) + 22;
+    const int chrome = (screen == effectiveDisplayLayout().primaryRect() ? platinumMenuBarHeight : 0) + 22;
     return size.width() > screen.width() || size.height() + chrome > screen.height();
 }
 void NativeManager::setFullScreen(ManagedWindow *w, bool fullScreen, QWaylandOutput *requested)
 {
     if (!w || !w->top)
         return;
+    if (m_state.move && m_state.move->window == w->identity)
+        finishWindowMove(w->id(), false);
     // Too big to show framed (psn_tch, 2026-10-22: such windows open full screen); a request to
     // leave full screen keeps it there while the window cannot fit.
     if (!fullScreen && oversizedFixedWindow(w))
@@ -1991,7 +2214,7 @@ void NativeManager::fillScreen(qulonglong id)
     }
     // The window's screen, below the menu bar on the main one; the frame's chrome fits inside too.
     const auto screen = windowScreen(w);
-    const int top = screen.y() + (screen.contains(effectiveDisplayLayout().primaryRect().topLeft()) ? 26 : 0);
+    const int top = screen.y() + (screen.contains(effectiveDisplayLayout().primaryRect().topLeft()) ? platinumMenuBarHeight : 0);
     const int frameWidth = w->serverDecorated() ? 6 : 0, frameHeight = w->serverDecorated() ? 27 : 0;
     w->filledRestore = QRect(w->x(), w->y(), w->width(), w->height());
     w->filled = true;
@@ -2011,6 +2234,16 @@ void NativeManager::closeWindow(qulonglong id)
     if (w && w->top)
         w->top->sendClose();
     queueClientFlush();
+}
+bool NativeManager::canCloseActiveWindow() const
+{
+    const auto *window = m_state.active.window ? find(m_state.active.window->value) : nullptr;
+    return window && window->top && !window->modal() && !window->shadeInMotion && !shellModal();
+}
+void NativeManager::closeActiveWindow(qulonglong expected)
+{
+    if ((!expected || expected == activeWindowId()) && canCloseActiveWindow())
+        closeWindow(m_state.active.window->value);
 }
 void NativeManager::hideApplication()
 {
@@ -2290,6 +2523,71 @@ void NativeManager::launchTrash()
 }
 bool NativeManager::eventFilter(QObject *object, QEvent *event)
 {
+    if (object == m_view && m_shellMoveItem)
+    {
+        if (event->type() == QEvent::KeyPress && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape)
+        {
+            endShellWindowMove(false);
+            return true;
+        }
+        if (event->type() == QEvent::UngrabMouse || event->type() == QEvent::WindowDeactivate ||
+            event->type() == QEvent::Hide || event->type() == QEvent::TouchCancel)
+            endShellWindowMove(false);
+        else if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonRelease)
+        {
+            auto *mouse = static_cast<QMouseEvent *>(event);
+            updateWindowMove(mouse->position());
+            if (event->type() == QEvent::MouseButtonRelease && mouse->button() == Qt::LeftButton)
+                endShellWindowMove(true);
+        }
+        else if (event->type() == QEvent::TouchUpdate || event->type() == QEvent::TouchEnd)
+        {
+            auto *touch = static_cast<QTouchEvent *>(event);
+            if (!touch->points().isEmpty())
+                updateWindowMove(touch->points().first().position());
+            if (event->type() == QEvent::TouchEnd)
+                endShellWindowMove(true);
+        }
+    }
+    if (object == m_view && m_clientMoveWindow &&
+        ((event->type() == QEvent::MouseButtonRelease &&
+          static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) ||
+         event->type() == QEvent::TouchEnd || event->type() == QEvent::TouchCancel ||
+         event->type() == QEvent::UngrabMouse || event->type() == QEvent::WindowDeactivate ||
+         event->type() == QEvent::Hide))
+    {
+        const auto generation = m_clientMoveGeneration;
+        QTimer::singleShot(0, this, [this, generation]
+                           { if (generation == m_clientMoveGeneration) m_clientMoveWindow = 0; });
+    }
+    if (object == m_view && m_state.move)
+    {
+        const auto id = m_state.move->window.value;
+        if (event->type() == QEvent::KeyPress && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape)
+        {
+            finishWindowMove(id, false);
+            return true;
+        }
+        if (event->type() == QEvent::UngrabMouse || event->type() == QEvent::WindowDeactivate ||
+            event->type() == QEvent::Hide || event->type() == QEvent::TouchCancel)
+            finishWindowMove(id, false);
+        else if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonRelease)
+        {
+            auto *mouse = static_cast<QMouseEvent *>(event);
+            updateWindowMove(mouse->position());
+            if (event->type() == QEvent::MouseButtonRelease && mouse->button() == Qt::LeftButton)
+                finishWindowMove(id);
+            // Still deliver release to the QML/Qt grab owner so it resets its pressed state.
+        }
+        else if (event->type() == QEvent::TouchUpdate || event->type() == QEvent::TouchEnd)
+        {
+            auto *touch = static_cast<QTouchEvent *>(event);
+            if (!touch->points().isEmpty())
+                updateWindowMove(touch->points().first().position());
+            if (event->type() == QEvent::TouchEnd)
+                finishWindowMove(id);
+        }
+    }
     if (object == m_view && (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease))
     {
         auto *key = static_cast<QKeyEvent *>(event);
@@ -2305,6 +2603,14 @@ bool NativeManager::eventFilter(QObject *object, QEvent *event)
                               code == Qt::Key_AltGr || code == Qt::Key_CapsLock;
         if (event->type() == QEvent::KeyPress && m_shellMenuOpen && !modifier)
         {
+            if (m_shellMenuKeyboardMode && (code == Qt::Key_Left || code == Qt::Key_Right ||
+                code == Qt::Key_Up || code == Qt::Key_Down || code == Qt::Key_Home ||
+                code == Qt::Key_End || code == Qt::Key_Return || code == Qt::Key_Enter || code == Qt::Key_Space))
+            {
+                m_swallowedMenuKey = code;
+                emit shellMenuNavigation(code);
+                return true;
+            }
             // As in 9.2.2: the key closes the menu and goes nowhere else.
             m_swallowedMenuKey = code;
             emit shellMenuKeyPressed();

@@ -243,7 +243,7 @@ Item {
                     width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12; color: "#333"
                     text: soundTab.available
                           ? "Menus, windows, WindowShade and the Trash play the sounds from your own Mac OS 9 installation, at the alert volume."
-                          : "No sound track is installed. Your own Mac OS 9 \"Platinum Sounds\" can be imported with scripts/import-macos9-assets.py."
+                          : "No sound track is installed. Your own Mac OS 9 \"Platinum Sounds\" can be imported with Apple menu ▸ Asset Importer."
                 }
             }
 

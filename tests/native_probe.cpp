@@ -100,6 +100,12 @@ class NativeProbe final : public QMainWindow
     int Width() const { return width(); }
     int Height() const { return height(); }
     bool LocalMenuVisible() const { return menuBar()->isVisible(); }
+    QString RenameFileMenu(QString title)
+    {
+        auto *menu = menuBar()->actions().first()->menu();
+        menu->setTitle(title);
+        return menu->title();
+    }
     void ShowFileMenu() { menuBar()->actions().first()->menu()->popup(mapToGlobal(QPoint(10,25))); }
     // A menu opened at a window-local point, e.g. near a monitor's edge.
     void ShowFileMenuAt(int x, int y) { menuBar()->actions().first()->menu()->popup(mapToGlobal(QPoint(x,y))); }

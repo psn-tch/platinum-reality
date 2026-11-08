@@ -23,13 +23,16 @@
 #include <QListWidget>
 #include <QToolButton>
 #include <QMenuBar>
+#include <QHeaderView>
 #include <QMimeData>
 #include <QTreeWidget>
 #include <QLabel>
 #include <QScopeGuard>
 #include <QSignalSpy>
+#include <QStandardItemModel>
 #include <QMessageBox>
 #include <QPointer>
+#include <QPainter>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QTemporaryDir>
@@ -43,6 +46,198 @@ class GuiTests : public QObject
 {
     Q_OBJECT
   private slots:
+    void finderHeaderMatchesActiveAndInactiveReferenceBand()
+    {
+        QTemporaryDir root,profile;
+        QVERIFY(QDir(root.path()).mkdir("Inside"));
+        QPointer<FinderWindow> window=new FinderWindow(root.path(),profile.path(),root.path());
+        const auto close=qScopeGuard([&]{if(window)window->close();});
+        window->show();QVERIFY(QTest::qWaitForWindowExposed(window));
+        window->activateWindow();QTRY_VERIFY(window->isActiveWindow());
+        QTRY_VERIFY(window->directoryState().value("loaded").toBool());
+        auto *header=window->findChild<QLabel*>("folderItemCount");QVERIFY(header);
+        QCOMPARE(header->height(),21);QCOMPARE(header->alignment(),Qt::AlignCenter);
+        QTRY_VERIFY(header->text().startsWith("1 item, "));
+        const auto check=[&](QColor field,QColor top,QColor shade,QColor bottom,QColor ink) {
+            const auto image=header->grab().toImage();
+            if(image.isNull())return false;
+            const auto ratio=image.devicePixelRatio();
+            const auto pixel=[&](int x,int y){return image.pixelColor(int((x+.5)*ratio),int((y+.5)*ratio));};
+            for(int x=0;x<4;++x)for(int y=0;y<21;++y){
+                const auto expected=y==0?top:y==19?shade:y==20?bottom:field;
+                if(pixel(x,y)!=expected){
+                    qWarning() << "Header sample" << x << y << ratio << image.size() << pixel(x,y) << expected;
+                    return false;
+                }
+            }
+            bool found=false;
+            for(int y=2;y<18;++y)for(int x=4;x<header->width()-4;++x)
+                found=found || pixel(x,y)==ink;
+            return found;
+        };
+        QVERIFY(check(QColor("#ddd"),Qt::white,QColor("#aaa"),Qt::black,Qt::black));
+        QWidget other;other.show();QVERIFY(QTest::qWaitForWindowExposed(&other));
+        other.activateWindow();QTRY_VERIFY(!window->isActiveWindow());
+        QTRY_VERIFY(check(QColor("#eee"),QColor("#eee"),QColor("#eee"),QColor("#555"),QColor("#777")));
+        window->activateWindow();QTRY_VERIFY(window->isActiveWindow());
+        QTRY_VERIFY(check(QColor("#ddd"),Qt::white,QColor("#aaa"),Qt::black,Qt::black));
+        // The text stays live while inactive, and both modern navigation controls remain.
+        other.activateWindow();QTRY_VERIFY(!window->isActiveWindow());
+        QVERIFY(QDir(root.path()).mkdir("Second"));
+        QTRY_VERIFY(header->text().startsWith("2 items, "));
+        QVERIFY(window->findChild<QLineEdit*>("pathField"));
+        QVERIFY(window->findChild<QListWidget*>("placesList"));
+    }
+
+    void finderListKeepsMeasuredRowsSortedColumnAndRealMetadata()
+    {
+        QTemporaryDir root,profile;
+        QVERIFY(QDir(root.path()).mkdir("One"));QVERIFY(QDir(root.path()).mkdir("Two"));
+        QPointer<FinderWindow> window=new FinderWindow(root.path(),profile.path(),root.path());
+        const auto close=qScopeGuard([&]{if(window)window->close();});
+        window->setViewMode(true);window->show();QVERIFY(QTest::qWaitForWindowExposed(window));
+        QTRY_VERIFY(window->directoryState().value("loaded").toBool());
+        auto *view=window->findChild<FolderList*>();QVERIFY(view);
+        auto *model=qobject_cast<QFileSystemModel*>(view->model());QVERIFY(model);
+        auto *header=view->header();QCOMPARE(header->height(),21);
+        QCOMPARE(header->sectionSize(0),214);QCOMPARE(header->logicalIndex(1),3);
+        QCOMPARE(view->iconSize(),QSize(16,16));QCOMPARE(model->columnCount(),4);
+        const auto index=model->index(root.path()+"/One");QVERIFY(index.isValid());
+        QTRY_COMPARE(view->visualRect(index).height(),19);
+        const auto check=[&](int column,QColor field) {
+            const auto rect=view->visualRect(index.siblingAtColumn(column));
+            const auto shot=view->viewport()->grab().toImage();const auto ratio=shot.devicePixelRatio();
+            const auto pixel=[&](int x,int y){return shot.pixelColor(int((x+.5)*ratio),int((y+.5)*ratio));};
+            const int x=rect.right()-4;
+            return rect.isValid() && pixel(x,rect.top()+1)==field && pixel(x,rect.bottom())==QColor(Qt::white)
+                && (column!=0 || (pixel(rect.left()-2,rect.top()+1)==field
+                                   && pixel(rect.left()-2,rect.bottom())==QColor(Qt::white)));
+        };
+        QTRY_VERIFY(check(0,QColor("#ddd")));QTRY_VERIFY(check(3,QColor("#eee")));
+        view->sortByColumn(3,Qt::DescendingOrder);
+        QTRY_VERIFY(check(0,QColor("#eee")));QTRY_VERIFY(check(3,QColor("#ddd")));
+        // Visual column order leaves real model metadata and selection identities intact.
+        QVERIFY(!model->data(index.siblingAtColumn(3)).toString().isEmpty());
+        view->selectionModel()->select(index,QItemSelectionModel::ClearAndSelect|QItemSelectionModel::Rows);
+        QVERIFY(view->selectionModel()->isSelected(index));
+        window->setViewMode(false);window->setViewMode(true);
+        QCOMPARE(header->logicalIndex(1),3);
+    }
+    void finderListSelectionPaintsOnlyTheActiveNameAndKeepsRealSelection()
+    {
+        QTemporaryDir root,profile;
+        QVERIFY(QDir(root.path()).mkdir("Selected folder"));
+        QPointer<FinderWindow> window=new FinderWindow(root.path(),profile.path(),root.path());
+        const auto close=qScopeGuard([&]{if(window)window->close();});
+        window->setViewMode(true);window->show();QVERIFY(QTest::qWaitForWindowExposed(window));
+        window->activateWindow();QTRY_VERIFY(window->isActiveWindow());
+        QTRY_VERIFY(window->directoryState().value("loaded").toBool());
+        auto *view=window->findChild<FolderList*>();QVERIFY(view);
+        auto *model=qobject_cast<QFileSystemModel*>(view->model());QVERIFY(model);
+        const auto index=model->index(root.path()+"/Selected folder");QVERIFY(index.isValid());
+        const auto rect=view->visualRect(index);QVERIFY(rect.isValid());
+        const auto point=rect.center();view->setFocus();
+        QTest::mouseMove(view->viewport(),point);
+        view->selectionModel()->clearSelection();
+        const auto row=[&](int column) {
+            const auto image=view->viewport()->grab().toImage();const auto ratio=image.devicePixelRatio();
+            const auto box=view->visualRect(index.siblingAtColumn(column));
+            return image.copy(QRect(qRound(box.x()*ratio),qRound(box.y()*ratio),
+                qRound(box.width()*ratio),qRound(box.height()*ratio)));
+        };
+        const auto normal=row(0),metadata=row(3);
+        QTest::mouseClick(view->viewport(),Qt::LeftButton,{},point);
+        QTRY_VERIFY(view->selectionModel()->isSelected(index));
+        const auto selected=row(0);QVERIFY(selected!=normal);
+        QCOMPARE(row(3),metadata); // Selection never floods metadata columns.
+        int changed=0,black=0;
+        for(int y=0;y<selected.height();++y)for(int x=0;x<selected.width();++x){
+            if(selected.pixelColor(x,y)!=normal.pixelColor(x,y)){
+                ++changed;black+=selected.pixelColor(x,y)==QColor(Qt::black);
+                QVERIFY(x<selected.width()*3/4); // The spare Name field stays ordinary.
+                QVERIFY(y<selected.height()-1); // Keep the measured white row separator.
+            }
+        }
+        QVERIFY(changed>50);QVERIFY(black>50);
+        QWidget other;other.show();QVERIFY(QTest::qWaitForWindowExposed(&other));
+        other.activateWindow();QTRY_VERIFY(!window->isActiveWindow());
+        QTRY_COMPARE(row(0),normal);
+        QVERIFY(view->selectionModel()->isSelected(index)); // Visual deactivation is not deselection.
+        window->activateWindow();QTRY_VERIFY(window->isActiveWindow());
+        QTRY_COMPARE(row(0),selected);
+        QCOMPARE(model->filePath(view->selectionModel()->selectedIndexes().first()),root.path()+"/Selected folder");
+    }
+    void selectedListIconsHalveRgbPreserveTransparencyAndRefresh()
+    {
+        QStandardItemModel model(1,1);
+        model.setData(model.index(0,0),"Owned icon");
+        const auto icon=[](QColor color) {
+            QPixmap image(16,16);image.fill(Qt::transparent);
+            QPainter painter(&image);painter.fillRect(3,3,10,10,color);painter.end();
+            return QIcon(image);
+        };
+        model.setData(model.index(0,0),icon(QColor(200,120,80)),Qt::DecorationRole);
+        FolderList view;view.resize(320,180);view.setModel(&model);view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));view.activateWindow();QTRY_VERIFY(view.isActiveWindow());
+        const auto index=model.index(0,0);
+        view.selectionModel()->clearSelection();
+        const auto normal=view.viewport()->grab().toImage();
+        QList<QPoint> opaque;
+        for(int y=0;y<normal.height();++y)for(int x=0;x<normal.width();++x)
+            if(normal.pixelColor(x,y)==QColor(200,120,80))opaque.push_back({x,y});
+        QVERIFY(opaque.size()>=25);
+        view.selectionModel()->select(index,QItemSelectionModel::ClearAndSelect);
+        const auto selected=view.viewport()->grab().toImage();
+        for(const auto &point:opaque)QCOMPARE(selected.pixelColor(point),QColor(100,60,40));
+        const auto transparent=opaque.first()-QPoint(qRound(2*normal.devicePixelRatio()),0);
+        QCOMPARE(normal.pixelColor(transparent),QColor("#ddd"));
+        QCOMPARE(selected.pixelColor(transparent),normal.pixelColor(transparent));
+        // The row outside the compact icon/name decorations remains unchanged.
+        QCOMPARE(selected.pixelColor(normal.width()-8,2),normal.pixelColor(normal.width()-8,2));
+        model.setData(index,icon(QColor(80,160,240)),Qt::DecorationRole);
+        const auto refreshed=view.viewport()->grab().toImage();
+        for(const auto &point:opaque)QCOMPARE(refreshed.pixelColor(point),QColor(40,80,120));
+        QWidget other;other.show();QVERIFY(QTest::qWaitForWindowExposed(&other));
+        other.activateWindow();QTRY_VERIFY(!view.isActiveWindow());
+        const auto inactive=view.viewport()->grab().toImage();
+        for(const auto &point:opaque)QCOMPARE(inactive.pixelColor(point),QColor(80,160,240));
+        QVERIFY(view.selectionModel()->isSelected(index));
+    }
+    void finderColumnHeadersMatchMeasuredBevelsAndKeepSorting()
+    {
+        QTemporaryDir root,profile;QVERIFY(QDir(root.path()).mkdir("Inside"));
+        QPointer<FinderWindow> window=new FinderWindow(root.path(),profile.path(),root.path());
+        const auto close=qScopeGuard([&]{if(window)window->close();});
+        window->setViewMode(true);window->show();QVERIFY(QTest::qWaitForWindowExposed(window));
+        window->activateWindow();QTRY_VERIFY(window->isActiveWindow());
+        auto *view=window->findChild<FolderList*>();QVERIFY(view);auto *header=view->header();
+        const auto check=[&](int logical,bool active,bool down){
+            const auto image=header->viewport()->grab().toImage();const auto ratio=image.devicePixelRatio();
+            const int x=header->sectionViewportPosition(logical)+3;
+            for(int y=0;y<21;++y){
+                const auto expected=QColor(active ?
+                    (y==0 ? (down?"#111":"#666") : y==1 ? (down?"#555":"#fff") :
+                     y==19 ? (down?"#aaa":"#888") : y==20 ? (down?"#444":"#333") : (down?"#888":"#ccc")) :
+                    (y==0 ? (down?"#777":"#aaa") : y==20 ? "#999" : (down?"#bbb":"#ddd")));
+                if(image.pixelColor(int((x+.5)*ratio),int((y+.5)*ratio))!=expected)return false;
+            }
+            return true;
+        };
+        QTRY_VERIFY(check(0,true,true));QTRY_VERIFY(check(3,true,false));
+        QVERIFY(header->sectionsClickable());QVERIFY(header->sectionsMovable());
+        const auto point=QPoint(header->sectionViewportPosition(3)+header->sectionSize(3)/2,10);
+        QTest::mouseClick(header->viewport(),Qt::LeftButton,{},point);
+        QTRY_COMPARE(header->sortIndicatorSection(),3);
+        QTRY_VERIFY(check(0,true,false));QTRY_VERIFY(check(3,true,true));
+        const auto order=header->sortIndicatorOrder();
+        QTest::mouseClick(header->viewport(),Qt::LeftButton,{},point);
+        QTRY_VERIFY(header->sortIndicatorOrder()!=order);
+        QWidget other;other.show();QVERIFY(QTest::qWaitForWindowExposed(&other));
+        other.activateWindow();QTRY_VERIFY(!window->isActiveWindow());
+        QTRY_VERIFY(check(0,false,false));QTRY_VERIFY(check(3,false,true));
+        window->activateWindow();QTRY_VERIFY(window->isActiveWindow());
+        QTRY_VERIFY(check(0,true,false));QTRY_VERIFY(check(3,true,true));
+    }
     void cutCopyAndPasteFilesBetweenWindowsAndFileManagers()
     {
         QTemporaryDir root, profile;

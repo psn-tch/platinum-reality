@@ -11,31 +11,71 @@ Item {
     // The module whose menu is open, drawn pressed while it is.
     property string openModule: ""
     signal moduleRequested(string module, Item anchor)
+    // Sound Volume, as in 9.2.2: no menu, a vertical slider shown while the button is held over
+    // the module; releasing sets the level. The volume is {available, value (0-100), muted}.
+    property var volume: null
+    // The user's own imported assets (scripts/import-macos9-assets.py): a module with an icon in
+    // <personalFolder>/icons/control-strip/<command>.png shows it instead of our drawing.
+    property string personalFolder: ""
+    function personalIcon(command) {
+        return personalFolder !== "" && /^[a-z]+$/.test(command)
+            ? "file://" + encodeURI(personalFolder + "/icons/control-strip/" + command + ".png") : ""
+    }
+    signal sliderOpened()
+    signal volumeChosen(int value)
     objectName: "control-strip"
     // Applications' tray items (StatusNotifierItem) follow the built-in modules:
     // {command: "status:<key>", name, icon, statusId}.
     property var extraModules: []
     readonly property rect screenRect: sessionManager.primaryDisplayRect
+    // In the order 9.2.2 lists its modules (alphabetically by file), with Platinum Reality's own.
     readonly property var modules: [
         {command:"applications",name:"Applications"},
-        {command:"appearance",name:"Appearance"},
-        {command:"sound",name:"Sound"},
-        {command:"monitors",name:"Brightness"},
-        {command:"wifi",name:"Wi-Fi"},
-        {command:"bluetooth",name:"Bluetooth"}]
+        {command:"appearance",name:"Appearance"}]
         .concat(battery && battery.present ? [{command:"battery",name:"Battery"}] : [])
+        .concat([{command:"bluetooth",name:"Bluetooth"},
+                 {command:"monitors",name:"Brightness"},
+                 {command:"energy",name:"Energy Settings"}])
         .concat(handheld && handheld.available ? [{command:"handheld",name:"Handheld"}] : [])
+        .concat([{command:"resolution",name:"Monitor Resolution"},
+                 {command:"printer",name:"Printer Selector"},
+                 {command:"sound",name:"Sound Volume",slider:true},
+                 {command:"soundsource",name:"Sound Source"},
+                 {command:"wifi",name:"Wi-Fi"}])
         .concat(extraModules)
     // The laptop's own battery (BatteryStatus); the module appears only when there is one.
     readonly property var battery: sessionManager.battery
     // Handheld Daemon (HandheldDaemon): shown while hhd runs on this computer.
     readonly property var handheld: sessionManager.handheld
-    readonly property int moduleWidth: 36
-    readonly property int endWidth: 16
-    readonly property int arrowWidth: 13
-    readonly property int fixedWidth: 2*endWidth + 2*arrowWidth
-    readonly property int fittingModules: Math.max(1, Math.min(modules.length,
-        Math.floor((screenRect.width - fixedWidth) / moduleWidth)))
+    // Geometry measured pixel by pixel in the 9.2.2 reference VM (docs/fidelity/control-strip.md):
+    // 24 px tall, flush with the screen edge; a 1 px black line at that edge and between
+    // cells; a 13 px collapse box and 13 px scroll-arrow wells; modules of their own width (most are
+    // 30 px, a 16 px icon at (2, 3) and the pop-up triangle 8 px from the right); an 18 px end tab.
+    readonly property int stripHeight: 24
+    readonly property int boxWidth: 13
+    readonly property int tabWidth: 18
+    // edge line, collapse box, line, back arrow, line, forward arrow, end tab (which starts with its line)
+    readonly property int fixedWidth: 1 + boxWidth + 1 + boxWidth + 1 + boxWidth + tabWidth
+    function moduleWidth(module) { return module && module.width ? module.width : 30 }
+    // Where module `index` starts in the row of all modules, each followed by its black line.
+    function moduleOffset(index) {
+        let x = 0
+        for (let i = 0; i < index && i < modules.length; ++i) x += moduleWidth(modules[i]) + 1
+        return x
+    }
+    function spanOf(first, count) { return moduleOffset(first + count) - moduleOffset(first) }
+    // How many whole modules, from the first, an outline `length` px long nearly covers.
+    function modulesCovering(length) {
+        let count = 0
+        while (count < modules.length && spanOf(0, count + 1) - moduleWidth(modules[count]) / 2 <= length) ++count
+        return count
+    }
+    readonly property int fittingModules: {
+        let count = 0, used = fixedWidth
+        while (count < modules.length && used + moduleWidth(modules[count]) + 1 <= screenRect.width)
+            used += moduleWidth(modules[count++]) + 1
+        return Math.max(1, count)
+    }
     // The length chosen by dragging the end tab, in whole modules (0 shows all that fit).
     readonly property int visibleModules: settings.controlStripModules > 0
         ? Math.min(settings.controlStripModules, fittingModules) : fittingModules
@@ -59,12 +99,12 @@ Item {
     // The edge comes from the saved position, so a strip saved on the right stays there when the
     // screen changes size; free positions saved by older versions go to the nearer edge.
     readonly property bool rightEdge: settings.controlStripX + width / 2 > screenRect.width / 2
-    readonly property int viewportWidth: visibleModules * moduleWidth
+    readonly property int viewportWidth: spanOf(firstModule, visibleModules)
     // Parts are placed from the screen edge outwards, mirrored on the right edge. Bindings rather
     // than a Row keep hit-testing correct before the next frame's polish.
     function place(offset, partWidth) { return rightEdge ? width - offset - partWidth : offset }
-    width: collapsed ? endWidth : fixedWidth + viewportWidth
-    height: 28
+    width: collapsed ? tabWidth : fixedWidth + viewportWidth
+    height: stripHeight
     x: screenRect.x + (rightEdge ? screenRect.width - width : 0)
     y: screenRect.y + Math.max(27, Math.min(settings.controlStripY < 0 ? screenRect.height - height
                                                                         : settings.controlStripY,
@@ -72,28 +112,29 @@ Item {
     visible: settings.controlStripVisible
     enabled: !sessionManager.shellModal && !sessionManager.menuOpen
 
-    // Body: open at the screen edge, closed by the end tab.
+    // The strip's colours, as read from the reference: Platinum greys and the collapse box's lavender.
+    readonly property var colours: ({"K": "#000000", "s": "#c0c0c0", "W": "#ffffff", "n": "#a0a0a0",
+        "H": "#808080", "G": "#404040", "o": "#cccccc", "p": "#555555", "q": "#444444", "u": "#888888",
+        "t": "#ccccff", "v": "#dddddd"})
+
+    // Body: black behind everything, so the lines at the edge, the top, the bottom and between
+    // cells are whatever the cells leave uncovered.
     Rectangle {
         visible: !strip.collapsed
-        x: strip.rightEdge ? strip.endWidth - 1 : 0; width: parent.width - strip.endWidth + 1; height: parent.height
-        color: "#ccc"
-        Rectangle {width: parent.width; height: 1; color: "#222"}
-        Rectangle {y: 1; width: parent.width; height: 1; color: "white"}
-        Rectangle {y: parent.height - 2; width: parent.width; height: 1; color: "#888"}
-        Rectangle {y: parent.height - 1; width: parent.width; height: 1; color: "#222"}
+        x: strip.place(0, width); width: parent.width - strip.tabWidth; height: parent.height
+        color: "black"
     }
     Item {
         anchors.fill: parent
         Item {
             objectName: "control-strip-collapse"
-            x: strip.place(0, width)
-            visible: !strip.collapsed; width: strip.endWidth; height: strip.height
-            Rectangle {
-                x: 2; y: 8; width: 12; height: 12; border.color: "#222"
-                color: collapseMouse.pressed ? "#888" : "#ddd"
-                Rectangle {x: 1; y: 1; width: 9; height: 1; color: collapseMouse.pressed ? "#666" : "white"}
-                Rectangle {x: 1; y: 1; width: 1; height: 9; color: collapseMouse.pressed ? "#666" : "white"}
-                Rectangle {x: 3; y: 3; width: 6; height: 6; color: "transparent"; border.color: "#555"}
+            x: strip.place(1, width); y: 1
+            visible: !strip.collapsed; width: strip.boxWidth; height: strip.height - 2
+            RaisedCell {anchors.fill: parent; pressed: collapseMouse.pressed && collapseMouse.containsMouse}
+            PixelArt {
+                x: strip.rightEdge ? 3 : 2; y: 7; mirrored: strip.rightEdge
+                offset: collapseMouse.pressed && collapseMouse.containsMouse ? 1 : 0
+                rows: ["pppppppp", "pttttttt", "ptuuuuqW", "ptuuuuqW", "ptuuuuqW", "ptuuuuqW", "ptqqqqqW", "ptWWWWWW"]
             }
             MouseArea {
                 id: collapseMouse; anchors.fill: parent; hoverEnabled: true
@@ -105,18 +146,19 @@ Item {
         }
         StripArrow {
             objectName: "control-strip-scroll-back"
-            x: strip.place(strip.endWidth, width)
-            visible: !strip.collapsed; width: strip.arrowWidth; height: strip.height
-            pointsLeft: !strip.rightEdge
+            x: strip.place(1 + strip.boxWidth + 1, width); y: 1
+            visible: !strip.collapsed; width: strip.boxWidth; height: strip.height - 2
+            pointsBack: true
             active: strip.firstModule > 0
             onActivated: strip.firstModule -= 1
         }
         Item {
-            x: strip.place(strip.endWidth + strip.arrowWidth, width)
+            x: strip.place(1 + 2 * (strip.boxWidth + 1), width); y: 1
             visible: !strip.collapsed; clip: true
-            width: strip.viewportWidth; height: strip.height
+            width: strip.viewportWidth; height: strip.height - 2
             Item {
-                x: -strip.firstModule * strip.moduleWidth
+                x: strip.rightEdge ? -(strip.spanOf(0, strip.modules.length) - strip.moduleOffset(strip.firstModule) - strip.viewportWidth)
+                                   : -strip.moduleOffset(strip.firstModule)
                 Repeater {
                     model: strip.modules
                     delegate: Item {
@@ -125,39 +167,67 @@ Item {
                         required property int index
                         objectName: modelData.statusId !== undefined ? "control-strip-status-" + modelData.statusId
                                                                      : "control-strip-" + modelData.command
-                        x: index * strip.moduleWidth
-                        width: strip.moduleWidth; height: strip.height
-                        readonly property bool down: strip.openModule === modelData.command || moduleMouse.pressed
-                        Rectangle {
-                            x: 3; y: 3; width: 24; height: 22; border.color: "#222"
-                            color: module.down ? "#888" : "#ddd"
-                            Rectangle {x: 1; y: 1; width: parent.width - 2; height: 1; color: module.down ? "#555" : "white"}
-                            Rectangle {x: 1; y: 1; width: 1; height: parent.height - 2; color: module.down ? "#555" : "white"}
-                            Rectangle {x: 1; y: parent.height - 2; width: parent.width - 2; height: 1; color: module.down ? "#aaa" : "#999"}
-                            Rectangle {x: parent.width - 2; y: 1; width: 1; height: parent.height - 2; color: module.down ? "#aaa" : "#999"}
-                            StripGlyph {x: 2; y: 1; kind: module.modelData.statusId !== undefined ? "status" : module.modelData.command
-                                        visible: !module.modelData.icon
-                                        level: strip.battery ? strip.battery.percent : -1
-                                        charging: !!strip.battery && strip.battery.pluggedIn}
-                            Image {
-                                objectName: "control-strip-icon"
-                                x: 2; y: 1; width: 20; height: 20
-                                visible: Boolean(module.modelData.icon)
-                                source: module.modelData.icon ? module.modelData.icon : ""
-                                sourceSize: Qt.size(40, 40); smooth: true; fillMode: Image.PreserveAspectFit
-                            }
+                        width: strip.moduleWidth(modelData); height: strip.height - 2
+                        // Each module is followed by its black line, towards the end tab.
+                        x: strip.rightEdge ? strip.spanOf(0, strip.modules.length) - strip.moduleOffset(index) - width - 1
+                                           : strip.moduleOffset(index)
+                        readonly property bool down: strip.openModule === modelData.command
+                                                     || (moduleMouse.pressed && (moduleMouse.containsMouse || strip.sliderModule === module))
+                        readonly property int shift: down ? 1 : 0
+                        RaisedCell {anchors.fill: parent; pressed: module.down}
+                        Image {
+                            id: personal
+                            objectName: "control-strip-personal-icon"
+                            x: 2 + module.shift; y: 3 + module.shift; width: 16; height: 16
+                            visible: !module.modelData.icon && status === Image.Ready
+                            source: module.modelData.icon ? "" : strip.personalIcon(module.modelData.command)
+                            smooth: false; cache: false
                         }
-                        // The small pop-up indicator to the right of every module (V922 E04).
+                        StripGlyph {x: 2 + module.shift; y: 3 + module.shift; width: 16; height: 16
+                                    kind: module.modelData.statusId !== undefined ? "status"
+                                          : module.modelData.command === "soundsource" ? "speaker"
+                                          : module.modelData.command === "energy" ? "sleep" : module.modelData.command
+                                    visible: !module.modelData.icon && !personal.visible
+                                    level: strip.battery ? strip.battery.percent : -1
+                                    charging: !!strip.battery && strip.battery.pluggedIn}
+                        Image {
+                            objectName: "control-strip-icon"
+                            x: 2 + module.shift; y: 3 + module.shift; width: 16; height: 16
+                            visible: Boolean(module.modelData.icon)
+                            source: module.modelData.icon ? module.modelData.icon : ""
+                            sourceSize: Qt.size(32, 32); smooth: true; fillMode: Image.PreserveAspectFit
+                        }
+                        // The pop-up triangle, 1 to 4 px wide over 8 rows, 8 px from the cell's right.
                         Repeater {
-                            model: 4
+                            model: 8
                             Rectangle {
                                 required property int index
-                                x: 29 + index; y: 10 + index; width: 1; height: 7 - 2*index; color: "#222"
+                                x: module.width - 8 + module.shift; y: 7 + index + module.shift
+                                width: index < 4 ? index + 1 : 8 - index; height: 1; color: "black"
                             }
                         }
                         MouseArea {
                             id: moduleMouse; anchors.fill: parent; hoverEnabled: true
-                            onClicked: strip.moduleRequested(module.modelData.command, module)
+                            onPressed: function(mouse) {
+                                if (!module.modelData.slider) return
+                                strip.sliderModule = module
+                                strip.sliderValue = strip.volume && strip.volume.available
+                                    ? (strip.volume.muted ? 0 : Math.round(strip.volume.value)) : -1
+                                strip.sliderStart = strip.sliderValue
+                                strip.sliderOpened()
+                            }
+                            onPositionChanged: function(mouse) {
+                                if (strip.sliderModule === module && strip.sliderValue >= 0)
+                                    strip.sliderValue = slider.valueAt(mapToItem(slider, mouse.x, mouse.y).y)
+                            }
+                            onReleased: {
+                                if (strip.sliderModule !== module) return
+                                if (strip.sliderValue >= 0 && strip.sliderValue !== strip.sliderStart)
+                                    strip.volumeChosen(strip.sliderValue)
+                                strip.sliderModule = null
+                            }
+                            onCanceled: strip.sliderModule = null
+                            onClicked: if (!module.modelData.slider) strip.moduleRequested(module.modelData.command, module)
                         }
                         ToolTip.visible: moduleMouse.containsMouse && strip.openModule === ""
                         ToolTip.delay: 600
@@ -168,47 +238,46 @@ Item {
         }
         StripArrow {
             objectName: "control-strip-scroll-forward"
-            x: strip.place(strip.endWidth + strip.arrowWidth + strip.viewportWidth, width)
-            visible: !strip.collapsed; width: strip.arrowWidth; height: strip.height
-            pointsLeft: strip.rightEdge
+            x: strip.place(1 + 2 * (strip.boxWidth + 1) + strip.viewportWidth, width); y: 1
+            visible: !strip.collapsed; width: strip.boxWidth; height: strip.height - 2
+            pointsBack: false
             active: strip.firstModule + strip.visibleModules < strip.modules.length
             onActivated: strip.firstModule += 1
         }
         Item {
             objectName: "control-strip-tab"
-            x: strip.collapsed ? 0 : strip.place(strip.width - strip.endWidth, width)
-            width: strip.endWidth; height: strip.height
-            Canvas {
-                id: tab
-                anchors.fill: parent
-                transform: Scale {origin.x: tab.width / 2; xScale: strip.rightEdge ? -1 : 1}
-                onPaint: {
-                    let c = getContext("2d")
-                    c.clearRect(0, 0, width, height)
-                    const w = width, h = height, r = 7
-                    // Pressed (darkened) while it is being dragged, as in 9.2.2.
-                    c.fillStyle = strip.dragging ? "#888" : "#ccc"; c.strokeStyle = "#222"; c.lineWidth = 1
-                    c.beginPath()
-                    c.moveTo(0, 0.5); c.lineTo(w - r - 0.5, 0.5)
-                    c.arcTo(w - 0.5, 0.5, w - 0.5, r + 0.5, r)
-                    c.lineTo(w - 0.5, h - r - 0.5)
-                    c.arcTo(w - 0.5, h - 0.5, w - r - 0.5, h - 0.5, r)
-                    c.lineTo(0, h - 0.5)
-                    if (strip.collapsed) c.lineTo(0.5, h - 0.5), c.lineTo(0.5, 0.5)
-                    c.fill(); c.stroke()
-                    for (const x of [3, 6, 9]) {
-                        c.fillStyle = strip.dragging ? "#555" : "#777"; c.fillRect(x, 8, 1, h - 16)
-                        c.fillStyle = strip.dragging ? "#aaa" : "white"; c.fillRect(x + 1, 8, 1, h - 16)
-                    }
-                }
-                Connections {
-                    target: strip
-                    function onCollapsedChanged() {tab.requestPaint()}
-                    function onDraggingChanged() {tab.requestPaint()}
-                }
-                // A canvas created while hidden paints nothing until asked again.
-                onAvailableChanged: if (available) requestPaint()
-                onVisibleChanged: if (visible) requestPaint()
+            x: strip.collapsed ? 0 : strip.place(strip.width - strip.tabWidth, width)
+            width: strip.tabWidth; height: strip.height
+            // The end tab as measured: rounded by one-pixel steps, a ridged grip, and the lip at its end.
+            PixelArt {
+                mirrored: strip.rightEdge
+                // Darkened while it is being dragged, as in 9.2.2.
+                colors: strip.dragging ? Object.assign({}, strip.colours, {"o": "#888888", "W": "#aaaaaa", "u": "#555555"})
+                                       : strip.colours
+                rows: ["KKKKKKKKKK........",
+                       "KKoooooooKK.......",
+                       "KKoWWWWWWWKK......",
+                       "KKoWoooooooKK.....",
+                       "KKoWWoooooooKK....",
+                       "KKoWopoooooooKK...",
+                       "KKoWoooWooooooKK..",
+                       "KKoWoooopooKKooKK.",
+                       "KKoWWooooooKWKooKK",
+                       "KKoWopoooooKWWKouK",
+                       "KKoWoooWoooKWWKouK",
+                       "KKoWoooopooKWWKouK",
+                       "KKoWWooooooKWWKouK",
+                       "KKoWopoooooKWWKouK",
+                       "KKoWoooWoooKWWKouK",
+                       "KKoWoooopooKWKooKK",
+                       "KKoWWooooooKKooKK.",
+                       "KKoWopooooooooKK..",
+                       "KKoWoooooooooKK...",
+                       "KKoWooooooooKK....",
+                       "KKoWoooooooKK.....",
+                       "KKouuuuuuuKK......",
+                       "KKuqqqqqqKK.......",
+                       "KKKKKKKKKK........"]
             }
             MouseArea {
                 id: tabMouse; anchors.fill: parent; hoverEnabled: true
@@ -236,24 +305,24 @@ Item {
                         strip.moving = true
                     } else {
                         // Only the length follows the pointer; the height stays.
-                        strip.outlineLength = Math.max(strip.endWidth, Math.min(
-                            strip.width + (strip.rightEdge ? -dx : dx), strip.fixedWidth + strip.fittingModules * strip.moduleWidth))
+                        strip.outlineLength = Math.max(strip.tabWidth, Math.min(
+                            strip.width + (strip.rightEdge ? -dx : dx), strip.fixedWidth + strip.spanOf(0, strip.fittingModules)))
                         strip.resizing = true
                     }
                 }
                 onReleased: {
                     const screen = strip.screenRect
                     if (strip.moving) {
-                        strip.settings.setControlStripPosition(strip.outlineRight ? screen.width - strip.endWidth : 0,
+                        strip.settings.setControlStripPosition(strip.outlineRight ? screen.width - strip.tabWidth : 0,
                                                                Math.round(strip.outlineY - screen.y))
                     } else if (strip.resizing) {
                         // Pulled back to the edge, the strip collapses to its tab; otherwise it
                         // keeps as many whole modules as the outline nearly covers.
-                        if (strip.outlineLength < 2 * strip.endWidth) {
+                        if (strip.outlineLength < 2 * strip.tabWidth) {
                             strip.settings.setControlStripCollapsed(true)
                         } else {
                             const count = Math.max(1, Math.min(strip.fittingModules,
-                                Math.round((strip.outlineLength - strip.fixedWidth) / strip.moduleWidth)))
+                                strip.modulesCovering(strip.outlineLength - strip.fixedWidth)))
                             strip.settings.setControlStripModules(count >= strip.modules.length ? 0 : count)
                         }
                     } else {
@@ -267,6 +336,67 @@ Item {
             ToolTip.delay: 600
             ToolTip.text: strip.collapsed ? "Click or drag out to show the Control Strip; drag up or down to move it."
                                           : "Click to collapse; drag sideways to change the length; drag up or down to move it."
+        }
+    }
+
+    property Item sliderModule: null
+    property int sliderValue: -1
+    property int sliderStart: -1
+    // The Sound Volume slider, measured in 9.2.2: a 21 px panel above the pressed module, 5 px in
+    // from its left, running from 63 px above the strip into the module so the strip's top line
+    // opens under it; a black track with grey sides; a 17x13 thumb with three grip lines. The
+    // thumb's travel is from just under the track's top to the panel's bottom (0 at the bottom).
+    Item {
+        id: slider
+        objectName: "control-strip-volume-slider"
+        parent: strip.parent
+        z: strip.z + 2
+        visible: strip.sliderModule !== null
+        readonly property point origin: strip.sliderModule
+            ? strip.sliderModule.mapToItem(strip.parent, 0, 0) : Qt.point(0, 0)
+        x: origin.x + 5; y: origin.y - 1 - 63
+        width: 22; height: 66
+        readonly property int thumbTop: 3
+        readonly property int travel: 46
+        function valueAt(y) { return Math.max(0, Math.min(100, Math.round((thumbTop + travel - (y - 6)) * 100 / travel))) }
+        readonly property int thumbY: thumbTop + Math.round(travel * (100 - Math.max(0, strip.sliderValue)) / 100)
+        Rectangle {width: 21; height: 66; color: "black"}
+        Rectangle {x: 1; y: 1; width: 19; height: 64; color: "#dddddd"}
+        // Shadow at the right.
+        Rectangle {x: 21; y: 2; width: 1; height: 61; color: "black"}
+        // Track: rounded top, grey left side, black edges, #aaa inside, white right side.
+        Rectangle {x: 8; y: 2; width: 4; height: 1; color: "#aaaaaa"}
+        Rectangle {x: 7; y: 3; width: 2; height: 1; color: "#aaaaaa"}
+        Rectangle {x: 9; y: 3; width: 3; height: 1; color: "black"}
+        Rectangle {x: 12; y: 3; width: 1; height: 1; color: "white"}
+        Rectangle {x: 7; y: 4; width: 1; height: 58; color: "#aaaaaa"}
+        Rectangle {x: 8; y: 4; width: 1; height: 58; color: "black"}
+        Rectangle {x: 9; y: 4; width: 3; height: 58; color: "#aaaaaa"}
+        Rectangle {x: 12; y: 4; width: 1; height: 58; color: "black"}
+        Rectangle {x: 13; y: 4; width: 1; height: 58; color: "white"}
+        Rectangle {x: 8; y: 62; width: 1; height: 1; color: "white"}
+        Rectangle {x: 9; y: 62; width: 3; height: 1; color: "black"}
+        Rectangle {x: 12; y: 62; width: 2; height: 1; color: "white"}
+        Rectangle {x: 9; y: 63; width: 4; height: 1; color: "white"}
+        PixelArt {
+            objectName: "control-strip-volume-thumb"
+            x: 2; y: slider.thumbY
+            visible: strip.sliderValue >= 0
+            colors: Object.assign({}, strip.colours, {"o": "#eeeeee", "p": "#cccccc", "b": "#aaaaaa",
+                                                       "r": "#555555", "s": "#222222"})
+            rows: [".KKKKKKKKKKKKKKK.",
+                   "KopppppppppppppbK",
+                   "KpbbbbbbbbbbbbbrK",
+                   "KpbbopppppppbbbrK",
+                   "KpbbbssssssssbbrK",
+                   "KpbbopppppppbbbrK",
+                   "KpbbbssssssssbbrK",
+                   "KpbbopppppppbbbrK",
+                   "KpbbbssssssssbbrK",
+                   "KpbbbbbbbbbbbbbrK",
+                   "KpbbbbbbbbbbbbbrK",
+                   "KbrrrrrrrrrrrrrrK",
+                   ".KKKKKKKKKKKKKKK."]
         }
     }
 
@@ -308,27 +438,79 @@ Item {
         }
     }
 
+    // A raised Platinum cell (modules, collapse box): white inside its top and left, grey and dark
+    // grey at its right and bottom; pressed, dark at the top and left and light at the right and bottom.
+    component RaisedCell: Item {
+        property bool pressed: false
+        Rectangle {anchors.fill: parent; color: parent.pressed ? "#808080" : "#c0c0c0"}
+        Item {
+            anchors.fill: parent; visible: !parent.pressed
+            Rectangle {x: 1; y: 1; width: parent.width - 3; height: 1; color: "white"}
+            Rectangle {x: 1; y: 2; width: 1; height: parent.height - 4; color: "white"}
+            Rectangle {x: parent.width - 2; y: 2; width: 1; height: parent.height - 3; color: "#a0a0a0"}
+            Rectangle {x: 2; y: parent.height - 2; width: parent.width - 3; height: 1; color: "#a0a0a0"}
+            Rectangle {x: parent.width - 1; y: 1; width: 1; height: parent.height - 1; color: "#808080"}
+            Rectangle {x: 1; y: parent.height - 1; width: parent.width - 1; height: 1; color: "#808080"}
+        }
+        Item {
+            anchors.fill: parent; visible: parent.pressed
+            Rectangle {width: parent.width; height: 2; color: "#404040"}
+            Rectangle {y: 2; width: 2; height: parent.height - 3; color: "#404040"}
+            Rectangle {x: parent.width - 2; y: 2; width: 2; height: parent.height - 3; color: "#c0c0c0"}
+            Rectangle {x: 1; y: parent.height - 1; width: parent.width - 1; height: 1; color: "#c0c0c0"}
+            Rectangle {x: 2; y: parent.height - 2; width: parent.width - 4; height: 1; color: "#c0c0c0"}
+        }
+    }
+
+    // Pixel drawings given as rows of palette letters ("." is clear), mirrored on the right edge.
+    component PixelArt: Canvas {
+        id: art
+        property var rows: []
+        property var colors: strip.colours
+        property bool mirrored: false
+        property int offset: 0
+        width: rows.length ? rows[0].length + offset : 0; height: rows.length + offset
+        antialiasing: false
+        onRowsChanged: requestPaint()
+        onColorsChanged: requestPaint()
+        onMirroredChanged: requestPaint()
+        onOffsetChanged: requestPaint()
+        onAvailableChanged: if (available) requestPaint()
+        onVisibleChanged: if (visible) requestPaint()
+        onPaint: {
+            let c = getContext("2d")
+            c.reset()
+            const w = rows.length ? rows[0].length : 0
+            for (let y = 0; y < rows.length; ++y) {
+                for (let x = 0; x < rows[y].length; ++x) {
+                    const key = rows[y][x]
+                    if (key === ".") continue
+                    c.fillStyle = colors[key]
+                    c.fillRect((mirrored ? w - 1 - x : x) + offset, y + offset, 1, 1)
+                }
+            }
+        }
+    }
+
+    // A scroll arrow in its sunken well: grey at the top and left, white at the right and bottom.
+    // The arrow is drawn grey while there is nothing more to scroll to.
     component StripArrow: Item {
         id: arrow
-        property bool pointsLeft: true
+        property bool pointsBack: true
         property bool active: false
         signal activated()
-        Canvas {
-            id: arrowShape
-            anchors.fill: parent
-            transform: Scale {origin.x: arrowShape.width / 2; xScale: arrow.pointsLeft ? 1 : -1}
-            onPaint: {
-                let c = getContext("2d")
-                c.clearRect(0, 0, width, height)
-                c.strokeStyle = arrow.active ? "#222" : "#999"; c.fillStyle = arrow.active ? "white" : "#ddd"
-                c.beginPath()
-                c.moveTo(2.5, 14); c.lineTo(7.5, 9.5); c.lineTo(7.5, 12.5); c.lineTo(11.5, 12.5)
-                c.lineTo(11.5, 15.5); c.lineTo(7.5, 15.5); c.lineTo(7.5, 18.5); c.closePath()
-                c.fill(); c.stroke()
-            }
-            Connections {target: arrow; function onActiveChanged() {arrowShape.requestPaint()}}
-            onAvailableChanged: if (available) requestPaint()
-            onVisibleChanged: if (visible) requestPaint()
+        Rectangle {anchors.fill: parent; color: "#c0c0c0"}
+        Rectangle {width: parent.width - 1; height: 1; color: "#808080"}
+        Rectangle {y: 1; width: 1; height: parent.height - 2; color: "#808080"}
+        Rectangle {x: parent.width - 1; y: 1; width: 1; height: parent.height - 1; color: "white"}
+        Rectangle {x: 1; y: parent.height - 1; width: parent.width - 1; height: 1; color: "white"}
+        PixelArt {
+            x: 2; y: 6
+            // Back points towards the screen edge: left on the left edge, right on the right edge.
+            mirrored: arrow.pointsBack === strip.rightEdge
+            colors: arrow.active ? Object.assign({}, strip.colours, {"p": "#000000", "v": "#ffffff"}) : strip.colours
+            rows: ["....p...", "...pp...", "..pvpppp", ".pvvvvvp", "pvvvvvvp", "pvvvvvvp",
+                   ".pvvvvvp", "..pvpppp", "...pp...", "....p..."]
         }
         MouseArea {anchors.fill: parent; enabled: arrow.active; onClicked: arrow.activated()}
     }

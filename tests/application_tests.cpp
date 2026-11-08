@@ -34,6 +34,32 @@ class ApplicationTests : public QObject
 {
     Q_OBJECT
   private slots:
+    void applicationIconsFollowDesktopIdentityAndRefresh()
+    {
+        QTemporaryDir root;
+        const auto directory = root.filePath("apps");
+        const auto file = directory + "/org.example.Paint.desktop";
+        const auto desktop = [](const QByteArray &icon) {
+            return "[Desktop Entry]\nType=Application\nName=Paint\nExec=/usr/bin/true\nIcon=" + icon + "\n";
+        };
+        QVERIFY(write(file, desktop("paint-icon")));
+        ApplicationCatalog catalog({directory}, root.path(), root.path(), QCoreApplication::applicationDirPath());
+        catalog.refresh();
+        QTRY_VERIFY(catalog.ready());
+        QCOMPARE(catalog.applicationIcon("org.example.Paint"), QString("paint-icon"));
+        QCOMPARE(catalog.applicationIcon("org.example.Paint.desktop"), QString("paint-icon"));
+        QVERIFY(catalog.applicationIcon("Paint").isEmpty()); // Display names do not establish identity.
+        QVERIFY(catalog.applicationIcon("org.example.Missing").isEmpty());
+        catalog.setQuery("no results");
+        QCOMPARE(catalog.count(), 0);
+        QCOMPARE(catalog.applicationIcon("org.example.Paint"), QString("paint-icon"));
+        QVERIFY(write(file, desktop("/tmp/test-owned-paint-icon.png")));
+        QSignalSpy refreshed(&catalog, &ApplicationCatalog::refreshed);
+        catalog.refresh();
+        QTRY_COMPARE(refreshed.count(), 1);
+        QCOMPARE(catalog.applicationIcon("org.example.Paint"), QString("/tmp/test-owned-paint-icon.png"));
+    }
+
     void normalApplicationsUseTheKdeWalletWithoutChangingExplicitChoices()
     {
         QTemporaryDir fixture;

@@ -7,6 +7,8 @@ import QtQuick
 // zoom and collapse boxes are not drawn: they would be controls that do nothing.
 FocusScope {
     id: window
+    property var moveManager: typeof manager === "undefined" ? null : manager
+    onActiveFocusChanged: if (!activeFocus && moveManager) moveManager.finishShellWindowMove(window, false)
     required property var clipboard
     signal closeRequested()
     signal raised()
@@ -39,8 +41,12 @@ FocusScope {
         }
         MouseArea {
             anchors.fill: parent
-            drag.target: window; drag.threshold: 2
-            onPressed: { window.raised(); window.forceActiveFocus() }
+            onPressed: function(mouse) {
+                window.raised(); window.forceActiveFocus()
+                if (window.moveManager) window.moveManager.beginShellWindowMove(window, mapToItem(null, mouse.x, mouse.y))
+            }
+            onReleased: if (window.moveManager) window.moveManager.finishShellWindowMove(window)
+            onCanceled: if (window.moveManager) window.moveManager.finishShellWindowMove(window, false)
         }
         Rectangle {
             objectName: "clipboard-close"

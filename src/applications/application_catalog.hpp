@@ -41,6 +41,7 @@ class ApplicationCatalog final : public QAbstractListModel
     QString preferredApplication(const QString &document) const;
     bool rememberApplication(const QString &id, const QString &document, QString &error);
     QString applicationName(const QString &waylandId) const;
+    QString applicationIcon(const QString &waylandId) const;
   signals:
     void filterChanged();
     void stateChanged();

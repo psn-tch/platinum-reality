@@ -112,7 +112,8 @@ class SoundIntegrationTests final : public QObject {
             QTest::mouseClick(&view,Qt::LeftButton,{},target->mapToScene(QPointF(target->width()/2,target->height()/2)).toPoint());
             return true;
         };
-        QVERIFY(click("control-strip-sound"));
+        // SoundSource's menu opens the Sound control panel, as in 9.2.2.
+        QVERIFY(click("control-strip-soundsource"));
         QTRY_VERIFY(item(view.contentItem(),"desktop-command-sound"));
         QVERIFY(click("desktop-command-sound"));
         // The Control Panels window opens at Sound. It is modeless, and takes the keyboard.

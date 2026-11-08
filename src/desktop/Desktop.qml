@@ -57,7 +57,14 @@ Rectangle {
     property var appearance: manager.appearance
     // Mac OS 9 highlights menu titles and items with the Appearance accent: blue-violet by
     // default, or the graphite variation (sampled from 9.2 captures; historical review F01/F10).
-    readonly property color menuAccent: desktop.appearance.accentColor
+    readonly property color menuAccent: desktop.appearance.accent==="blue" ? "#333399" : desktop.appearance.accentColor
+    readonly property color menuHighlightLight: desktop.appearance.accent==="blue" ? "#6666cc" : Qt.lighter(menuAccent,1.5)
+    readonly property color menuHighlightDark: desktop.appearance.accent==="blue" ? "#000088" : Qt.darker(menuAccent,1.5)
+    readonly property bool menuFontBold: desktop.appearance.fontFamily.toLowerCase()!=="charcoal"
+    property bool menuKeyboardMode:false
+    property int menuSelection:-1
+    property int submenuSelection:-1
+    property bool navigatingSubmenu:false
     // The desktop picture on each monitor by itself (psn_tch, 2026-11-06: one picture spread across
     // two monitors looked wrong), or the monitor's own picture (AppearanceSettings.monitorPictures).
     // The first is "desktop-wallpaper"; the others add their output's name.
@@ -82,7 +89,38 @@ Rectangle {
                        ? Qt.size(0,0) : Qt.size(Math.min(4096,width*manager.hostScale),Math.min(4096,height*manager.hostScale))
         }
     }
-    property var barEntries: [{label:"◆",kind:"apple"}].concat(manager.desktopActive ? [{label:"File",kind:"desktop-file"},{label:"Edit",kind:"desktop-edit"},{label:"View",kind:"desktop-view"},{label:"Window",kind:"window"},{label:"Special",kind:"special"},{label:"Help",kind:"help"}] : broker.menus.length > 0 ? broker.menus.filter(function(m){return m.visible && !m.separator}).map(function(m){return {label:m.label,kind:"export",id:m.id,children:m.children,enabled:m.enabled && !broker.interactionBlocked}}) : [{label:"Edit",kind:"app-edit"},{label:"Window",kind:"window"},{label:"Special",kind:"special"},{label:"Help",kind:"help"}])
+    function currentShellWindow() {
+        let window=frontShellWindow
+        return window && window.visible && window.front ? window : null
+    }
+    function canCloseShellWindow() {
+        let window=currentShellWindow()
+        return window && (typeof window.close==="function" || typeof window.closeRequested==="function")
+    }
+    function applicationMenuRoots(providerMenus,blocked) {
+        let roots=providerMenus.filter(function(m){return m.visible && !m.separator}).map(function(m){
+            return {label:m.label,kind:"export",id:m.id,children:m.children,enabled:m.enabled && !blocked}})
+        if(!roots.length)roots=[{label:"Edit",kind:"app-edit"},{label:"Window",kind:"window"},
+                               {label:"Special",kind:"special"},{label:"Help",kind:"help"}]
+        // Preserve provider roots/commands. Supply a File root only when absent.
+        const fileIndex=roots.findIndex(function(m){return String(m.label).replace(/[_&]/g,"").trim().toLowerCase()==="file"})
+        if(fileIndex<0)roots.unshift({label:"File",kind:"app-file"})
+        else if(fileIndex>0)roots.unshift(roots.splice(fileIndex,1)[0])
+        return roots
+    }
+    function makeBarEntries() {
+        let roots
+        if(manager.desktopActive) {
+            roots=currentShellWindow() ? [{label:"File",kind:"app-file"},{label:"Edit",kind:"desktop-edit"},
+                {label:"Window",kind:"window"},{label:"Help",kind:"help"}] :
+                [{label:"File",kind:"desktop-file"},{label:"Edit",kind:"desktop-edit"},{label:"View",kind:"desktop-view"},
+                 {label:"Window",kind:"window"},{label:"Special",kind:"special"},{label:"Help",kind:"help"}]
+        } else {
+            roots=applicationMenuRoots(broker.menus,broker.interactionBlocked)
+        }
+        return [{label:"◆",kind:"apple"}].concat(roots)
+    }
+    property var barEntries: makeBarEntries()
     function updateDesktopSize(){if(desktopFiles)desktopFiles.setViewport(width,height)}
     function isDesktopDropPoint(px, py) {
         if(!desktopFiles.acceptsPoint(px,py) || manager.shellModal || manager.menuOpen)return false
@@ -158,6 +196,15 @@ Rectangle {
         else if(action==="control-strip")desktop.appearance.apply(desktop.appearance.shadeDuration,!desktop.appearance.controlStripVisible)
         else if(action==="quick-controls")quickControls.showControls()
         else if(action==="finder")manager.showFinder()
+        else if(action==="close-active-window"){
+            let shell=desktop.currentShellWindow()
+            // A menu blink must not retarget Close to a newly activated window.
+            if(applicationId && typeof applicationId==="object"){
+                if(!manager.desktopActive || shell!==applicationId)return
+            } else if(applicationId){manager.closeActiveWindow(applicationId);return}
+            if(manager.desktopActive && shell){if(typeof shell.close==="function")shell.close();else if(typeof shell.closeRequested==="function")shell.closeRequested()}
+            else if(!applicationId)manager.closeActiveWindow()
+        }
         // Strip modules use the Quick Controls service so tests can substitute a fake helper.
         else if(action.startsWith("set-"))quickControls.service.set(action.slice(4),applicationId)
         else if(action==="status-activate")manager.statusItems.activate(applicationId)
@@ -182,6 +229,8 @@ Rectangle {
         else if(action==="appearance")appearanceDialog.edit()
         else if(action==="desktop-picture")desktopPictureDialog.edit()
         else if(action==="monitors")monitorsPanel.edit()
+        else if(action==="default-printer")manager.printers.setDefault(applicationId)
+        else if(action==="display-mode")manager.setDisplayMode(applicationId.output,applicationId.width,applicationId.height,applicationId.refresh)
         else if(action==="network")networkPanel.edit()
         else if(action==="date-time")dateTimePanel.edit()
         else if(action==="keyboard")keyboardPanel.edit()
@@ -189,6 +238,8 @@ Rectangle {
         else if(action==="mouse")mousePanel.edit()
         else if(action==="control-panels-window")controlPanels.show("")
         else if(action==="calculator")calculator.open()
+        else if(action==="asset-importer")assetImporter.open()
+        else if(action==="software-update")softwareUpdate.open()
         else if(action==="control-panel")classicControlPanel.open()
         else if(action==="note-pad")notePadWindow.open()
         else if(action==="scrapbook")scrapbookWindow.open()
@@ -196,6 +247,7 @@ Rectangle {
         else if(action==="sticky-new")newStickyNote()
         else if(action==="sticky-toggle")manager.stickies.setHidden(!manager.stickies.hidden)
         else if(action==="sound")soundPanel.edit()
+        else if(action==="sound-output")soundPanel.service.chooseOutput(applicationId)
         else if(action==="bluetooth")bluetoothPanel.edit()
         else if(action==="bluetooth-add")bluetoothPanel.addDevice()
         else if(action==="bluetooth-power")bluetoothPanel.service.setPowered(applicationId===1)
@@ -326,12 +378,14 @@ Rectangle {
     function openShellApplications() {
         const windows=[{name:"Control Panels",action:"control-panels-window",item:controlPanels},
                        {name:"Control Panel",action:"control-panel",item:classicControlPanel},
+                       {name:"Asset Importer",action:"asset-importer",item:assetImporter},
                        {name:"Calculator",action:"calculator",item:calculator},
+                       {name:"Software Update",action:"software-update",item:softwareUpdate},
                        {name:"Key Caps",action:"key-caps",item:keyCapsWindow},
                        {name:"Note Pad",action:"note-pad",item:notePadWindow},
                        {name:"Scrapbook",action:"scrapbook",item:scrapbookWindow}]
         return windows.filter(function(w){return w.item && w.item.visible}).map(function(w){
-            return {id:"shell:"+w.action,name:w.name,hidden:false,attention:false,shell:true,
+            return {id:"shell:"+w.action,name:w.name,icon:manager.applicationIcon("shell:"+w.action),hidden:false,attention:false,shell:true,
                     active:manager.desktopActive && Boolean(w.item.front)}})
     }
     function applicationsByName() {
@@ -383,13 +437,14 @@ Rectangle {
             {text:"Hide "+manager.activeApplication,action:"hide",enabled:manager.applications.some(function(a){return !a.active && !a.hidden})},
             {text:"Hide Others",action:"hide-others",enabled:manager.applications.some(function(a){return !a.active && !a.hidden})},
             {text:"Show All",action:"show-all",enabled:manager.applications.some(function(a){return a.hidden})},
-            {separator:true,action:"separator"}].concat(desktop.applicationsByName().map(function(a){return {text:a.name,action:"app",id:a.id,checked:a.active,marked:a.attention && !a.active,glyph:a.name==="Finder"?"disk":"application"}}))
+            {separator:true,action:"separator"}].concat(desktop.applicationsByName().map(function(a){return {text:a.name,action:"app",id:a.id,icon:a.icon,checked:a.active,marked:a.attention && !a.active,glyph:a.name==="Finder"?"disk":"application"}}))
         if(index===0){
             let recent=manager.recentApplications.map(function(a){return {text:a.name,action:"launch",id:a.id,glyph:"application"}})
             return [
                 {text:"About This Computer",action:"about"},
                 {separator:true,action:"separator"},
                 {text:"Applications…",action:"applications",glyph:"application"},
+                {text:"Asset Importer",action:"asset-importer",glyph:"application"},
                 {text:"Calculator",action:"calculator",glyph:"application"},
                 {text:"Control Panel",action:"control-panel",glyph:"application"},
                 {text:"Control Panels",action:"control-panels",glyph:"application",children:[
@@ -406,6 +461,7 @@ Rectangle {
                     {text:"Mouse & Trackpad…",action:"mouse"},
                     {text:"Network…",action:"network"},
                     {text:"Quick Controls…",action:"quick-controls"},
+                    {text:"Software Update…",action:"software-update"},
                     {text:"Sound…",action:"sound"}]},
                 {text:"Key Caps",action:"key-caps",glyph:"application"},
                 {text:"Note Pad",action:"note-pad",glyph:"application"},
@@ -421,12 +477,15 @@ Rectangle {
         }
         let kind=barEntries[index]?barEntries[index].kind:""
         let ready=!desktopFiles.busy
+        if(kind==="app-file")return [{text:"Close Window",key:"⌘W",action:"close-active-window",name:"file-close-window",
+            id:manager.desktopActive ? currentShellWindow() : manager.activeWindowId,
+            enabled:manager.desktopActive ? canCloseShellWindow() : manager.canCloseActiveWindow}]
         if(kind==="desktop-file")return [
             {text:"New Folder…",action:"new-folder",enabled:ready},
             {text:"Open",action:"selection",enabled:desktopFiles.selectionCount>0 && ready},
             {text:"Open With…",action:"open-with",enabled:desktopFiles.selectedDocument!=="" && ready},
             {text:"Move To Trash",action:"trash",enabled:desktopFiles.canModifySelection && ready},
-            {text:"Close Window",action:"close-window",enabled:false},
+            {text:"Close Window",action:"close-active-window",enabled:false},
             {separator:true,action:"separator"},
             {text:"Get Info",action:"get-info",enabled:desktopFiles.selectionCount===1},
             {text:"Label",action:"label-menu",enabled:desktopFiles.canModifySelection && ready,children:desktop.labelEntries()},
@@ -500,7 +559,9 @@ Rectangle {
         stripAnchor=Qt.rect(origin.x,origin.y,anchor.width,anchor.height)
         stripMenuOpenedAt=Date.now()
         stripModule=module
-        if(["sound","monitors","wifi"].includes(module))quickControls.service.refresh()
+        if(["monitors","wifi"].includes(module))quickControls.service.refresh()
+        if(module==="soundsource" && soundPanel.service)soundPanel.service.refresh()
+        if(module==="printer" && manager.printers)manager.printers.refresh()
         if(module==="handheld")manager.handheld.refresh()
         // Opening the Wi-Fi module looks for networks, as later AirPort menus do.
         if(module==="wifi")wifiAlert.service.scan()
@@ -595,19 +656,34 @@ Rectangle {
         }
         if(module==="appearance")return [{text:"Open Appearance…",action:"appearance"},{separator:true,action:"separator"},
             {text:"Desktop Picture…",action:"desktop-picture"},{text:"Hide Control Strip",action:"control-strip"}]
-        if(module==="sound") {
-            open=[{text:"Open Sound…",action:"sound"},{separator:true,action:"separator"}]
-            let volume=values.volume||({})
-            if(!volume.available)return open.concat([unavailable("Sound")])
-            let level=nearest([10,25,50,75,100],volume.value)
-            return open.concat([{text:"Mute",action:"set-mute",id:volume.muted?0:1,name:"mute",checked:volume.muted},{separator:true,action:"separator"}],
-                [10,25,50,75,100].map(function(l){return {text:"Volume "+l+"%",action:"set-volume",id:l,name:"volume-"+l,checked:!volume.muted && l===level}}))
+        // Energy Settings, as 9.2.2's: its control panel, a line, then Sleep Now. (9.2.2's Spin Down
+        // Hard Disk has no honest equivalent for today's disks, so it is left out.)
+        if(module==="energy")return [{text:"Open Energy Saver Control Panel",action:"energy"},{separator:true,action:"separator"},
+            {text:"Sleep Now",action:"sleep",name:"sleep-now",enabled:manager.powerAvailable}]
+        // SoundSource, as 9.2.2's: its control panel, then where sound plays; choosing one moves it there.
+        if(module==="soundsource") {
+            let audio=soundPanel.service, state=audio?audio.state||({}):({})
+            open=[{text:"Open Sound Control Panel",action:"sound"},{separator:true,action:"separator"}]
+            let outputs=state.outputs||[]
+            if(!outputs.length)return open.concat([{text:audio&&audio.busy?"Checking…":"No Sound Outputs",action:"none",name:"status",enabled:false}])
+            return open.concat(outputs.map(function(o){return {text:o.description,action:"sound-output",id:o.name,
+                                                                  name:"sound-output-"+o.name,checked:o.name===state.defaultOutput}}))
         }
         if(module==="monitors") {
             let brightness=values.brightness||({})
             if(!brightness.available)return open.concat([unavailable("Brightness")])
             let level=nearest([10,25,50,75,100],brightness.value)
             return open.concat([10,25,50,75,100].map(function(l){return {text:"Brightness "+l+"%",action:"set-brightness",id:l,name:"brightness-"+l,checked:l===level}}))
+        }
+        if(module==="resolution")return resolutionMenuEntries()
+        // Printer Selector, as 9.2.2's: the desktop printers, the default checked; choosing one makes
+        // it the default. With none, its own "No Desktop Printers".
+        if(module==="printer") {
+            let printers=manager.printers?manager.printers.printers:[]
+            if(!printers.length)return [{text:manager.printers&&manager.printers.busy?"Checking…":"No Desktop Printers",
+                                         action:"none",name:"printer-none",enabled:false}]
+            return printers.map(function(p){return {text:p.name,action:"default-printer",id:p.name,name:"printer-"+p.name,
+                                                     checked:p.default,enabled:!manager.printers.busy}})
         }
         if(module==="bluetooth")return bluetoothMenuEntries()
         if(module==="battery")return batteryMenuEntries()
@@ -618,6 +694,24 @@ Rectangle {
         let entries=open.concat([{text:"Wi-Fi: "+(radio.enabled?"On":"Off"),action:"none",name:"status",enabled:false},
                                  {text:(radio.enabled?"Turn Wi-Fi Off":"Turn Wi-Fi On"),action:"set-wifi",id:radio.enabled?0:1,name:"wifi"}])
         return radio.enabled?entries.concat(wifiMenuEntries()):entries
+    }
+    // Monitor Resolution, as 9.2.2's: its control panel, a line, then each display's name in italics
+    // over its resolutions, the current one marked with a bullet. Choosing one waits for Keep.
+    function resolutionMenuEntries() {
+        let entries=[{text:"Open Monitors Control Panel",action:"monitors",name:"resolution-open"},{separator:true,action:"separator"}]
+        let outputs=manager.displaySwitchingAvailable?manager.displayOutputs:[]
+        if(!outputs.length)return entries.concat([{text:"Resolution Unavailable",action:"none",name:"status",enabled:false}])
+        let ready=!manager.displayRequestBusy && !manager.displayChangePending
+        let hz=function(r){let v=r/1000;return (Math.abs(v-Math.round(v))<0.01?Math.round(v):v.toFixed(2))+"Hz"}
+        let same=function(a,b){return !!a && !!b && a.width===b.width && a.height===b.height && a.refresh===b.refresh}
+        for(let o of outputs) {
+            entries.push({text:o.internal?"Built-in":o.label,action:"none",heading:true,enabled:false,name:"resolution-display-"+o.name})
+            for(let m of o.modes||[])
+                entries.push({text:m.width+" x "+m.height+", "+hz(m.refresh),action:"display-mode",bullet:same(m,o.mode),
+                              id:{output:o.name,width:m.width,height:m.height,refresh:m.refresh},
+                              name:"resolution-"+o.name+"-"+m.width+"x"+m.height+"@"+m.refresh,enabled:ready})
+        }
+        return entries
     }
     function wifiNetworks() {return wifiAlert.service && wifiAlert.service.available?wifiAlert.service.networks:[]}
     // The networks iwd sees, strongest first (docs/wifi.md): choosing one joins it, asking for a
@@ -745,10 +839,24 @@ Rectangle {
         let previous=exportPopup
         if(sound!=="" && (openMenu>=0 || previous))interfaceSound(sound)
         exportPopup=null;openMenu=-1;exportedRoot=-1;openSubmenu=-1;stripModule=""
+        menuKeyboardMode=false;menuSelection=-1;submenuSelection=-1;navigatingSubmenu=false
         if(previous){previous.close();previous.destroy()}
         if(endTracking)manager.endMenu()
     }
+    FontMetrics {id:menuFontMetrics;font.family:desktop.appearance.fontFamily;font.pixelSize:12;font.bold:desktop.menuFontBold}
+    function shellMenuWidth(entries,exported) {
+        let width=180
+        for(let entry of entries){
+            if(entry.separator)continue
+            let text=exported ? entry.label : entry.text
+            let key=entry.key || ""
+            width=Math.max(width,Math.ceil(menuFontMetrics.advanceWidth(text || "")+menuFontMetrics.advanceWidth(key))+
+                (entry.glyph || entry.swatch ? 24 : 0)+44)
+        }
+        return Math.min(manager.primaryDisplayRect.width,width)
+    }
     function populate(menu, entries, generation, revision) {
+        menu.width=desktop.shellMenuWidth(entries,true)
         for (let entry of entries) {
             if (!entry.visible) continue
             if (entry.separator) {menu.addItem(separatorFactory.createObject(menu.contentItem));continue}
@@ -781,32 +889,88 @@ Rectangle {
                 let entry=barEntries[index];exportedRoot=entry.id
                 exportPopup=menuFactory.createObject(desktop,{rootMenu:true})
                 populate(exportPopup,entry.children,broker.generation,broker.revision)
-                exportPopup.popup(menuX(index),menuBar.y+26);broker.prepare(entry.id)
+                exportPopup.popup(menuX(index),menuBar.y+menuBar.height-1);broker.prepare(entry.id)
             }
         }
     }
-    Component {id:menuFactory;Menu {id:exportedMenu;property bool rootMenu:false; width:240;padding:2; font.pixelSize:12;enabled:!desktop.broker.busy && !desktop.broker.interactionBlocked
-        background:Rectangle{color:"#ddd";border.color:"#222"}
+    Component {id:menuFactory;Menu {id:exportedMenu;property bool rootMenu:false; width:240;padding:1; font.pixelSize:12; font.family:desktop.appearance.fontFamily; font.bold:desktop.menuFontBold;enabled:!desktop.broker.busy && !desktop.broker.interactionBlocked
+        background:Rectangle{color:"#ddd";border.color:"black"}
         onClosed:if(rootMenu && desktop.exportPopup===exportedMenu)desktop.closeMenu()
     }}
-    Component {id:itemFactory;MenuItem {id:nativeItem;height:24
-        contentItem:Text{text:nativeItem.text;textFormat:Text.PlainText;elide:Text.ElideRight;leftPadding:20;rightPadding:15;verticalAlignment:Text.AlignVCenter;font.pixelSize:12;color:!nativeItem.enabled?"#888":nativeItem.highlighted?"white":"black"}
+    Component {id:itemFactory;MenuItem {id:nativeItem;height:16
+        contentItem:Text{text:nativeItem.text;textFormat:Text.PlainText;elide:Text.ElideRight;leftPadding:20;rightPadding:15;verticalAlignment:Text.AlignVCenter;font.family:desktop.appearance.fontFamily;font.bold:desktop.menuFontBold;font.pixelSize:12;color:!nativeItem.enabled?"#777":nativeItem.highlighted?"white":"black"}
         background:Rectangle{color:nativeItem.highlighted?desktop.menuAccent:"#ddd"}
     }}
-    Component {id:separatorFactory;MenuSeparator{padding:3;contentItem:Rectangle{implicitWidth:200;implicitHeight:1;color:"#888"}}}
+    Component {id:separatorFactory;MenuSeparator{padding:0;contentItem:Item{implicitWidth:200;implicitHeight:4
+        Rectangle{y:2;width:parent.width;height:1;color:"#888"}
+        Rectangle{y:3;width:parent.width;height:1;color:"white"}}}}
     Connections {target:broker;function onChanged(){
+        // Provider roots can arrive/relabel while a fallback menu is open. Never
+        // reinterpret that old index as a different menu's commands.
+        if(!manager.desktopActive && desktop.openMenu>0 && desktop.exportedRoot<0){desktop.closeMenu();return}
         if(desktop.exportPopup && desktop.exportedRoot>=0){
             let entry=broker.menus.find(function(e){return e.id===desktop.exportedRoot})
-            if(!entry){desktop.closeMenu();return}
+            let index=desktop.barEntries.findIndex(function(e){return e.kind==="export" && e.id===desktop.exportedRoot})
+            if(!entry || index<0){desktop.closeMenu();return}
+            desktop.openMenu=index
             desktop.clearEntries(desktop.exportPopup);desktop.populate(desktop.exportPopup,entry.children,broker.generation,broker.revision)
         }
     }}
-    // In 9.2.2 a key closes an open (sticky) menu, choosing nothing; there is no menu keyboard
-    // navigation (checked in psn_tch's 9.2.2 VM). The desktop's own menus and Control Strip menus
-    // do the same (the manager swallows that key). Exported application menus keep Qt's
-    // keyboard handling.
+    // Mouse-open sticky menus retain 9.2.2's key-to-dismiss behavior. F10 is an
+    // explicit modern keyboard-access mode; its arrows/Enter never reach a client.
     Binding {target:manager;property:"shellMenuOpen";value:(desktop.openMenu>=0 && desktop.exportedRoot<0) || desktop.stripModule!==""}
-    Connections {target:manager;function onShellMenuKeyPressed(){desktop.closeMenu()}}
+    Binding {target:manager;property:"shellMenuKeyboardMode";value:desktop.menuKeyboardMode}
+    Connections {target:manager
+        function onShellMenuKeyPressed(){desktop.closeMenu()}
+        function onShellMenuNavigation(key){desktop.navigateMenu(key)}
+    }
+    function selectableMenuIndex(entries,from,step) {
+        for(let n=0;n<entries.length;++n){
+            from=(from+step+entries.length)%entries.length
+            if(!entries[from].separator && entries[from].enabled!==false)return from
+        }
+        return -1
+    }
+    function navigateMenu(key) {
+        let entries=navigatingSubmenu ? submenuEntries : stripModule!=="" ? stripMenu.entries : shellMenuEntries(openMenu)
+        let selected=navigatingSubmenu ? submenuSelection : menuSelection
+        if(key===Qt.Key_Up || key===Qt.Key_Down || key===Qt.Key_Home || key===Qt.Key_End){
+            let step=key===Qt.Key_Up || key===Qt.Key_End ? -1 : 1
+            if(key===Qt.Key_Home || key===Qt.Key_End || selected<0)selected=step===1 ? -1 : 0
+            selected=selectableMenuIndex(entries,selected,step)
+            if(navigatingSubmenu)submenuSelection=selected
+            else {menuSelection=selected;openSubmenu=-1}
+            return
+        }
+        if(key===Qt.Key_Left && navigatingSubmenu){navigatingSubmenu=false;openSubmenu=-1;submenuSelection=-1;return}
+        let entry=entries[selected]
+        if((key===Qt.Key_Right || key===Qt.Key_Return || key===Qt.Key_Enter || key===Qt.Key_Space) && entry && entry.children){
+            let owner=stripModule!=="" ? stripMenu : popup
+            let at=owner.y+1
+            for(let i=0;i<selected;++i)at+=entries[i].separator ? 4 : 16
+            openShellSubmenu(selected,entry.children,at)
+            navigatingSubmenu=true;submenuSelection=selectableMenuIndex(entry.children,-1,1)
+            return
+        }
+        if(key===Qt.Key_Left || key===Qt.Key_Right){
+            if(stripModule!=="")return
+            let step=key===Qt.Key_Right ? 1 : -1
+            let next=openMenu
+            for(let n=0;n<=barEntries.length;++n){
+                next=(next+step+barEntries.length+1)%(barEntries.length+1)
+                if(next===barEntries.length || barEntries[next].enabled!==false)break
+            }
+            showMenu(next);menuKeyboardMode=true;return
+        }
+        if((key===Qt.Key_Return || key===Qt.Key_Enter || key===Qt.Key_Space) && entry && entry.enabled!==false && !entry.separator)
+            chooseShellEntry("desktop-command-"+(entry.name || entry.action),entry.action,entry.id)
+    }
+    Shortcut {sequence:"F10";autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging && !manager.windowMoveActive
+        onActivated:{desktop.showMenu(0);desktop.menuKeyboardMode=true}}
+    Shortcut {objectName:"fallback-close-window-shortcut";sequence:"Meta+W";autoRepeat:false
+        enabled:!manager.shellModal && !manager.menuOpen && desktop.barEntries.some(function(m){return m.kind==="app-file"}) &&
+                (manager.desktopActive ? desktop.canCloseShellWindow() : manager.canCloseActiveWindow)
+        onActivated:desktop.dispatchShellCommand("close-active-window",0)}
     Shortcut {sequence:"Meta+H";enabled:!manager.shellModal;onActivated:manager.hideApplication()}
     // Command-? opens the Help Center, as on a Mac (? is Shift-/ on most layouts).
     // A shifted chord has several spellings (Command-Shift-3 is also Command-#). A real keyboard's
@@ -985,33 +1149,50 @@ Rectangle {
             onXChanged: if (!record.fullScreen && Math.round(x) !== record.x) manager.moveWindow(record.id, Math.round(x), Math.round(y))
             onYChanged: if (!record.fullScreen && Math.round(y) !== record.y) manager.moveWindow(record.id, Math.round(x), Math.round(y))
             Rectangle {visible:frame.chrome; x: 3; y: 3; width: parent.width; height: parent.height; color: "#50000000" }
-            Rectangle {visible:frame.chrome; anchors.fill: parent; color: "#ccc"; border.width: 1; border.color: "#111" }
-            Rectangle {visible:frame.chrome; x: 1; y: 1; width: parent.width - 2; height: parent.height - 2; color: "transparent"; border.color: "#fff" }
+            Rectangle {visible:frame.chrome; anchors.fill: parent; color: record.active ? "#ccc" : "#ddd"; border.width: 1; border.color: record.active ? "#000" : "#555" }
+            // The active Platinum bevel is light above/left and dark below/right.
+            // Inactive windows have a flat field and a single gray outline.
+            Rectangle {visible:frame.chrome && record.active; x:1;y:1;width:parent.width-3;height:1;color:"#fff"}
+            Rectangle {visible:frame.chrome && record.active; x:1;y:2;width:1;height:parent.height-4;color:"#fff"}
+            Rectangle {visible:frame.chrome && record.active; x:parent.width-2;y:2;width:1;height:parent.height-3;color:"#999"}
+            Rectangle {visible:frame.chrome && record.active; x:2;y:parent.height-2;width:parent.width-4;height:1;color:"#999"}
             Rectangle {
                 id: titlebar
                 visible: frame.chrome
-                x: 2; y: 2; width: parent.width-4; height: 19
-                color: record.active ? "#ccc" : "#d6d6d6"
+                x: 2; y: 2; width: parent.width-4; height: 18
+                color: record.active ? "#ccc" : "#ddd"
                 Repeater {
-                    model: record.modal || !record.active ? 0 : 5
-                    Rectangle { required property int index; x: 4; y: 3+index*3; width: titlebar.width-8; height: 1; color: record.active ? "#777" : "#c5c5c5" }
+                    model: record.modal || !record.active ? 0 : 6
+                    Item {
+                        required property int index
+                        // Reference: six white/dark pairs at frame y+4 through y+15.
+                        // Offset the dark row right by one pixel to bevel each stripe.
+                        x: closeControls.visible ? 19 : 2; y: 2+index*2
+                        width: Math.max(0,(rightControls.visible ? rightControls.x-5 : titlebar.width-3)-x); height:2
+                        Rectangle {width:parent.width;height:1;color:"#fff"}
+                        Rectangle {x:1;y:1;width:parent.width;height:1;color:"#777"}
+                    }
                 }
                 MouseArea {
                     objectName:"title-bar-"+record.id
-                    anchors.fill: parent;property point origin;property point pointerOrigin
+                    anchors.fill: parent
                     // Two clicks: WindowShade, at once. A third: the shade rolls back and the window
                     // fills the screen (or returns to where it was).
                     property double doubleClickAt:0;property bool shadedByDoubleClick:false
                     onPressed: function(mouse) {
-                        manager.activate(record.id);origin=Qt.point(record.x,record.y);pointerOrigin=mapToItem(desktop,mouse.x,mouse.y)
+                        manager.activate(record.id)
                         if(doubleClickAt && Date.now()-doubleClickAt<=Qt.styleHints.mouseDoubleClickInterval){
                             doubleClickAt=0
                             if(shadedByDoubleClick)manager.shade(record.id)
                             manager.fillScreen(record.id)
+                            return
                         }
+                        manager.beginWindowMove(record.id,mapToItem(desktop,mouse.x,mouse.y))
                     }
-                    onPositionChanged: function(mouse) {if(pressed){let p=mapToItem(desktop,mouse.x,mouse.y);manager.moveWindow(record.id,origin.x+p.x-pointerOrigin.x,origin.y+p.y-pointerOrigin.y)}}
+                    onReleased:manager.finishWindowMove(record.id)
+                    onCanceled:manager.finishWindowMove(record.id,false)
                     onDoubleClicked: {
+                        manager.finishWindowMove(record.id,false)
                         doubleClickAt=Date.now()
                         shadedByDoubleClick=record.canShade && desktop.appearance.doubleClickCollapse
                         if(shadedByDoubleClick)manager.shade(record.id)
@@ -1022,12 +1203,15 @@ Rectangle {
                     Text { id: caption; anchors.centerIn: parent; width: parent.width-8; elide: Text.ElideRight; horizontalAlignment: Text.AlignHCenter; text: record.title;textFormat:Text.PlainText; color: record.active ? "#111" : "#777"; font.pixelSize: 12; font.bold: false }
                 }
                 Row {
+                    id: closeControls
                     objectName:"close-box-"+record.id
-                    visible:record.hasCloseBox && record.active;x: 4; anchors.verticalCenter: parent.verticalCenter
+                    visible:record.hasCloseBox && record.active;x: 2; y: 2
                     TitleBox { objectName:"close-box-button-"+record.id; kind:"close"; onActivated:manager.closeWindow(record.id) }
                 }
                 Row {
-                    anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter; spacing: 7
+                    id: rightControls
+                    visible:record.active && (record.canZoom || record.canShade)
+                    anchors.right: parent.right; anchors.rightMargin: 2; y: 2; spacing: 3
                     TitleBox {objectName:"zoom-box-"+record.id;visible:record.canZoom && record.active;kind:"zoom";onActivated:manager.zoom(record.id)}
                     TitleBox {objectName:"shade-box-"+record.id;visible:record.canShade && record.active;kind:"shade";onActivated:manager.shade(record.id)}
                 }
@@ -1062,12 +1246,12 @@ Rectangle {
                 x: record.x; y: record.y
                 onXChanged: {
                     if(!record.fullScreen && Math.round(x)!==record.x)
-                        manager.moveWindow(record.id,Math.round(x),record.y)
+                        manager.clientMovePosition(record.id,Math.round(x),record.y)
                     x=Qt.binding(function(){return record.x})
                 }
                 onYChanged: {
                     if(!record.fullScreen && Math.round(y)!==record.y)
-                        manager.moveWindow(record.id,record.x,Math.round(y))
+                        manager.clientMovePosition(record.id,record.x,Math.round(y))
                     y=Qt.binding(function(){return record.y})
                 }
             }
@@ -1082,15 +1266,20 @@ Rectangle {
             }
             Rectangle {
                 objectName:"resize-box-"+record.id
-                visible: frame.chrome && !record.collapsed && !frame.animating && record.canResize; anchors.right: parent.right; anchors.bottom: parent.bottom; width: 15; height: 15; color: "#ccc"
+                visible: frame.chrome && !record.collapsed && !frame.animating && record.canResize; anchors.right: parent.right; anchors.rightMargin:4; anchors.bottom: parent.bottom; anchors.bottomMargin:4; width: 15; height: 15; color: record.active ? "#ccc" : "#ddd"
                 Canvas {
-                    anchors.fill:parent
+                    anchors.fill:parent;visible:record.active
+                    // Three short beveled diagonals, measured at 1:1 in the Finder grow box.
+                    // Integer fills keep the one-pixel caps crisp at native scale.
                     onPaint:{
-                        let c=getContext("2d");c.clearRect(0,0,width,height);c.lineWidth=1
+                        let c=getContext("2d");c.clearRect(0,0,width,height)
                         for(let i=0;i<3;++i){
-                            let o=4+i*3
-                            c.strokeStyle="#666";c.beginPath();c.moveTo(o+.5,13.5);c.lineTo(13.5,o+.5);c.stroke()
-                            c.strokeStyle="white";c.beginPath();c.moveTo(o+1.5,13.5);c.lineTo(13.5,o+1.5);c.stroke()
+                            c.fillStyle="#fff"
+                            for(let j=0;j<6;++j)c.fillRect(7+2*i-j,2+2*i+j,1,1)
+                            c.fillRect(8+2*i,2+2*i,1,1)
+                            c.fillStyle="#aaa";c.fillRect(2+2*i,8+2*i,1,1)
+                            c.fillStyle="#777"
+                            for(let j=0;j<6;++j)c.fillRect(8+2*i-j,3+2*i+j,1,1)
                         }
                     }
                 }
@@ -1106,26 +1295,80 @@ Rectangle {
             }
         }
     }
+    Item {
+        id: moveOutline;objectName:"window-move-outline";z:9998
+        visible:manager.windowMoveActive;enabled:false
+        x:manager.windowMoveRect.x;y:manager.windowMoveRect.y
+        width:manager.windowMoveRect.width;height:manager.windowMoveRect.height
+        // Reference: a two-pixel checker perimeter, every other pixel inverted.
+        // Four small textures sample a private in-memory snapshot; clients stay live
+        // at their original coordinates and removal never alters the underlying scene.
+        Repeater {
+            model:moveOutline.visible ? [{x:0,y:0,w:moveOutline.width,h:2},
+                {x:0,y:moveOutline.height-2,w:moveOutline.width,h:2},
+                {x:0,y:2,w:2,h:Math.max(0,moveOutline.height-4)},
+                {x:moveOutline.width-2,y:2,w:2,h:Math.max(0,moveOutline.height-4)}] : []
+            Image {
+                required property var modelData
+                x:modelData.x;y:modelData.y;width:modelData.w;height:modelData.h
+                cache:false;smooth:false
+                source:moveOutline.visible && width>0 && height>0 ?
+                       "image://window-move/"+manager.windowMoveGeneration+"/"+
+                       (moveOutline.x+x)+"/"+(moveOutline.y+y)+"/"+width+"/"+height : ""
+            }
+        }
+    }
     Rectangle {
         id: menuBar; objectName: "desktop-menu-bar"; z: 10000
         x:manager.primaryDisplayRect.x;y:manager.primaryDisplayRect.y;width:manager.primaryDisplayRect.width
         // Menus and the menu bar are #dddddd, as in 9.2.2 (psn_tch chose to match it, 2026-10-22).
-        height: 26; color: "#ddd"; border.color: "#222";enabled:!manager.shellModal
-        Rectangle {x:1;y:1;width:parent.width-2;height:1;color:"white"}
+        height: manager.menuBarHeight; color: "#ddd";enabled:!manager.shellModal
+        Rectangle {x:0;y:0;width:parent.width;height:1;color:"white"}
+        Rectangle {x:0;y:parent.height-2;width:parent.width;height:1;color:"#999"}
+        Rectangle {x:0;y:parent.height-1;width:parent.width;height:1;color:"black"}
+        Canvas {
+            anchors.fill:parent;smooth:false
+            // Measured eight-pixel rounded bevels, expressed as geometric gray steps.
+            onWidthChanged:requestPaint()
+            onPaint:{
+                let c=getContext("2d");c.clearRect(0,0,width,height)
+                let left=["000005ad","0005afff","005dfddd","05dfdddd","0afddddd","5fdddddd","afdddddd","dfdddddd"]
+                let right=["da520000","dcb85000","dddb8500","ddddb850","dddddb82","dddddda5","ddddddb7","ddddddc8"]
+                for(let y=0;y<8;++y)for(let x=0;x<8;++x){
+                    let l=parseInt(left[y][x],16)*17,r=parseInt(right[y][x],16)*17
+                    c.fillStyle=Qt.rgba(l/255,l/255,l/255,1);c.fillRect(x,y,1,1)
+                    c.fillStyle=Qt.rgba(r/255,r/255,r/255,1);c.fillRect(width-8+x,y,1,1)
+                }
+                c.fillStyle="#fff";c.fillRect(0,8,1,height-10)
+                c.fillStyle="#999";c.fillRect(width-1,8,1,height-10)
+                c.fillStyle="#ddd";c.fillRect(0,height-2,1,1)
+            }
+        }
         MouseArea {anchors.fill:parent;onPressed:desktop.closeMenu()}
         Rectangle {objectName:"menu-bar-flash";anchors.fill:parent;z:300;color:"black";visible:menuFlash.running}
-        Row {
-            x: 10; height: parent.height; spacing: 0
+        Item {
+            x: 8; width:parent.width-8; height:parent.height
             Repeater {
                 id:barItems
                 model: desktop.barEntries
                 delegate: Rectangle {
                     required property var modelData; required property int index
-                    width: (modelData.kind==="apple"?16:label.implicitWidth)+22;height:26;color:desktop.openMenu===index?desktop.menuAccent:"transparent"
+                    // Bind positions directly: a Row briefly stacks freshly rebuilt titles at
+                    // x=0 before polish, allowing their hover handlers to switch an open menu.
+                    x: {
+                        let offset=0
+                        for(let i=0;i<index;++i)offset+=desktop.barEntries[i].kind==="apple" ? 29
+                            : Math.ceil(menuFontMetrics.advanceWidth(desktop.barEntries[i].label))+14
+                        return offset
+                    }
+                    width: modelData.kind==="apple" ? 29 : Math.ceil(menuFontMetrics.advanceWidth(modelData.label))+14
+                    height:menuBar.height-1;color:desktop.openMenu===index?desktop.menuAccent:"transparent"
+                    Rectangle {visible:desktop.openMenu===index;x:0;y:0;width:parent.width;height:1;color:desktop.menuHighlightLight}
+                    Rectangle {visible:desktop.openMenu===index;x:0;y:parent.height-1;width:parent.width;height:1;color:desktop.menuHighlightDark}
                     objectName: "bar-entry-"+index
-                    Text {id:label;anchors.centerIn:parent;visible:modelData.kind!=="apple" || emblem.status!==Image.Ready;text:modelData.label;textFormat:Text.PlainText;color:modelData.enabled===false?"#888":desktop.openMenu===index?"white":"black";font.pixelSize:12}
-                    Image {id:emblem;anchors.centerIn:parent;width:16;height:16;visible:modelData.kind==="apple";source:modelData.kind==="apple"?desktop.appearance.menuEmblem:"";smooth:false;fillMode:Image.PreserveAspectFit}
-                    MouseArea{anchors.fill:parent;enabled:modelData.enabled!==false;hoverEnabled:true;onClicked:desktop.showMenu(index);onEntered:if(desktop.openMenu>=0 && desktop.openMenu!==index)desktop.showMenu(index)}
+                    Text {id:label;x:6;y:Math.floor((menuBar.height-height)/2);visible:modelData.kind!=="apple" || emblem.status!==Image.Ready;text:modelData.label;textFormat:Text.PlainText;color:modelData.enabled===false?"#777":desktop.openMenu===index?"white":"black";font.family:desktop.appearance.fontFamily;font.bold:desktop.menuFontBold;font.pixelSize:12}
+                    Image {id:emblem;x:Math.floor((parent.width-width)/2);y:2;width:16;height:16;visible:modelData.kind==="apple";source:modelData.kind==="apple"?desktop.appearance.menuEmblem:"";smooth:false;fillMode:Image.PreserveAspectFit}
+                    MouseArea{anchors.fill:parent;enabled:modelData.enabled!==false;hoverEnabled:true;onClicked:desktop.showMenu(index);onEntered:if(!desktop.menuKeyboardMode && desktop.openMenu>=0 && desktop.openMenu!==index)desktop.showMenu(index)}
                 }
             }
         }
@@ -1133,12 +1376,12 @@ Rectangle {
             id:menuClock;objectName:"menu-bar-clock"
             anchors.right:keyboardMenu.visible?keyboardMenu.left:appDivider.left;anchors.rightMargin:7;anchors.verticalCenter:parent.verticalCenter
             visible:desktop.appearance.clock.visible!==false
-            text:desktop.clockText(desktop.clockTime,desktop.appearance.clock,desktop.clockShowsDate);textFormat:Text.StyledText;font.pixelSize:12
+            text:desktop.clockText(desktop.clockTime,desktop.appearance.clock,desktop.clockShowsDate);textFormat:Text.StyledText;font.family:desktop.appearance.fontFamily;font.bold:desktop.menuFontBold;font.pixelSize:12
             MouseArea {anchors.fill:parent;anchors.margins:-4;onClicked:{desktop.clockShowsDate=!desktop.clockShowsDate;if(desktop.clockShowsDate)clockDate.restart()}}
         }
         Rectangle {
             id:keyboardMenu;objectName:"keyboard-menu";visible:desktop.keyboardMenuShown
-            anchors.right:appDivider.left;anchors.rightMargin:2;width:keyboardTitle.implicitWidth+14;height:26
+            anchors.right:appDivider.left;anchors.rightMargin:2;width:keyboardTitle.implicitWidth+14;height:menuBar.height-1
             color:desktop.openMenu===desktop.keyboardMenuIndex?desktop.menuAccent:"transparent"
             Rectangle {
                 anchors.centerIn:parent;width:keyboardTitle.implicitWidth+6;height:15
@@ -1152,26 +1395,27 @@ Rectangle {
         // The application menu's etched strip, as in 9.2.2 (psn_tch's About This Computer capture):
         // a solid white line, four grip dots, then a solid grey line through the top highlight.
         Item {
-            id:appDivider;objectName:"application-menu-divider";anchors.right:appMenu.left;y:1;width:6;height:24
-            Rectangle {objectName:"application-menu-divider-light";x:0;y:1;width:1;height:23;color:"white"}
-            Repeater {model:4;Item {required property int index;x:2;y:7+index*3;width:2;height:2
+            id:appDivider;objectName:"application-menu-divider";anchors.right:appMenu.left;y:1;width:6;height:menuBar.height-2
+            Rectangle {objectName:"application-menu-divider-light";x:0;y:1;width:1;height:parent.height-1;color:"white"}
+            Repeater {model:4;Item {required property int index;x:2;y:3+index*3;width:2;height:2
                 Rectangle {x:0;y:0;width:1;height:1;color:"#8c8c8c"}
                 Rectangle {x:1;y:0;width:1;height:1;color:"#adadad"}
                 Rectangle {x:0;y:1;width:1;height:1;color:"#bdbdbd"}
                 Rectangle {x:1;y:1;width:1;height:1;color:"white"}}}
-            Rectangle {objectName:"application-menu-divider-shadow";x:5;y:0;width:1;height:24;color:"#9c9c9c"}
+            Rectangle {objectName:"application-menu-divider-shadow";x:5;y:0;width:1;height:parent.height;color:"#9c9c9c"}
         }
-        Rectangle {id:appMenu;objectName:"application-menu";anchors.right:parent.right;anchors.rightMargin:6;width:appTitle.implicitWidth+16;height:26;color:desktop.openMenu===desktop.barEntries.length?desktop.menuAccent:"transparent"
+        Rectangle {id:appMenu;objectName:"application-menu";anchors.right:parent.right;anchors.rightMargin:6;width:appTitle.implicitWidth+16;height:menuBar.height-1;color:desktop.openMenu===desktop.barEntries.length?desktop.menuAccent:"transparent"
             // While an application asks for attention, the title alternates about once a second
             // with that application's icon alone, as 9.2.2 does (checked in psn_tch's 9.2.2 VM).
+            readonly property var current:desktop.applicationsByName().find(function(a){return a.active})
             readonly property var waiting:manager.applications.find(function(a){return a.attention && !a.active})
             property bool alternate:false
             Timer {interval:1000;repeat:true;running:Boolean(appMenu.waiting);onTriggered:appMenu.alternate=!appMenu.alternate;onRunningChanged:if(!running)appMenu.alternate=false}
             Row {
                 id:appTitle;anchors.centerIn:parent;spacing:5
                 readonly property bool showWaiting:Boolean(appMenu.waiting) && appMenu.alternate
-                MenuGlyph {objectName:"application-menu-glyph";kind:(appTitle.showWaiting?appMenu.waiting.name:manager.activeApplication)==="Finder"?"disk":"application";anchors.verticalCenter:parent.verticalCenter}
-                Text{id:appLabel;visible:!appTitle.showWaiting;text:manager.activeApplication;textFormat:Text.PlainText;color:desktop.openMenu===desktop.barEntries.length?"white":"black";font.bold:false;font.pixelSize:12;anchors.verticalCenter:parent.verticalCenter}
+                MenuGlyph {objectName:"application-menu-glyph";source:(appTitle.showWaiting?appMenu.waiting:appMenu.current)?.icon || "";kind:(appTitle.showWaiting?appMenu.waiting.name:manager.activeApplication)==="Finder"?"disk":"application";anchors.verticalCenter:parent.verticalCenter}
+                Text{id:appLabel;visible:!appTitle.showWaiting;text:appMenu.current ? appMenu.current.name : manager.activeApplication;textFormat:Text.PlainText;color:desktop.openMenu===desktop.barEntries.length?"white":"black";font.family:desktop.appearance.fontFamily;font.bold:desktop.menuFontBold;font.pixelSize:12;anchors.verticalCenter:parent.verticalCenter}
             }
             // Pressing opens the menu; dragging down past the open menu tears it off as the
             // Application Switcher, dropped where the button is released (9.2.2).
@@ -1224,22 +1468,28 @@ Rectangle {
             required property var modelData
             required property int index
             property bool submenuRow: false
-            width:parent?parent.width:200;height:modelData.separator?9:25
+            width:parent?parent.width:200;height:modelData.separator?4:16
             readonly property bool blinking:desktop.blinkFlashes>0 && desktop.blinkRow===objectName
-            readonly property bool lit:!modelData.separator && (blinking ? desktop.blinkFlashes%2===1 : (entryMouse.containsMouse ||
+            readonly property bool lit:!modelData.separator && modelData.enabled!==false && (blinking ? desktop.blinkFlashes%2===1 : ((desktop.menuKeyboardMode ? (submenuRow ? desktop.navigatingSubmenu && index===desktop.submenuSelection : !desktop.navigatingSubmenu && index===desktop.menuSelection) : entryMouse.containsMouse) ||
                 (!submenuRow && Boolean(modelData.children) && desktop.openSubmenu===index)))
             color:lit?desktop.menuAccent:"transparent"
+            Rectangle {visible:row.lit;x:0;y:0;width:1;height:parent.height;color:desktop.menuHighlightLight}
+            Rectangle {visible:row.lit;x:parent.width-1;y:0;width:1;height:parent.height;color:desktop.menuHighlightDark}
+            Rectangle {visible:row.lit && index===0 && desktop.stripModule==="";x:0;y:0;width:parent.width-1;height:1;color:desktop.menuHighlightLight}
             objectName:"desktop-command-"+(modelData.name?modelData.name:modelData.action)
-            Rectangle{visible:Boolean(modelData.separator);x:2;y:4;width:parent.width-4;height:1;color:"#888"}
+            Rectangle{visible:Boolean(modelData.separator);x:0;y:2;width:parent.width;height:1;color:"#888"}
+            Rectangle{visible:Boolean(modelData.separator);x:0;y:3;width:parent.width;height:1;color:"white"}
             Text{visible:Boolean(modelData.checked);anchors.verticalCenter:parent.verticalCenter;x:4;text:"✓";font.pixelSize:12;color:row.lit?"white":"black"}
+            // •: the one current choice of several, as 9.2.2's Monitor Resolution module marks it.
+            Text{visible:Boolean(modelData.bullet);anchors.verticalCenter:parent.verticalCenter;x:4;text:"•";font.pixelSize:12;color:row.lit?"white":"black"}
             // ◆: this application asks for attention (Mac OS 9's Notification Manager mark).
             Text{visible:Boolean(modelData.marked);objectName:"attention-mark-"+(modelData.text?modelData.text:"");anchors.verticalCenter:parent.verticalCenter;x:4;text:"◆";font.pixelSize:10;color:row.lit?"white":"black"}
             // A label's colour swatch (File ▸ Label).
             Rectangle {visible:Boolean(modelData.swatch);x:17;width:12;height:12;anchors.verticalCenter:parent.verticalCenter
                 color:modelData.swatch?modelData.swatch:"transparent";border.color:"#222"}
-            MenuGlyph {objectName:"menu-glyph-"+(modelData.text?modelData.text:"");visible:Boolean(modelData.glyph);x:17;anchors.verticalCenter:parent.verticalCenter;kind:modelData.glyph?modelData.glyph:"application"}
-            Text{visible:!modelData.separator;anchors.verticalCenter:parent.verticalCenter;x:modelData.glyph || modelData.swatch?39:15;width:parent.width-x-20;elide:Text.ElideRight
-                text:modelData.text?modelData.text:"";textFormat:Text.PlainText;color:modelData.enabled===false?"#888":row.lit?"white":"black";font.pixelSize:12}
+            MenuGlyph {objectName:"menu-glyph-"+(modelData.text?modelData.text:"");visible:Boolean(modelData.glyph);x:17;anchors.verticalCenter:parent.verticalCenter;source:modelData.icon || "";kind:modelData.glyph?modelData.glyph:"application"}
+            Text{visible:!modelData.separator;anchors.verticalCenter:parent.verticalCenter;x:modelData.glyph || modelData.swatch?39:20;width:parent.width-x-20;elide:Text.ElideRight
+                text:modelData.text?modelData.text:"";textFormat:Text.PlainText;color:modelData.enabled===false?"#777":row.lit?"white":"black";font.family:desktop.appearance.fontFamily;font.bold:desktop.menuFontBold;font.pixelSize:12;font.italic:Boolean(modelData.heading)}
             Text{visible:Boolean(modelData.children);anchors.right:parent.right;anchors.rightMargin:6;anchors.verticalCenter:parent.verticalCenter;text:"▶";font.pixelSize:9;color:row.lit?"white":"black"}
             // A Wi-Fi network: its lock (secured) and four signal bars, at the right.
             Row {visible:Boolean(modelData.bars);objectName:"menu-signal-"+(modelData.text?modelData.text:"");anchors.right:parent.right;anchors.rightMargin:10
@@ -1256,36 +1506,44 @@ Rectangle {
                     Rectangle {x:8;y:3;width:3;height:9;color:parent.bars>=3?parent.on:parent.off}
                     Rectangle {x:12;y:0;width:3;height:12;color:parent.bars>=4?parent.on:parent.off}}}
             Text{visible:Boolean(modelData.key);objectName:"menu-key-"+(modelData.text?modelData.text:"");anchors.right:parent.right;anchors.rightMargin:10;anchors.verticalCenter:parent.verticalCenter
-                text:modelData.key?modelData.key:"";textFormat:Text.PlainText;font.pixelSize:12;color:modelData.enabled===false?"#888":row.lit?"white":"black"}
+                text:modelData.key?modelData.key:"";textFormat:Text.PlainText;font.family:desktop.appearance.fontFamily;font.bold:desktop.menuFontBold;font.pixelSize:12;color:modelData.enabled===false?"#777":row.lit?"white":"black"}
             MouseArea{id:entryMouse;anchors.fill:parent;enabled:!modelData.separator && modelData.enabled!==false;hoverEnabled:true
-                onEntered:if(!row.submenuRow && !(desktop.stripModule!=="" && Date.now()-desktop.stripMenuOpenedAt<300)){if(modelData.children)desktop.openShellSubmenu(index,modelData.children,row.mapToItem(desktop,0,0).y);else desktop.openSubmenu=-1}
+                onEntered:if(!desktop.menuKeyboardMode && !row.submenuRow && !(desktop.stripModule!=="" && Date.now()-desktop.stripMenuOpenedAt<300)){if(modelData.children)desktop.openShellSubmenu(index,modelData.children,row.mapToItem(desktop,0,0).y);else desktop.openSubmenu=-1}
                 onPositionChanged:if(!row.submenuRow && modelData.children && desktop.openSubmenu!==index && desktop.stripModule!=="" &&
                                      Date.now()-desktop.stripMenuOpenedAt>=300)desktop.openShellSubmenu(index,modelData.children,row.mapToItem(desktop,0,0).y)
                 onClicked:if(modelData.children)desktop.openShellSubmenu(index,modelData.children,row.mapToItem(desktop,0,0).y);else desktop.chooseShellEntry(row.objectName,modelData.action,modelData.id)}
         }
     }
-    Rectangle {visible:popup.visible;z:10000.5;x:popup.x+3;y:popup.y+3;width:popup.width;height:popup.height;color:"#50000000"}
+    Rectangle {visible:popup.visible;z:10000.5;x:popup.x+1;y:popup.y+2;width:popup.width;height:popup.height-1;color:"#222"}
     Rectangle {
         id: popup; objectName: "desktop-menu-popup"; z: 10001; visible:desktop.openMenu>=0 && desktop.exportedRoot<0
         x:Math.max(menuBar.x,Math.min(desktop.openMenu===desktop.barEntries.length?menuBar.x+menuBar.width-width-2
               :desktop.openMenu===desktop.keyboardMenuIndex?keyboardMenu.mapToItem(desktop,0,0).x:desktop.menuX(desktop.openMenu),menuBar.x+menuBar.width-width))
-        y:menuBar.y+25
-        width:240;height:items.height+6;color:"#ddd";border.color:"#222"
+        y:menuBar.y+menuBar.height-1
+        width:desktop.shellMenuWidth(desktop.openMenu>=0 ? desktop.shellMenuEntries(desktop.openMenu) : [],false);height:items.height+2;color:"#ddd";border.color:"black"
+        Rectangle {x:1;y:1;width:parent.width-3;height:1;color:"white"}
+        Rectangle {x:1;y:2;width:1;height:parent.height-4;color:"white"}
+        Rectangle {x:parent.width-2;y:2;width:1;height:parent.height-3;color:"#999"}
+        Rectangle {x:2;y:parent.height-2;width:parent.width-4;height:1;color:"#999"}
         Column {
-            id:items;x:3;y:3;width:parent.width-6
+            id:items;x:1;y:1;width:parent.width-2
             Repeater {model:desktop.openMenu>=0 && desktop.exportedRoot<0 ? desktop.shellMenuEntries(desktop.openMenu) : [];delegate:shellMenuRow}
         }
     }
-    Rectangle {visible:submenu.visible;z:10001.5;x:submenu.x+3;y:submenu.y+3;width:submenu.width;height:submenu.height;color:"#50000000"}
+    Rectangle {visible:submenu.visible;z:10001.5;x:submenu.x+1;y:submenu.y+2;width:submenu.width;height:submenu.height-1;color:"#222"}
     Rectangle {
         id: submenu; objectName:"desktop-submenu"; z: 10002; visible:owner.visible && desktop.openSubmenu>=0
         // Beside the menu it belongs to: the menu bar's, or a Control Strip module's.
         readonly property Item owner: desktop.stripModule!=="" ? stripMenu : popup
         x:owner.x+owner.width+width-4<=menuBar.x+menuBar.width?owner.x+owner.width-4:Math.max(menuBar.x,owner.x-width+4)
-        y:Math.max(menuBar.y+26,Math.min(desktop.submenuY-3,menuBar.y+manager.primaryDisplayRect.height-height-2))
-        width:220;height:subitems.height+6;color:"#ddd";border.color:"#222"
+        y:Math.max(menuBar.y+menuBar.height,Math.min(desktop.submenuY-1,menuBar.y+manager.primaryDisplayRect.height-height-2))
+        width:desktop.shellMenuWidth(desktop.submenuEntries,false);height:subitems.height+2;color:"#ddd";border.color:"black"
+        Rectangle {x:1;y:1;width:parent.width-3;height:1;color:"white"}
+        Rectangle {x:1;y:2;width:1;height:parent.height-4;color:"white"}
+        Rectangle {x:parent.width-2;y:2;width:1;height:parent.height-3;color:"#999"}
+        Rectangle {x:2;y:parent.height-2;width:parent.width-4;height:1;color:"#999"}
         Column {
-            id:subitems;x:3;y:3;width:parent.width-6
+            id:subitems;x:1;y:1;width:parent.width-2
             Repeater {model:desktop.openSubmenu>=0 ? desktop.submenuEntries : [];delegate:shellMenuRow
                 onItemAdded:function(index,item){item.submenuRow=true}}
         }
@@ -1300,12 +1558,14 @@ Rectangle {
         onLiveChanged:if(JSON.stringify(live)!==JSON.stringify(entries))entries=live
         Component.onCompleted:entries=live
         width:220;height:stripItems.height+6;color:"#ddd";border.color:"#222"
-        x:Math.max(menuBar.x,Math.min(desktop.stripAnchor.x,menuBar.x+menuBar.width-width))
+        // Measured in 9.2.2: the menu's left edge 1 px left of the module, its bottom edge over the
+        // strip's top line and the module's top 2 px (docs/fidelity/control-strip.md).
+        x:Math.max(menuBar.x,Math.min(desktop.stripAnchor.x-1,menuBar.x+menuBar.width-width))
         // Above the module (V922 E12), or below it when the strip sits under the menu bar.
-        y:desktop.stripAnchor.y-height>=menuBar.y+26?desktop.stripAnchor.y-height
-          :desktop.stripAnchor.y+desktop.stripAnchor.height+height<=manager.primaryDisplayRect.y+manager.primaryDisplayRect.height
-            ?desktop.stripAnchor.y+desktop.stripAnchor.height
-          :Math.max(menuBar.y+26,manager.primaryDisplayRect.y+manager.primaryDisplayRect.height-height)
+        y:desktop.stripAnchor.y+2-height>=menuBar.y+menuBar.height?desktop.stripAnchor.y+2-height
+          :desktop.stripAnchor.y+desktop.stripAnchor.height-2+height<=manager.primaryDisplayRect.y+manager.primaryDisplayRect.height
+            ?desktop.stripAnchor.y+desktop.stripAnchor.height-2
+          :Math.max(menuBar.y+menuBar.height,manager.primaryDisplayRect.y+manager.primaryDisplayRect.height-height)
         Column {
             id:stripItems;x:3;y:3;width:parent.width-6
             Repeater {model:stripMenu.entries;delegate:shellMenuRow}
@@ -1488,6 +1748,32 @@ Rectangle {
             else desktop.forceActiveFocus()
         }
     }
+    // Platinum Asset Importer: the user's own Mac OS 9 sounds, icons, cursors and pictures.
+    AssetImporterWindow {
+        id:assetImporter
+        service:manager.assetImporter
+        z:front?3991.5:0.765
+        x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
+        y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
+        onRaised:desktop.bringShellWindowForward(assetImporter)
+        onClosed:{
+            if(desktop.shellWindowPending===assetImporter)desktop.shellWindowPending=null
+            desktop.forceActiveFocus()
+        }
+    }
+    // Software Update: checks for, downloads and installs Platinum Reality releases on request.
+    SoftwareUpdateWindow {
+        id:softwareUpdate
+        service:manager.softwareUpdate
+        z:front?3991.4:0.764
+        x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
+        y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
+        onRaised:desktop.bringShellWindowForward(softwareUpdate)
+        onClosed:{
+            if(desktop.shellWindowPending===softwareUpdate)desktop.shellWindowPending=null
+            desktop.forceActiveFocus()
+        }
+    }
     // Control Panel (System 6), kept open beside the applications as long as the user likes.
     property var classicPanelReturnTo:0
     property var classicPanelReturnWindow:null
@@ -1609,7 +1895,7 @@ Rectangle {
         EnergySaverPanel {id:energyPanel;settings:manager.energy;sessionManager:manager}
         GeneralControlsPanel {id:generalPanel;settings:desktop.appearance}
         // Listed only on a computer whose Handheld Daemon can hide its built-in controller.
-        HandheldPanel {id:handheldPanel;service:manager.handheld}
+        HandheldPanel {id:handheldPanel;service:manager ? manager.handheld : null}
         KeyboardPanel {id:keyboardPanel;settings:manager.input}
         MonitorsPanel {id:monitorsPanel;sessionManager:manager}
         MousePanel {id:mousePanel;settings:manager.input}
@@ -1693,8 +1979,17 @@ Rectangle {
             for(let y=0;y<height;y+=2){c.fillRect(0,y,1,1);c.fillRect(width-1,y,1,1)}}
     }
     ControlStrip {id:desktopControlStrip;z:8000;sessionManager:manager;settings:desktop.appearance;openModule:desktop.stripModule
+        personalFolder:manager.personalAssets
         extraModules:manager.statusItems ? manager.statusItems.items.map(function(i){return {command:"status:"+i.key,name:i.title,icon:i.icon,statusId:i.id}}) : []
-        onModuleRequested:function(module,anchor){desktop.openStripModule(module,anchor)}}
+        onModuleRequested:function(module,anchor){desktop.openStripModule(module,anchor)}
+        // Sound Volume's slider sets the level through Quick Controls, unmuting first.
+        volume:(quickControls.values||({})).volume||null
+        onSliderOpened:quickControls.service.refresh()
+        onVolumeChosen:function(value){
+            let volume=(quickControls.values||({})).volume||({})
+            if(volume.muted && value>0)quickControls.service.set("mute",0)
+            quickControls.service.set("volume",value)
+        }}
     // A tray item that disappears takes its open menu with it.
     Connections {
         target:manager.statusItems

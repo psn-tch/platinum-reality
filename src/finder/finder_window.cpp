@@ -33,6 +33,8 @@
 #include <QFrame>
 #include <QFutureWatcher>
 #include <QHeaderView>
+#include <QStyledItemDelegate>
+#include <QStyleOptionHeader>
 #include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
@@ -44,6 +46,7 @@
 #include <QMimeData>
 #include <QPainter>
 #include <QPointer>
+#include <QPixmapCache>
 #include <QProgressDialog>
 #include <QScrollBar>
 #include <QShortcut>
@@ -73,6 +76,164 @@ FolderIcons::FolderIcons(QWidget *parent) : QListView(parent)
 }
 namespace
 {
+// The 9.2.2 item/space band is 21px including its bottom rule. Its inactive
+// field/text flatten to #eee/#777 instead of retaining a sunken Qt panel.
+class FolderHeader final : public QLabel
+{
+  public:
+    explicit FolderHeader(QWidget *owner) : QLabel(owner)
+    {
+        setObjectName("folderItemCount");
+        setAlignment(Qt::AlignCenter);
+        setFixedHeight(21);
+        owner->installEventFilter(this);
+    }
+  protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (event->type() == QEvent::ActivationChange) update();
+        return QLabel::eventFilter(watched, event);
+    }
+    void paintEvent(QPaintEvent *) override
+    {
+        const bool active = isActiveWindow();
+        QPainter painter(this);
+        painter.fillRect(rect(), QColor(active ? "#dddddd" : "#eeeeee"));
+        if (active) {
+            painter.fillRect(0, 0, width(), 1, Qt::white);
+            painter.fillRect(0, height()-2, width(), 1, QColor("#aaaaaa"));
+        }
+        painter.fillRect(0, height()-1, width(), 1, QColor(active ? "#000000" : "#555555"));
+        painter.setPen(QColor(active ? "#000000" : "#777777"));
+        painter.drawText(rect().adjusted(4, 0, -4, -1), alignment(),
+                         fontMetrics().elidedText(text(), Qt::ElideRight, qMax(0, width()-8)));
+    }
+};
+class FolderColumnHeader final : public QHeaderView
+{
+  public:
+    explicit FolderColumnHeader(QWidget *parent) : QHeaderView(Qt::Horizontal,parent)
+    {
+        setSectionsClickable(true);setSectionsMovable(true);setStretchLastSection(true);
+    }
+  protected:
+    void paintSection(QPainter *painter,const QRect &rect,int logical) const override
+    {
+        if (!rect.isValid()) return;
+        QStyleOptionHeader option;initStyleOptionForIndex(&option,logical);
+        const bool active=window()->isActiveWindow();
+        const bool down=logical==sortIndicatorSection() || option.state.testFlag(QStyle::State_Sunken);
+        painter->save();painter->setClipRect(rect);
+        painter->fillRect(rect,QColor(active ? (down ? "#888" : "#ccc") : (down ? "#bbb" : "#ddd")));
+        const auto topLeft=QColor(active ? (down ? "#111" : "#666") : (down ? "#777" : "#aaa"));
+        const auto bottomRight=QColor(active ? (down ? "#444" : "#333") : "#999");
+        painter->fillRect(rect.x(),rect.y(),rect.width()-1,1,topLeft);
+        painter->fillRect(rect.x(),rect.y(),1,rect.height()-1,topLeft);
+        painter->fillRect(rect.right(),rect.y()+1,1,rect.height()-1,bottomRight);
+        painter->fillRect(rect.x()+1,rect.bottom(),rect.width()-1,1,bottomRight);
+        const auto corner=QColor(active ? (down ? "#222" : "#555") : (down ? "#888" : "#aaa"));
+        painter->fillRect(rect.right(),rect.top(),1,1,corner);
+        painter->fillRect(rect.left(),rect.bottom(),1,1,corner);
+        if(active){
+            const auto light=QColor(down ? "#555" : "#fff");
+            const auto shade=QColor(down ? "#aaa" : "#888");
+            painter->fillRect(rect.x()+1,rect.y()+1,rect.width()-3,1,light);
+            painter->fillRect(rect.x()+1,rect.y()+1,1,rect.height()-3,light);
+            painter->fillRect(rect.right()-1,rect.y()+2,1,rect.height()-3,shade);
+            painter->fillRect(rect.x()+2,rect.bottom()-1,rect.width()-3,1,shade);
+            const auto innerCorner=QColor(down ? "#777" : "#ccc");
+            painter->fillRect(rect.right()-1,rect.top()+1,1,1,innerCorner);
+            painter->fillRect(rect.left()+1,rect.bottom()-1,1,1,innerCorner);
+        }
+        // Name follows the disclosure/icon gutter; other metadata starts at6px.
+        const int inset=logical==0 ? 44 : 6;
+        const bool arrow=isSortIndicatorShown() && logical==sortIndicatorSection();
+        const auto textRect=rect.adjusted(inset,2,arrow ? -20 : -6,-2);
+        painter->setFont(font());
+        painter->setPen(QColor(active ? "#000" : "#777"));
+        painter->drawText(textRect,Qt::AlignLeft|Qt::AlignVCenter|Qt::TextSingleLine,
+            fontMetrics().elidedText(option.text,Qt::ElideRight,qMax(0,textRect.width())));
+        // Preserve the existing sort-direction affordance until the reference's
+        // separate reverse-order control is implemented and measured interactively.
+        if(arrow){
+            option.rect=QRect(rect.right()-13,rect.center().y()-4,9,9);
+            style()->drawPrimitive(QStyle::PE_IndicatorHeaderArrow,&option,painter,this);
+        }
+        painter->restore();
+    }
+};
+class FolderListDelegate final : public QStyledItemDelegate
+{
+  public:
+    explicit FolderListDelegate(QTreeView *view) : QStyledItemDelegate(view), m_view(view) {}
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        auto size = QStyledItemDelegate::sizeHint(option, index);
+        size.setHeight(qMax(19, option.fontMetrics.height()+2));
+        return size;
+    }
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        auto styled = option;
+        initStyleOption(&styled, index);
+        const QColor field(index.column()==m_view->header()->sortIndicatorSection() ? "#dddddd" : "#eeeeee");
+        const bool highlight = styled.state.testFlag(QStyle::State_Selected) &&
+                               m_view->window()->isActiveWindow() && index.column()==0;
+        // Selection remains in the model. The reference paints only the active Name
+        // label, leaving metadata and the inactive row in their ordinary fields.
+        styled.state &= ~(QStyle::State_Selected | QStyle::State_HasFocus);
+        styled.backgroundBrush = field;
+        if (highlight && !styled.icon.isNull())
+            styled.icon = darkenedIcon(styled.icon,styled.decorationSize,m_view->devicePixelRatioF());
+        auto *style = styled.widget ? styled.widget->style() : QApplication::style();
+        style->drawControl(QStyle::CE_ItemViewItem, &styled, painter, styled.widget);
+        painter->save();
+        if (highlight && !styled.text.isEmpty())
+        {
+            const int margin = style->pixelMetric(QStyle::PM_FocusFrameHMargin, &styled, styled.widget)+1;
+            const auto area = style->subElementRect(QStyle::SE_ItemViewItemText, &styled, styled.widget)
+                                  .adjusted(margin,0,-margin,0);
+            const auto text = styled.fontMetrics.elidedText(styled.text,styled.textElideMode,qMax(0,area.width()));
+            const auto label = style->itemTextRect(styled.fontMetrics,area,
+                styled.displayAlignment | Qt::TextSingleLine,true,text).adjusted(-1,0,1,0)
+                .intersected(option.rect.adjusted(0,0,0,-1));
+            // Difference against the measured field turns #ddd into black and black
+            // glyphs into #ddd without shifting or redrawing their baseline.
+            painter->setCompositionMode(QPainter::CompositionMode_Difference);
+            painter->fillRect(label,field);
+            painter->setCompositionMode(QPainter::CompositionMode_SourceOver);
+        }
+        painter->fillRect(option.rect.left(), option.rect.bottom(), option.rect.width(), 1, Qt::white);
+        painter->restore();
+    }
+  private:
+    static QIcon darkenedIcon(const QIcon &icon, QSize size, qreal ratio)
+    {
+        // The cursor-free reference icon strip halves opaque RGB channels. Preserve
+        // source alpha so its transparent edge still composites against the row.
+        const auto key = QString("platinum-finder-selected-%1-%2x%3-%4")
+            .arg(icon.cacheKey()).arg(size.width()).arg(size.height()).arg(ratio);
+        QPixmap pixmap;
+        if (!QPixmapCache::find(key,&pixmap))
+        {
+            auto image = icon.pixmap(size,ratio,QIcon::Normal).toImage().convertToFormat(QImage::Format_ARGB32);
+            if (image.isNull()) return icon;
+            for (int y=0;y<image.height();++y)
+            {
+                auto *pixels=reinterpret_cast<QRgb*>(image.scanLine(y));
+                for (int x=0;x<image.width();++x)
+                {
+                    const auto pixel=pixels[x];
+                    pixels[x]=qRgba(qRed(pixel)/2,qGreen(pixel)/2,qBlue(pixel)/2,qAlpha(pixel));
+                }
+            }
+            pixmap=QPixmap::fromImage(image);
+            QPixmapCache::insert(key,pixmap);
+        }
+        return QIcon(pixmap);
+    }
+    QTreeView *m_view;
+};
 // A finger held still for 0.6 s on a folder view opens its menu, as a right click does: the
 // handheld's touchscreen has no right button (psn_tch, 2026-10-29). Touch arrives here as Qt's
 // synthesized mouse events from a touchscreen device; moving more than a few pixels cancels.
@@ -380,11 +541,25 @@ void FolderIcons::dropEvent(QDropEvent *e)
 }
 FolderList::FolderList(QWidget *parent) : QTreeView(parent)
 {
+    setHeader(new FolderColumnHeader(this));
     m_spring.opened = [this](const QString &folder) { emit springOpen(folder); };
     setDragEnabled(true);
     setAcceptDrops(true);
     setDropIndicatorShown(true);
     setDefaultDropAction(Qt::MoveAction);
+    setIconSize({16,16});
+    setUniformRowHeights(true);
+    setItemDelegate(new FolderListDelegate(this));
+    header()->setFixedHeight(qMax(21, fontMetrics().height()+4));
+    connect(header(), &QHeaderView::sortIndicatorChanged, viewport(), qOverload<>(&QWidget::update));
+}
+void FolderList::drawBranches(QPainter *painter, const QRect &rect, const QModelIndex &index) const
+{
+    painter->fillRect(rect, QColor(header()->sortIndicatorSection()==0 ? "#dddddd" : "#eeeeee"));
+    QTreeView::drawBranches(painter, rect, index);
+    painter->save();
+    painter->fillRect(rect.left(), rect.bottom(), rect.width(), 1, Qt::white);
+    painter->restore();
 }
 void FolderList::startDrag(Qt::DropActions)
 {
@@ -464,11 +639,7 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
     m_path->setObjectName("pathField");
     navigation->addWidget(m_path, 1);
     layout->addLayout(navigation);
-    m_header = new QLabel;
-    m_header->setObjectName("folderItemCount");
-    m_header->setAlignment(Qt::AlignCenter);
-    m_header->setFrameStyle(QFrame::Panel | QFrame::Sunken);
-    m_header->setMinimumHeight(23);
+    m_header = new FolderHeader(this);
     layout->addWidget(m_header);
     updateHeader();
     installPlatinumIcons(m_model);
@@ -504,7 +675,9 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
     m_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_list->setSortingEnabled(true);
     m_list->sortByColumn(0, Qt::AscendingOrder);
-    m_list->setColumnWidth(0, 230);
+    m_list->setColumnWidth(0, 214);
+    // Name, Date Modified, then the remaining modern filesystem metadata.
+    m_list->header()->moveSection(m_list->header()->visualIndex(3), 1);
     m_views->addWidget(m_icons);
     m_views->addWidget(m_list);
     // Places, as in Dolphin's sidebar: the home disk and its standard folders, drives, Trash.

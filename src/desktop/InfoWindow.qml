@@ -5,6 +5,8 @@ import QtQuick
 // The title bar moves it, the close box or Escape closes it, and nothing is ever written.
 FocusScope {
     id: info
+    property var moveManager: typeof manager === "undefined" ? null : manager
+    onActiveFocusChanged: if (!activeFocus && moveManager) moveManager.finishShellWindowMove(info, false)
     required property var details
     signal closeRequested()
     signal raised()
@@ -47,8 +49,12 @@ FocusScope {
         }
         MouseArea {
             anchors.fill: parent
-            drag.target: info; drag.threshold: 2
-            onPressed: { info.raised(); info.forceActiveFocus() }
+            onPressed: function(mouse) {
+                info.raised(); info.forceActiveFocus()
+                if (info.moveManager) info.moveManager.beginShellWindowMove(info, mapToItem(null, mouse.x, mouse.y))
+            }
+            onReleased: if (info.moveManager) info.moveManager.finishShellWindowMove(info)
+            onCanceled: if (info.moveManager) info.moveManager.finishShellWindowMove(info, false)
         }
         Rectangle {
             objectName: "info-close-" + info.details.key

@@ -8,6 +8,8 @@ import QtQuick.Controls
 // on screen. A panel's edit() opens this window at that panel.
 FocusScope {
     id: window
+    property var moveManager: typeof manager === "undefined" ? null : manager
+    onActiveFocusChanged: if (!activeFocus && moveManager) moveManager.finishShellWindowMove(window, false)
     signal raised()
     signal closed()
     objectName: "control-panels-window"
@@ -94,8 +96,12 @@ FocusScope {
         }
         MouseArea {
             anchors.fill: parent
-            drag.target: window; drag.threshold: 2
-            onPressed: { window.raised(); window.forceActiveFocus() }
+            onPressed: function(mouse) {
+                window.raised(); window.forceActiveFocus()
+                if (window.moveManager) window.moveManager.beginShellWindowMove(window, mapToItem(null, mouse.x, mouse.y))
+            }
+            onReleased: if (window.moveManager) window.moveManager.finishShellWindowMove(window)
+            onCanceled: if (window.moveManager) window.moveManager.finishShellWindowMove(window, false)
         }
         Rectangle {
             objectName: "control-panels-close"

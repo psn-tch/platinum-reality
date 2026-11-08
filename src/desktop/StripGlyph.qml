@@ -38,6 +38,18 @@ Canvas {
         } else if(kind==="monitors") {
             c.beginPath();c.arc(8,8,3,0,Math.PI*2);c.fill()
             for(let i=0;i<8;++i){const a=i*Math.PI/4;line(8+Math.cos(a)*4.5,8+Math.sin(a)*4.5,8+Math.cos(a)*6.5,8+Math.sin(a)*6.5)}
+        } else if(kind==="printer") {
+            // Printer Selector: a desktop printer with its sheet.
+            c.fillStyle="white";c.fillRect(4.5,1.5,7,5);c.strokeRect(4.5,1.5,7,5)
+            c.fillStyle="#ccc";c.fillRect(1.5,6.5,13,6);c.strokeRect(1.5,6.5,13,6)
+            c.fillStyle="white";c.fillRect(4.5,10.5,7,4);c.strokeRect(4.5,10.5,7,4)
+        } else if(kind==="resolution") {
+            // Monitor Resolution: a screen of fine and coarse squares.
+            c.fillStyle="#eee";c.fillRect(1.5,2.5,13,10);c.strokeRect(1.5,2.5,13,10)
+            c.fillStyle="#222"
+            for(let y=0;y<4;++y)for(let x=0;x<5;++x)if((x+y)%2===0)c.fillRect(3+x*2,4+y*2,2,2)
+            c.fillRect(9,8,4,3)
+            c.fillRect(7,12.5,2,1);c.fillRect(4,13.5,8,1)
         } else if(kind==="display") {
             // A monitor on its stand.
             c.fillStyle="#eee";c.fillRect(1.5,2.5,13,9);c.strokeRect(1.5,2.5,13,9)
@@ -65,6 +77,12 @@ Canvas {
             c.fillStyle="#eee";c.fillRect(3.5,5,9,5);c.strokeRect(3.5,5,9,5)
             c.fillStyle="#222";c.fillRect(6.5,10,3,2)
             c.beginPath();c.moveTo(8,12);c.bezierCurveTo(8,15,4,13,3,15.5);c.stroke()
+        } else if(kind==="sleep") {
+            // Energy Settings: a crescent moon and two stars on a night sky.
+            c.fillStyle="#334";c.fillRect(1.5,1.5,13,13);c.strokeRect(1.5,1.5,13,13)
+            c.fillStyle="#ffd";c.beginPath();c.arc(8,8,4.5,0,Math.PI*2);c.fill()
+            c.fillStyle="#334";c.beginPath();c.arc(10,6.5,4,0,Math.PI*2);c.fill()
+            c.fillStyle="#fff";c.fillRect(11,10,1,1);c.fillRect(4,3,1,1);c.fillRect(12,3,1,1)
         } else if(kind==="trackpad") {
             c.fillStyle="#ddd";c.fillRect(1.5,3.5,13,9);c.strokeRect(1.5,3.5,13,9)
             line(1.5,10.5,14.5,10.5);line(8,10.5,8,12.5)

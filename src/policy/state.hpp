@@ -43,6 +43,7 @@ struct State
     std::vector<ApplicationId> applications_back_to_front;
     Context active;
     std::optional<MenuTracking> menu;
+    std::optional<WindowMove> move;
     bool operator==(const State &) const = default;
 };
 

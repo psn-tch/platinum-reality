@@ -61,7 +61,7 @@ class DisplayLayoutTests final:public QObject
         QCOMPARE(layout.reachablePosition({950,80},{360,240}),QPoint(950,80));
         QCOMPARE(layout.reachablePosition({1090,80},{360,240}),QPoint(1090,80));
         QCOMPARE(layout.reachablePosition({1100,700},{360,240}),QPoint(1040,700));
-        QCOMPARE(layout.reachablePosition({150,0},{360,240}),QPoint(150,26));
+        QCOMPARE(layout.reachablePosition({150,0},{360,240}),QPoint(150,20));
         QCOMPARE(layout.reachablePosition({1250,0},{360,240}),QPoint(1250,0));
         const auto unplugged=DisplayLayout::single({1120,760});
         QCOMPARE(unplugged.reachablePosition({1250,80},{360,240},true),QPoint(754,80));

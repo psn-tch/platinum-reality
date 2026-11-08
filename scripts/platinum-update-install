@@ -1,0 +1,39 @@
+#!/usr/bin/python3 -I
+"""Install a verified Platinum Reality release with pacman (run through pkexec; never by the
+desktop itself). Usage: platinum-update-install <release folder> | --restore-previous
+Progress and the result are JSON lines on standard output. See docs/software-update.md."""
+import json
+import os
+from pathlib import Path
+import sys
+
+sys.path.insert(0, '/usr/lib/platinum-reality')
+import platinum_update  # noqa: E402
+
+
+def report(message):
+    print(json.dumps(message), flush=True)
+
+
+def main(arguments):
+    if os.geteuid() != 0:
+        report({'error': 'Installing updates needs an administrator.'})
+        return 1
+    if len(arguments) != 1:
+        report({'error': __doc__.split('\n')[1]})
+        return 2
+    os.umask(0o077)
+    try:
+        if arguments[0] == '--restore-previous':
+            version = platinum_update.restore_previous(report)
+        else:
+            version = platinum_update.install(Path(arguments[0]), report)
+    except platinum_update.UpdateError as problem:
+        report({'error': str(problem)})
+        return 1
+    report({'done': True, 'version': version})
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
