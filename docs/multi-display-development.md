@@ -11,7 +11,7 @@ The newer [pointer domain](mirror-pointer-development.md) and
 [cursor-copy prototype](mirror-cursor-development.md) have separate development
 evidence. They do not enable a production mirrored session.
 
-psn_tch explicitly wants both modes, with a primary-display choice. **Extend remains
+Lily Hewitt explicitly wants both modes, with a primary-display choice. **Extend remains
 opt-in and experimental. Production Mirror is unfinished.** Owned headless checks
 do not certify physical hotplug, mixed-density rendering cost or display rollback.
 No physical monitor configuration is changed by the qualification commands here.
@@ -355,7 +355,7 @@ work" for the main display only.
 
 ## "Use all displays": the opt-in, and a crash it uncovered (Claude, 2026-10-21)
 
-psn_tch chose to have Extend finished properly before using two monitors. The way in is a user
+Lily Hewitt chose to have Extend finished properly before using two monitors. The way in is a user
 choice, never a default:
 
 - **Monitors panel:** a "Use all displays" checkbox (`monitors-use-all`), applied with OK; Cancel
@@ -406,7 +406,7 @@ KWin saves a `setups` entry for each combination of connected monitors and lid s
 - their logical positions;
 - a priority, where 1 means the main display.
 
-psn_tch's setups:
+Lily Hewitt's setups:
 
 - **Docked to the Samsung:** the laptop panel is off. The Samsung is at x=0 with the lid open,
   or x=696 with it closed.
@@ -427,7 +427,7 @@ psn_tch's setups:
   - KDE's main display replaces the `--primary-output` hint until the user picks one in the
     Monitors panel.
   - Because it is applied once per set, a later change is never fought.
-- Single-output mode is unchanged. For each of psn_tch's combinations, its existing choice (the
+- Single-output mode is unchanged. For each of Lily Hewitt's combinations, its existing choice (the
   external screen) is already KDE's main display.
 - Tests:
   - `tests/output_selection_tests.py` `KdeArrangementTests` (their setups; the Samsung on a
@@ -442,20 +442,20 @@ psn_tch's setups:
 
 ## Screens keep their KDE rotation and scale (Claude, 2026-10-20)
 
-psn_tch's laptop panel (eDP-1, 1600×2560 portrait) has to be rotated, which KDE stores as
+Lily Hewitt's laptop panel (eDP-1, 1600×2560 portrait) has to be rotated, which KDE stores as
 `Rotated90` at scale 2.3. The native session showed it sideways when undocked.
 
 - `standalone-session.py` reads `$XDG_CONFIG_HOME/kwinoutputconfig.json` (read-only).
   `kde_output_preferences()` is bounded to 1 MiB, refuses symlinks, and validates connector
   names, scale (0.5–4) and transform.
-- Transform mapping: **KWin counts quarter-turns the opposite way to Sway.** psn_tch's panel, which
+- Transform mapping: **KWin counts quarter-turns the opposite way to Sway.** Lily Hewitt's panel, which
   is `Rotated90` in KDE, is upright with Sway's `270`. They confirmed this on the real screen
   (2026-10-20): my first guess, `90`, was wrong. So Rotated90→270, Rotated270→90, Rotated180→180,
   Flipped90→flipped-270, Flipped270→flipped-90. The flipped quarter-turns follow the same rule
   but are not hardware-confirmed.
 - **Monitors are matched by EDID first (2026-10-20).** KWin's `edidHash` is the MD5 of the raw
   EDID; `sysfs_edid_hash()` reads `/sys/class/drm/card*-NAME/edid` (read-only, ≤ 32 KiB).
-  - Before this, matching was by connector: psn_tch's Samsung, docked on DP-3, took the 1.35 that
+  - Before this, matching was by connector: Lily Hewitt's Samsung, docked on DP-3, took the 1.35 that
     KDE kept for a 1080p APT monitor once seen on DP-3, instead of its own 1.5 (KDE saw it on
     DP-2). Checked against their real file and monitors: Samsung → 1.5, panel → 270 at 2.3.
   - A monitor with a known EDID that KDE has never seen takes nothing from other monitors' entries
@@ -470,7 +470,7 @@ psn_tch's laptop panel (eDP-1, 1600×2560 portrait) has to be rotated, which KDE
   scale before the topology is described. Only differences are sent. This is covered by code and
   unit tests, not yet by the two-screen qualifier.
 - `--no-kde-output-settings` turns this off.
-- Tests: `tests/output_selection_tests.py` (12 cases, including psn_tch's exact panel, all eight
+- Tests: `tests/output_selection_tests.py` (12 cases, including Lily Hewitt's exact panel, all eight
   transforms, a reused connector, malformed and symlinked files). `qualify-session.py` has a new
   check, `screen_keeps_kde_rotation_and_scale`: a nested Sway applies `transform 270` at scale 2
   from a fake KDE file and reports it. 10/10 on a staged build of this tree. Rocky's Extend

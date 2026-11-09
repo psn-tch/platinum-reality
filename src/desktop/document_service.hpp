@@ -17,6 +17,9 @@ class DesktopDocumentService final : public QObject, protected QDBusContext
     // desktop's own Special menu does; and whether the last three are offered.
     bool EndSession(QString command);
     bool PowerAvailable();
+    // View ▸ as Window / as Pop-up Window for one of the calling Finder's own windows.
+    bool SetPopUpWindow(uint surfaceId, bool popUp);
+    bool IsPopUpWindow(uint surfaceId);
 
   private:
     uint ownedPeerPid(const QString &binary) const;

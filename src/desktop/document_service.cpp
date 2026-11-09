@@ -83,3 +83,13 @@ bool DesktopDocumentService::DropFiles(QStringList paths, QString token)
     const auto pid = ownedPeerPid("frankenstein-drop-receiver");
     return pid && m_manager->receiveDesktopDrop(pid, std::move(paths), std::move(token));
 }
+bool DesktopDocumentService::SetPopUpWindow(uint surfaceId, bool popUp)
+{
+    const auto pid = ownedPeerPid("frankenstein-finder");
+    return pid && m_manager->popUpForSurface(pid, surfaceId, popUp ? 1 : 0);
+}
+bool DesktopDocumentService::IsPopUpWindow(uint surfaceId)
+{
+    const auto pid = ownedPeerPid("frankenstein-finder");
+    return pid && m_manager->popUpForSurface(pid, surfaceId, -1);
+}

@@ -364,7 +364,7 @@ installed link dependency, not a package installed for the project. The native
 10:58 gate verifies correct resolution of two same-titled windows and a child
 folder on this machine. No title-based fallback is provided.
 
-The visible product name is now Platinum Reality, per psn_tch. Stable internal
+The visible product name is now Platinum Reality, per Lily Hewitt. Stable internal
 executable, style and IPC names retain `frankenstein`; this separate directory
 has not been moved or merged with the protected KDE project. No new Apple assets
 were acquired, copied or bundled. Marquee rendering is original QML geometry;

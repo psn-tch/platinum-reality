@@ -202,7 +202,7 @@ class MainDisplayPreferenceTests(unittest.TestCase):
 
 
 class KdeOutputSettingsTests(unittest.TestCase):
-    """psn_tch's laptop: a portrait panel KDE shows rotated 90° (left) at 2.3, and two docks."""
+    """Lily Hewitt's laptop: a portrait panel KDE shows rotated 90° (left) at 2.3, and two docks."""
 
     def write(self, sections):
         import json, tempfile
@@ -255,7 +255,7 @@ class KdeOutputSettingsTests(unittest.TestCase):
         self.assertEqual(session.kde_output_preferences(broken, outputs), {})
 
     def test_a_monitor_is_recognised_by_its_edid_on_any_port(self):
-        # psn_tch's KDE file: the Samsung was on DP-2 at 1.5, a 1080p APT monitor on DP-3 at 1.35.
+        # Lily Hewitt's KDE file: the Samsung was on DP-2 at 1.5, a 1080p APT monitor on DP-3 at 1.35.
         # Today the Samsung is on DP-3: it must keep its own 1.5, not take the APT's 1.35.
         samsung = dict(self.entry('DP-2', 'Normal', 1.5, 3840, 2160), edidHash='364375f4')
         apt = dict(self.entry('DP-3', 'Normal', 1.35, 1920, 1080), edidHash='d87b0493')
@@ -292,7 +292,7 @@ class KdeOutputSettingsTests(unittest.TestCase):
 
 
 class KdeArrangementTests(unittest.TestCase):
-    """psn_tch's saved KDE setups (2026-10-20): with the Samsung the laptop panel is off; with the
+    """Lily Hewitt's saved KDE setups (2026-10-20): with the Samsung the laptop panel is off; with the
     1080p APT monitor the panel sits left and the APT, to its right at 1114, is the main display."""
 
     HASHES = {'panel': 'a1', 'samsung': 'b2', 'apt': 'c3'}
@@ -685,7 +685,7 @@ class PersonalCursorTests(unittest.TestCase):
             self.assertEqual(played.read_text().splitlines()[-1], '--volume=0.5 ' + str(assets / 'startup-chime.aiff'))
 
     def test_startup_chime_follows_the_sound_panel_setting(self):
-        # Sound ▸ Startup (psn_tch, 2026-10-29): off means no chime; the volume slider sets its level.
+        # Sound ▸ Startup (Lily Hewitt, 2026-10-29): off means no chime; the volume slider sets its level.
         import tempfile
         with tempfile.TemporaryDirectory() as home:
             home = Path(home)

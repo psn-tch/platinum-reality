@@ -34,7 +34,7 @@ mouse_warping none
 # This binding only locks/refreshes; it cannot authenticate or unlock. Allow it
 # while locked as a recovery key, without repeated refreshes when the key is held.
 bindsym --locked --inhibited --no-repeat Ctrl+Alt+l nop platinum-lock
-# Laptop touchpads: tap to click and two-finger scrolling, as psn_tch has them under KDE (2026-10-20).
+# Laptop touchpads: tap to click and two-finger scrolling, as Lily Hewitt has them under KDE (2026-10-20).
 input type:touchpad {
     tap enabled
     scroll_method two_finger
@@ -79,14 +79,14 @@ def choose_primary_output(outputs, preferred):
     return selected, "fallback_external" if external else "fallback_internal"
 
 
-# KWin counts rotation the opposite way to Sway: psn_tch's panel, Rotated90 in KDE, is upright with
+# KWin counts rotation the opposite way to Sway: Lily Hewitt's panel, Rotated90 in KDE, is upright with
 # Sway's "270" (confirmed on the real screen, 2026-10-20). Flipped quarter-turns follow suit.
 KWIN_TRANSFORMS = {"Normal": "normal", "Rotated90": "270", "Rotated180": "180", "Rotated270": "90",
                    "Flipped": "flipped", "Flipped90": "flipped-270", "Flipped180": "flipped-180",
                    "Flipped270": "flipped-90"}
 
 
-# psn_tch's OneXPlayer panel is portrait inside a landscape laptop. Their exact command, made the
+# Lily Hewitt's OneXPlayer panel is portrait inside a landscape laptop. Their exact command, made the
 # default (2026-10-20): output eDP-1 transform 270 scale 2.3. Matched by panel model as well,
 # so another laptop's eDP-1 is never turned. KDE's own setting still wins when it has one.
 PANEL_DEFAULTS = {("eDP-1", "HSX", "YHB02P24"): {"transform": "270", "scale": 2.3}}
@@ -215,7 +215,7 @@ def kde_output_preferences(path, outputs, edid_hash=sysfs_edid_hash):
     """Each screen's rotation and scale as the user set them in KDE (read-only).
 
     KWin's quarter-turns run opposite to Sway's (see KWIN_TRANSFORMS). A monitor is matched by
-    its EDID first: dock ports change, and psn_tch's Samsung on DP-3 took the scale KDE kept for a
+    its EDID first: dock ports change, and Lily Hewitt's Samsung on DP-3 took the scale KDE kept for a
     different monitor once seen on DP-3. Only a monitor KDE has never seen by EDID falls back to
     its connector name. Several candidates are told apart by the current mode's size;
     anything ambiguous or malformed is ignored.
@@ -856,7 +856,7 @@ CHIME_NAMES = ("startup-chime.wav", "startup-chime.aiff", "startup-chime.aif", "
 # 2026-10-22). At most 15 s, then half a second to settle; $1 may be empty (no wpctl: no wait).
 CHIME_HELPER = ('i=0; if [ -n "$1" ]; then while [ "$i" -lt 75 ] && ! "$1" inspect @DEFAULT_AUDIO_SINK@ '
                 '>/dev/null 2>&1; do sleep 0.2; i=$((i + 1)); done; sleep 0.5; fi; exec "$2" "$3" "$4"')
-# Half volume unless Sound ▸ Startup says otherwise: the chime at full volume startled psn_tch
+# Half volume unless Sound ▸ Startup says otherwise: the chime at full volume startled Lily Hewitt
 # (2026-10-23). pw-play takes a factor, paplay a value out of 65536.
 CHIME_VOLUME = 0.5
 
@@ -892,9 +892,9 @@ def startup_sound_settings(profile):
 def startup_chime(environment, home=None, boot_id=Path("/proc/sys/kernel/random/boot_id"),
                   players=("/usr/bin/pw-play", "/usr/bin/paplay"), wpctl="/usr/bin/wpctl", profile=None):
     """Once per boot, when the Log In is first on screen: the user's own startup sound,
-    <data>/platinum-reality/assets/startup-chime.* (psn_tch chose the Macintosh IIsi chime, 2026-10-22).
+    <data>/platinum-reality/assets/startup-chime.* (Lily Hewitt chose the Macintosh IIsi chime, 2026-10-22).
     Never bundled: Macs played it from ROM. Sound ▸ Startup can turn it off or set its volume
-    (<profile>/startup-sound.json; psn_tch asked for both, 2026-10-29). Returns the player process,
+    (<profile>/startup-sound.json; Lily Hewitt asked for both, 2026-10-29). Returns the player process,
     or None when it is off or silent, there is no sound or player, or it already played since this boot."""
     home = Path(home or environment.get("HOME") or Path.home())
     data = Path(environment.get("XDG_DATA_HOME") or home / ".local/share")
@@ -951,8 +951,8 @@ def saved_energy_settings(profile):
 
 
 def idle_command(lock_command, resume_command, energy=None, backend_ipc=None):
-    """swayidle for a physical seat. No lock after idle time (psn_tch, 2026-10-20); sleep, Ctrl+Alt+L
-    and loginctl lock-session lock. -C /dev/null: never the user's own swayidle config. psn_tch's has
+    """swayidle for a physical seat. No lock after idle time (Lily Hewitt, 2026-10-20); sleep, Ctrl+Alt+L
+    and loginctl lock-session lock. -C /dev/null: never the user's own swayidle config. Lily Hewitt's has
     "before-sleep swaylock", which swayidle -w ran first and waited on until unlock, so this lock
     missed logind's 5 s window, the laptop slept unlocked, and on wake swaylock then Platinum each
     asked to unlock (2026-10-22; very likely the 2026-10-21 freeze too). Resume replaces the

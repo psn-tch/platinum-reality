@@ -147,16 +147,23 @@ The full native test suite runs real applications on a private headless display;
 
 ## How this was made
 
-Platinum Reality was made with AI. psn_tch had the idea, decided what it should do and how it
+Platinum Reality was made with AI. Lily Hewitt had the idea, decided what it should do and how it
 should feel, used it every day as their real desktop and reported what was wrong. Almost all of
 the code, tests and documentation were written by AI coding assistants working from that
 direction: Anthropic's Claude (in Claude Code) and OpenAI's Codex. The title-bar drawings come from
-psn_tch's own PlatinumWayland project.
+Lily Hewitt's own PlatinumWayland project.
 
 Every change goes through the automatic test suite, including tests that run real applications
 (Firefox, Chromium, games, terminals) on a private display, and Mac OS 9 behaviour was compared
 against a real Mac OS 9.2.2 running in an emulator. That is not the same as years of use on many
 machines: if something is wrong, please open an issue.
+
+## Contact
+
+Platinum Reality is made by Lily Hewitt. Write to **lily@platinumreality.uk**, or open an issue
+here. The project's home is **[platinumreality.uk](https://platinumreality.uk)**, and
+**[platinumreality.uk/download](https://platinumreality.uk/download)** always leads to the
+newest release.
 
 ## Licence
 

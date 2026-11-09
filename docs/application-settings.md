@@ -1,6 +1,6 @@
 # Application settings: normal or private
 
-Decision (psn_tch, 2026-10-20, after their first physical login): **"yes everything normal"**.
+Decision (Lily Hewitt, 2026-10-20, after their first physical login): **"yes everything normal"**.
 Applications launched from Platinum Reality use the same settings and logins as under KDE. Firefox
 keeps its normal look (option 1b): no Platinum `userChrome.css` is written into their real profile.
 
@@ -27,7 +27,7 @@ development builds can never reach a real home folder. The installed launcher
 
 ## Firefox and GTK window frames (2026-10-20)
 
-psn_tch reported that their normal Firefox had no Platinum title bar, couldn't be resized, and moved
+Lily Hewitt reported that their normal Firefox had no Platinum title bar, couldn't be resized, and moved
 when they clicked away and back. Two causes:
 
 - **Frame.** Only the owned private-profile Firefox got `classicBrowserFrame`. Their normal

@@ -306,7 +306,7 @@ def banner_logo(width, height, pixels):
 
 
 # System 'CURS' IDs (single cursors) and 'acur' frame lists, by Xcursor names. Verified by eye
-# against psn_tch's 9.2.2 System file (labelled sheet, 2026-10-22).
+# against Lily Hewitt's 9.2.2 System file (labelled sheet, 2026-10-22).
 CURSORS = {(1,): ('text', 'xterm', 'ibeam'), (2,): ('crosshair', 'cross', 'tcross'), (3,): ('cell', 'plus'),
            (-20713,): ('pointer', 'hand2', 'hand1', 'pointing_hand'), (-20709,): ('grab', 'openhand'),
            (-20714,): ('grabbing', 'closedhand'), (-20488,): ('context-menu',), (-20486,): ('copy', 'dnd-copy'),

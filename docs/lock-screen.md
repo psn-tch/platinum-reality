@@ -1,6 +1,6 @@
 # The Platinum lock screen (`platinum-lock`)
 
-psn_tch asked (2026-10-20) for a lock screen in the style of Mac OS 9.2.2. It must accept their
+Lily Hewitt asked (2026-10-20) for a lock screen in the style of Mac OS 9.2.2. It must accept their
 fingerprint or password: swaylock refused both that day, because agent shell commands had
 triggered `pam_faillock` through `~/.bash_profile` (see HANDOFF).
 
@@ -57,7 +57,7 @@ triggered `pam_faillock` through `~/.bash_profile` (see HANDOFF).
 ## Qualification
 
 - `tests/lock_tests.cpp` (`ctest -R '^lock$'`, offscreen):
-  - The PAM stack check (psn_tch's three-deep chain; commented-out, non-auth, `-auth`, cycles,
+  - The PAM stack check (Lily Hewitt's three-deep chain; commented-out, non-auth, `-auth`, cycles,
     names that escape the directory).
   - Real PAM through `pam_start_confdir` and a disposable directory: `pam_exec expose_authtok`
     checks the password, and `pam_echo` sends an information message. Never `/etc/pam.d`.
@@ -94,7 +94,7 @@ Defects found while building it, all caught by the session test:
 - Qt moves a window to the screen containing its position, so each window gets its screen's
   geometry.
 
-## Not yet proven on hardware (ask psn_tch)
+## Not yet proven on hardware (ask Lily Hewitt)
 
 ### Wake-up recovery (2026-10-24 development)
 

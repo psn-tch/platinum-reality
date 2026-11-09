@@ -1266,7 +1266,7 @@ class NativeTests : public QObject
         // to tell Firefox's own popup-creation hang (a timing race?) from a compositor cause.
         if (const auto settle = qEnvironmentVariableIntValue("FRANKENSTEIN_CONTEXT_MENU_SETTLE_MS"); settle > 0)
             QTest::qWait(qMin(settle, 5000));
-        // Twice: the second Save Image As froze Firefox with its chooser behind (psn_tch, 2026-10-22).
+        // Twice: the second Save Image As froze Firefox with its chooser behind (Lily Hewitt, 2026-10-22).
         for (int round = 0; round < 2; ++round) {
         const QString saveName = round == 0 ? "pdmenusaved" : "pdmenusecond";
         if (round > 0) { manager.activate(id); QTRY_VERIFY(client->hasActiveFocus()); QTest::qWait(300); }
@@ -2732,7 +2732,7 @@ class NativeTests : public QObject
         manager.closeWindow(childId);
         QTRY_VERIFY(findPrefix("PD Popup").isEmpty());
         if (!touch) {
-            // A mouse wheel, as the host delivers one (psn_tch, 2026-10-22: "i cant scroll in chromium"):
+            // A mouse wheel, as the host delivers one (Lily Hewitt, 2026-10-22: "i cant scroll in chromium"):
             // three notches down over the page, 120 a notch with 15 host pixels each.
             manager.activate(id);
             QTRY_VERIFY(client->hasActiveFocus());
@@ -3025,7 +3025,7 @@ class NativeTests : public QObject
     }
     void menusHangingPastTheirWindowStillTakeClicks()
     {
-        // psn_tch, 2026-10-31: Konsole's ☰ menu hangs below its window, and a click on that part went to
+        // Lily Hewitt, 2026-10-31: Konsole's ☰ menu hangs below its window, and a click on that part went to
         // the desktop: Konsole was deactivated, its menu closed and Configure Konsole never opened.
         // Qt Quick had cached that the frame's children lay within it before the menu existed.
         NativeScene scene;
@@ -3088,7 +3088,7 @@ class NativeTests : public QObject
     }
     void touchpadScrollingAndTouchscreenReachApplications()
     {
-        // psn_tch's touchpad scrolls with two fingers in small fractional steps, and their panel is a
+        // Lily Hewitt's touchpad scrolls with two fingers in small fractional steps, and their panel is a
         // touchscreen. Scrolling is real host input from the owned headless Sway through
         // wlr-virtual-pointer; touches are the desktop window's own touch events.
         NativeScene scene;
@@ -3877,7 +3877,7 @@ class NativeTests : public QObject
         QTRY_COMPARE(QDBusReply<int>(api.call("Width")).value(),scene.view.width());
         api.call("SetFullScreen",false);
         QTRY_VERIFY(!first(manager,"Native Probe X11").value("fullScreen").toBool());
-        // An X11 minimize button (Steam's could not minimize: psn_tch, 2026-10-22) hides the
+        // An X11 minimize button (Steam's could not minimize: Lily Hewitt, 2026-10-22) hides the
         // application, as Hide does; activating it shows the window again.
         api.call("Minimize");
         QTRY_VERIFY(!first(manager,"Native Probe X11").value("visible").toBool());
@@ -6079,7 +6079,7 @@ class NativeTests : public QObject
     }
     void titleBarBoxesPressInAndCancelWhenDraggedOff()
     {
-        // Mac OS 9.2.2 tracking (psn_tch, 2026-10-22): a box is drawn pressed in only while held over
+        // Mac OS 9.2.2 tracking (Lily Hewitt, 2026-10-22): a box is drawn pressed in only while held over
         // it, and acts only when released over it.
         NativeScene scene;
         QVERIFY(scene.show());
@@ -6118,7 +6118,7 @@ class NativeTests : public QObject
     }
     void tripleClickingTheTitleBarFillsTheScreenAndBack()
     {
-        // psn_tch, 2026-10-23: two clicks on the title bar are WindowShade (at once, as before); a
+        // Lily Hewitt, 2026-10-23: two clicks on the title bar are WindowShade (at once, as before); a
         // third fills the screen below the menu bar; three again put the window back.
         NativeScene scene;
         QVERIFY(scene.show());
@@ -6163,7 +6163,7 @@ class NativeTests : public QObject
     }
     void aClickOnAWindowClosesAnOpenMenuAndGoesNoFurther()
     {
-        // psn_tch, 2026-10-23: a Control Strip menu stayed open until something was chosen when the
+        // Lily Hewitt, 2026-10-23: a Control Strip menu stayed open until something was chosen when the
         // click outside it landed on a window. As in Mac OS 9, the click only closes the menu.
         NativeScene scene;
         QVERIFY(scene.show());
@@ -6204,7 +6204,7 @@ class NativeTests : public QObject
     }
     void theHandheldModuleOffersHandheldDaemonsChoices()
     {
-        // psn_tch, 2026-10-23: a Control Strip module for Handheld Daemon with real options, not
+        // Lily Hewitt, 2026-10-23: a Control Strip module for Handheld Daemon with real options, not
         // just a way to open its app. A fake hhd serves what a OneXPlayer G1 reports.
         QTemporaryDir fixture;
         QFile token(fixture.filePath("token"));
@@ -6254,7 +6254,7 @@ class NativeTests : public QObject
     }
     void theBuiltInControllerTurnsOnAndOffFromTheStripAndControlPanels()
     {
-        // psn_tch, 2026-11-06: games made the built-in controller player 1 with an external one
+        // Lily Hewitt, 2026-11-06: games made the built-in controller player 1 with an external one
         // plugged in. The Handheld module and the Handheld control panel turn it off (hhd's
         // Hidden mode) and on again. A fake hhd serves a OneXPlayer G1, its controller Hidden.
         QTemporaryDir fixture;
@@ -6358,7 +6358,7 @@ class NativeTests : public QObject
     }
     void fixedSizeWindowsTooBigForTheScreenAreShownFullScreen()
     {
-        // psn_tch, 2026-10-22 (Daggerfall Unity's launcher): a window whose client fixed its size too
+        // Lily Hewitt, 2026-10-22 (Daggerfall Unity's launcher): a window whose client fixed its size too
         // big to show framed below the menu bar is full screen, and stays so if the client asks to
         // leave; a fixed window that fits is framed as before.
         NativeScene scene;
@@ -6395,7 +6395,7 @@ class NativeTests : public QObject
     }
     void lateActivationRequestsDoNotCoverANewerWindow()
     {
-        // psn_tch, 2026-10-22: Firefox's second download window opened behind everything. Closing the
+        // Lily Hewitt, 2026-10-22: Firefox's second download window opened behind everything. Closing the
         // first, Firefox asked to bring its main window back; that request arrived after the next
         // window had come forward, and covered it. A request now counts only while the keyboard
         // focus it was made under lasts.
@@ -6443,7 +6443,7 @@ class NativeTests : public QObject
     }
     void windowsSizedForAMonitorThatLeftShrinkToTheOneThatRemains()
     {
-        // psn_tch, 2026-10-22: a window made big on the external monitor, unplugged, could not be
+        // Lily Hewitt, 2026-10-22: a window made big on the external monitor, unplugged, could not be
         // resized: its resize box was off the built-in display. It now shrinks to fit there.
         NativeScene scene;
         QVERIFY(scene.show());
@@ -7098,7 +7098,7 @@ class NativeTests : public QObject
     }
     void screenshotKeysWorkWhileAnApplicationHasTheKeyboard()
     {
-        // psn_tch, 2026-11-02: the screenshot keys did nothing in daily use, where an application
+        // Lily Hewitt, 2026-11-02: the screenshot keys did nothing in daily use, where an application
         // (Firefox, Konsole) has the keyboard; the gate pressed them only on the desktop.
         NativeScene scene;
         QVERIFY(scene.show());
@@ -7136,7 +7136,7 @@ class NativeTests : public QObject
         nativeKeyEvent(&scene.view, QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier, 1);
         nativeKeyEvent(&scene.view, QEvent::KeyRelease, Qt::Key_Escape, Qt::NoModifier, 1);
         QTRY_VERIFY(!area->isVisible());
-        // Command-Shift-P shows the same crosshair (psn_tch, 2026-11-04), and the application
+        // Command-Shift-P shows the same crosshair (Lily Hewitt, 2026-11-04), and the application
         // gets neither the letter nor the chord.
         commandShiftKey(&scene.view, Qt::Key_P, 25);
         QTRY_VERIFY(area->isVisible());
@@ -7505,7 +7505,7 @@ class NativeTests : public QObject
     }
     void shiftedCommandChordsFromARealKeyboardReachTheDesktop()
     {
-        // psn_tch, 2026-11-02: Command-Shift-3/4 did nothing on her keyboard. Real key events carry
+        // Lily Hewitt, 2026-11-02: Command-Shift-3/4 did nothing on her keyboard. Real key events carry
         // the layout, so Qt offers every spelling (Command-Shift-3 and Command-#); two of a
         // Shortcut's sequences matched and Qt reported it as ambiguous instead of activating it.
         // QTest's keys have no layout and matched once, so this types through the owned host Sway's
@@ -7829,7 +7829,7 @@ class NativeTests : public QObject
     }
     void controlAndCommandCopyAndPasteFromARealKeyboard()
     {
-        // psn_tch, 2026-11-05: Control-C and Control-V stopped working (right-click Copy and
+        // Lily Hewitt, 2026-11-05: Control-C and Control-V stopped working (right-click Copy and
         // Paste still did). Through the host keyboard, as she types: Control chords as Linux
         // applications know them, then the Command (Super) chords the desktop translates.
         NativeScene scene;
@@ -7875,7 +7875,7 @@ class NativeTests : public QObject
     }
     void firefoxControlAndCommandCopyAndPasteFromARealKeyboard()
     {
-        // The same chords in Firefox, which psn_tch types in most: a text area whose value
+        // The same chords in Firefox, which Lily Hewitt types in most: a text area whose value
         // the page title shows.
         if (!QFileInfo::exists("/usr/lib/firefox/firefox"))
             QSKIP("This browser workflow needs the installed Firefox.");
@@ -8068,7 +8068,7 @@ class NativeTests : public QObject
         QCOMPARE(manager.rowCount(), 2);
         QCOMPARE(QDBusReply<int>(apiB.call("CloseRequests")).value(), 0);
         QVERIFY(QDBusReply<void>(apiA.call("VetoClose", false)).isValid());
-        // Super is psn_tch's Command key (D06); Alt+Q above remains their earlier alias.
+        // Super is Lily Hewitt's Command key (D06); Alt+Q above remains their earlier alias.
         commandKey(&scene.view, Qt::Key_Q, 16);
         QTRY_COMPARE(a.state(), QProcess::NotRunning);
         QVERIFY(first(manager, "Native Probe ShortcutsA").isEmpty());
@@ -8195,7 +8195,7 @@ class NativeTests : public QObject
     {
         QTest::addColumn<bool>("normalSettings");
         QTest::newRow("owned profile") << false;
-        // psn_tch's own profile under normal application settings: no Platinum styling at all.
+        // Lily Hewitt's own profile under normal application settings: no Platinum styling at all.
         QTest::newRow("normal profile") << true;
     }
     void firefoxUsesClassicFrameControls()
@@ -8449,7 +8449,7 @@ class NativeTests : public QObject
                     ? scene.view.activeFocusItem()->metaObject()->className() : "none");
         qInfo() << "Browser key counts: item presses" << keyCounter.presses << "wire events" << wireKeys;
         QTRY_VERIFY(browserWindow().value("title").toString().startsWith("Typed platinum"));
-        // psn_tch (2026-10-20): clicking away and back moved their Firefox. Neither the frame nor
+        // Lily Hewitt (2026-10-20): clicking away and back moved their Firefox. Neither the frame nor
         // the page inside it may move when the window loses or regains focus.
         const auto framePosition = frame->position();
         const auto contentArea = client->mapRectToScene(client->boundingRect());
@@ -8605,6 +8605,107 @@ class NativeTests : public QObject
         }
     }
 #endif
+    void finderPopUpWindowsOpenFromTabsAtTheScreenBottom()
+    {
+        // Lily Hewitt, 2026-11-09: pop-up folder windows, measured in the 9.2.2 reference VM.
+        NativeScene scene;
+        auto &manager = *scene.manager;
+        QVERIFY(scene.show());
+        const auto folder = scene.files.path() + "/Apple Extras";
+        QVERIFY(QDir().mkpath(folder + "/Inside"));
+        const auto service =
+            "org.frankenstein.Finder.p" +
+            QString::fromLatin1(QCryptographicHash::hash(
+                                    (scene.files.path() + "\n" + scene.files.path() + "/profile").toUtf8(),
+                                    QCryptographicHash::Sha256).toHex().left(24));
+        manager.launchFinder(folder);
+        QTRY_COMPARE(manager.rowCount(), 1);
+        QDBusInterface finder(service, "/Finder", "org.frankenstein.Finder");
+        QTRY_VERIFY(finder.isValid());
+        qulonglong id = 0;
+        QTRY_VERIFY((id = [&]() -> qulonglong {
+            const auto wireId = QDBusReply<QVariantMap>(finder.call("DirectoryState", folder)).value().value("surfaceId").toUInt();
+            for (const auto &value : manager.snapshot().value("windows").toList())
+                if (wireId && value.toMap().value("surfaceId").toUInt() == wireId)
+                    return value.toMap().value("id").toULongLong();
+            return 0;
+        }()));
+        // Right of the Control Strip, which covers a closed tab beneath it (as in 9.2.2).
+        manager.moveWindow(id, 560, 120);
+        manager.resizeWindow(id, 300, 260);
+        auto *window = manager.findChild<ManagedWindow *>(QString(), Qt::FindDirectChildrenOnly);
+        for (auto *candidate : manager.findChildren<ManagedWindow *>())
+            if (candidate->id() == id) window = candidate;
+        QVERIFY(window && window->id() == id);
+        QTRY_VERIFY(window->width() == 300 && window->height() == 260 && window->x() == 560);
+        QVERIFY(window->canPopUp());
+        const auto screen = manager.primaryDisplayRect();
+        // Frame: tab and edge 23, grip strip 13, bottom edge 4.
+        const auto standsOnBottom = [&] { return window->y() + window->height() + 40 == screen.bottom() + 1; };
+        // View ▸ as Pop-up Window: open, active, on the bottom of the screen, a tab for a title bar.
+        QVERIFY(manager.setPopUp(id, true));
+        QTRY_VERIFY(window->isPopUpOpen() && window->active() && standsOnBottom());
+        QCOMPARE(window->x(), 560);
+        auto *tab = visualItem(scene.view.contentItem(), "pop-up-tab-" + QString::number(id));
+        auto *client = visualItem(scene.view.contentItem(), "client-" + QString::number(id));
+        QVERIFY(tab && client);
+        QTRY_VERIFY(tab->isVisible() && client->isVisible());
+        QCOMPARE(tab->mapToScene({0, 0}).toPoint(), QPoint(560, window->y()));
+        QVERIFY(!visualItem(scene.view.contentItem(), "title-bar-" + QString::number(id))->isVisible());
+        QVERIFY(capture(scene.view, "native-popup-open.png"));
+        const auto tabCentre = [&] { return tab->mapToScene({30, 10}).toPoint(); };
+        // A click on the tab closes it: only the tab, on the bottom edge, and the desktop is active.
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, tabCentre());
+        QTRY_VERIFY(!window->isPopUpOpen() && manager.desktopActive());
+        QTRY_VERIFY(!client->isVisible());
+        QTRY_COMPARE(tab->mapToScene({0, 20}).toPoint(), QPoint(560, screen.bottom() + 1));
+        QVERIFY(capture(scene.view, "native-popup-closed.png"));
+        // Again: it opens. A click on the desktop elsewhere closes it.
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, tabCentre());
+        QTRY_VERIFY(window->isPopUpOpen() && window->active() && client->isVisible());
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, QPoint(900, 200));
+        QTRY_VERIFY(!window->isPopUpOpen());
+        // Dragged along the bottom, the tab moves; it opens there.
+        auto from = tabCentre();
+        QTest::mousePress(&scene.view, Qt::LeftButton, {}, from);
+        QTest::mouseMove(&scene.view, from + QPoint(60, 0), 20);
+        QTest::mouseMove(&scene.view, from + QPoint(150, 0), 20);
+        QTest::mouseRelease(&scene.view, Qt::LeftButton, {}, from + QPoint(150, 0));
+        QTRY_COMPARE(window->popUpTabX(), 710);
+        QVERIFY(!window->isPopUpOpen());
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, tabCentre());
+        QTRY_VERIFY(window->isPopUpOpen() && window->x() == 710 && standsOnBottom());
+        // The right grip: dragged up and right, the window grows upward and wider, still standing
+        // on the bottom of the screen.
+        auto *grip = visualItem(scene.view.contentItem(), "pop-up-grip-right-" + QString::number(id));
+        QVERIFY(grip && grip->isVisible());
+        from = grip->mapToScene({6, 5}).toPoint();
+        QTest::mousePress(&scene.view, Qt::LeftButton, {}, from);
+        QTest::mouseMove(&scene.view, from + QPoint(20, -20), 20);
+        QTest::mouseMove(&scene.view, from + QPoint(40, -50), 20);
+        QTest::mouseRelease(&scene.view, Qt::LeftButton, {}, from + QPoint(40, -50));
+        QTRY_VERIFY(window->width() == 340 && window->height() == 310 && standsOnBottom());
+        QCOMPARE(window->x(), 710);
+        // The tab dragged up and away: a regular window again, its frame where the tab went.
+        from = tabCentre();
+        QTest::mousePress(&scene.view, Qt::LeftButton, {}, from);
+        QTest::mouseMove(&scene.view, from + QPoint(0, -30), 20);
+        QTest::mouseMove(&scene.view, from + QPoint(-50, -200), 20);
+        QTest::mouseRelease(&scene.view, Qt::LeftButton, {}, from + QPoint(-50, -200));
+        QTRY_VERIFY(!window->isPopUp() && window->active() && client->isVisible());
+        QTRY_VERIFY(visualItem(scene.view.contentItem(), "title-bar-" + QString::number(id))->isVisible());
+        QTRY_COMPARE(QPoint(window->x(), window->y()), QPoint(660, from.y() - 200 - 10));
+        // A title bar dragged to the very bottom of the screen: a pop-up again.
+        auto *title = visualItem(scene.view.contentItem(), "title-bar-" + QString::number(id));
+        from = title->mapToScene({120, 9}).toPoint();
+        QTest::mousePress(&scene.view, Qt::LeftButton, {}, from);
+        QTest::mouseMove(&scene.view, QPoint(from.x(), screen.bottom() - 100), 20);
+        QTest::mouseMove(&scene.view, QPoint(from.x(), screen.bottom()), 20);
+        QTest::mouseRelease(&scene.view, Qt::LeftButton, {}, QPoint(from.x(), screen.bottom()));
+        QTRY_VERIFY(window->isPopUp() && window->isPopUpOpen() && standsOnBottom());
+        // Only the Finder's own windows, and only this Finder's.
+        QVERIFY(!manager.popUpForSurface(1, 1, 1));
+    }
     void desktopFilesDropIntoExactFinderWindowsAndChildFolders()
     {
         NativeScene scene;
@@ -8833,7 +8934,7 @@ class NativeTests : public QObject
     }
     void finderCopiesPastesAndDragsBetweenIconWindowsWithHostInput()
     {
-        // psn_tch, 2026-10-29: "cant copy paste cant drag files from one to another". Everything
+        // Lily Hewitt, 2026-10-29: "cant copy paste cant drag files from one to another". Everything
         // here uses the host's own pointer (wlr-virtual-pointer through the owned Sway) and the
         // Command key, as a person does, on two Finder windows in icon view.
         NativeScene scene;

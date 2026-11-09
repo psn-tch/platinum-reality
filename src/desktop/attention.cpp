@@ -20,7 +20,7 @@ struct ApplicationAttention::State
         QElapsedTimer age;
         // An application's token is good only while the keyboard focus it was issued under
         // lasts: closing a dialog, Firefox asked to bring its main window back, and that late
-        // request then covered the next dialog (psn_tch, 2026-10-22). The desktop's own tokens (a
+        // request then covered the next dialog (Lily Hewitt, 2026-10-22). The desktop's own tokens (a
         // notification's action) are not tied to focus.
         bool focusBound = false;
         QPointer<QWaylandSurface> focus;

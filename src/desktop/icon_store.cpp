@@ -40,8 +40,14 @@ void ensureIconTheme()
     const auto config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
     const QSettings kde(config + "/kdeglobals", QSettings::IniFormat);
     candidates << kde.value("Icons/Theme").toString() << "breeze" << "Adwaita";
+    // Without XDG_DATA_DIRS (an Arch login outside Plasma) Qt searches only its own resources,
+    // and no theme was found: the Apple menu and other menus had no icons (Lily Hewitt 2026-11-09).
     QStringList roots = QIcon::themeSearchPaths();
     roots << QDir::homePath() + "/.local/share/icons" << QDir::homePath() + "/.icons";
+    for (const auto &data : QStandardPaths::standardLocations(QStandardPaths::GenericDataLocation))
+        roots << data + "/icons";
+    roots << "/usr/local/share/icons" << "/usr/share/icons";
+    roots.removeDuplicates();
     for (const auto &theme : candidates)
     {
         if (theme.isEmpty() || theme.contains('/'))

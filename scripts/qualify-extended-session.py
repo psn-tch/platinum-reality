@@ -184,7 +184,7 @@ with tempfile.TemporaryDirectory(prefix='platinum-extended-check-') as temporary
                 child.terminate()
                 child.wait(timeout=20)
             (evidence/'manifest.json').write_text(json.dumps(record,indent=2)+'\n')
-    # A third session: psn_tch's 2026-10-22 login. KDE kept the only enabled monitor at x=696 because
+    # A third session: Lily Hewitt's 2026-10-22 login. KDE kept the only enabled monitor at x=696 because
     # the disabled laptop panel sat at the origin. Sway draws the global-fullscreen desktop from
     # the layout origin, so before the fix the right 696 columns were black.
     (fixture/'config'/'kwinoutputconfig.json').write_text(json.dumps([

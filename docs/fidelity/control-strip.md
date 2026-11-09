@@ -1,6 +1,6 @@
 # Control Strip — Mac OS 9.2.2 reference measurements
 
-Measured 2026-11-08 by Sammy in a `-snapshot` clone of psn_tch's clean 9.2.2 install
+Measured 2026-11-08 by Sammy in a `-snapshot` clone of Lily Hewitt's clean 9.2.2 install
 (QEMU mac99, 640x480, millions of colours), by reading screen pixels. This file holds
 numbers and descriptions only. No Apple screenshots or artwork are in Git; the raw
 captures stay in `build/fidelity/` (gitignored).
@@ -87,7 +87,7 @@ All values in screen pixels; x from the screen edge, y from the strip's top.
 - 2026-11-08: the Asset Importer (`scripts/import-macos9-assets.py`) also reads the user's
   `Control Strip Modules` and writes 16 px icons for Sound Volume, SoundSource and Energy
   Settings to `assets/icons/control-strip/`; the strip shows them in place of our drawings.
-  On psn_tch's 9.2.2 disk the three imported icons match the strip capture pixel for pixel.
+  On Lily Hewitt's 9.2.2 disk the three imported icons match the strip capture pixel for pixel.
 - Not yet: our own module icons are drawn at 16 px on our 16-unit grid (no Apple art); per-module widths other than 30; the active arrow colours
   (assumed black outline, white fill; not yet captured); the slider's exact value scale (the
   thumb travels 46 px; 9.2.2's 8 volume steps not yet mapped).
@@ -111,7 +111,7 @@ the slider stays continuous (0-100) until a capture from real hardware or a VM w
 
 ## Printer Selector (added 2026-11-08)
 
-From the module's own resources on psn_tch's 9.2.2 disk (read from a reflink clone with 7-Zip):
+From the module's own resources on Lily Hewitt's 9.2.2 disk (read from a reflink clone with 7-Zip):
 MENU 256 holds the single item "No Desktop Printers"; STR# 256's help text says "To change your
 default desktop printer, click here and choose another desktop printer." The live menu lists the
 desktop printers with the default checked (not captured: the reference has no printers). Ours:

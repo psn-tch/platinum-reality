@@ -22,5 +22,5 @@ What you get
 
 Made with AI
 
-Platinum Reality was designed by psn_tch and written with the help of AI coding
+Platinum Reality was designed by Lily Hewitt and written with the help of AI coding
 assistants. It is free software under the MIT License; see the next page.

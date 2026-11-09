@@ -4,7 +4,7 @@ Source: `src/desktop/attention.*`, wired in `NativeManager`, with the Applicatio
 `Desktop.qml`. These protocols aren't in Qt's compositor, so they are implemented directly
 with libwayland, like the appmenu bridge.
 
-## Mac OS 9.2.2 (checked in psn_tch's 9.2.2 VM)
+## Mac OS 9.2.2 (checked in Lily Hewitt's 9.2.2 VM)
 
 - The Application menu marks an application that wants attention with **◆** (Notification
   Manager), next to the ✓ of the active one.

@@ -29,7 +29,7 @@ class HandheldDaemon final : public QObject
     // {controller, tdp, boost, fan, chargeLimit}: each {key, value, ...} and present only when
     // hhd offers it. controller/fan/chargeLimit carry options [{value, title}]; tdp has min, max.
     Q_PROPERTY(QVariantMap state READ state NOTIFY changed)
-    // The built-in controller On or Off (psn_tch, 2026-11-06: with an external controller plugged
+    // The built-in controller On or Off (Lily Hewitt, 2026-11-06: with an external controller plugged
     // in, games should make that one player 1). Off is hhd's Hidden mode, which hides the built-in
     // controller from games; On goes back to the mode it had before (Xbox when that's unknown).
     Q_PROPERTY(bool controllerSwitchable READ controllerSwitchable NOTIFY changed)

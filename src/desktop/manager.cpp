@@ -186,6 +186,16 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
                                             audible ? QString("/usr/bin/pw-play") : QString(),
                                             [alerts] { return alerts->volume(); }, this);
     connect(m_appearance, &AppearanceSettings::errorOccurred, this, &NativeManager::errorOccurred);
+    // General Controls ▸ Menu Bar Size: the bar the desktop draws and the space windows keep clear.
+    const auto updateMenuBarHeight = [this] {
+        const int height = qRound(platinumMenuBarBaseHeight * m_appearance->general().value("barSize").toInt() / 100.0);
+        if (height == platinumMenuBarHeight)
+            return;
+        platinumMenuBarHeight = height;
+        emit menuBarHeightChanged();
+    };
+    connect(m_appearance, &AppearanceSettings::changed, this, updateMenuBarHeight);
+    updateMenuBarHeight();
     m_catalog = new ApplicationCatalog(std::move(applicationDirectories), m_workspace, m_profile,
                                        QCoreApplication::applicationDirPath(), this);
     connect(m_catalog, &ApplicationCatalog::refreshed, this, &NativeManager::drainDocumentRequests);
@@ -1133,7 +1143,26 @@ QUrl NativeManager::applicationIcon(QString identity, int size) const
         {"shell:calculator", {"calculator", "accessories-calculator"}},
         {"shell:key-caps", {"key-caps", "input-keyboard"}},
         {"shell:note-pad", {"note-pad", "accessories-text-editor"}},
-        {"shell:scrapbook", {"scrapbook", "edit-paste"}}
+        {"shell:scrapbook", {"scrapbook", "edit-paste"}},
+        // The Apple menu's other items (Lily Hewitt 2026-11-09: it had no icons). Folders and each
+        // control panel take an imported icon of that name when there is one, else the theme's.
+        {"shell:folder", {"folder", "folder"}},
+        {"shell:asset-importer", {"asset-importer", "document-import"}},
+        {"shell:puzzle", {"puzzle", "applications-games"}},
+        {"shell:sticky-notes", {"stickies", "knotes"}},
+        {"shell:terminal", {"terminal", "utilities-terminal"}},
+        {"shell:appearance", {"appearance", "preferences-desktop-theme"}},
+        {"shell:bluetooth", {"bluetooth", "preferences-system-bluetooth"}},
+        {"shell:date-time", {"date-time", "preferences-system-time"}},
+        {"shell:desktop-picture", {"desktop-picture", "preferences-desktop-wallpaper"}},
+        {"shell:energy", {"energy-saver", "preferences-system-power-management"}},
+        {"shell:keyboard", {"keyboard", "input-keyboard"}},
+        {"shell:monitors", {"monitors", "preferences-desktop-display"}},
+        {"shell:mouse", {"mouse", "input-mouse"}},
+        {"shell:network", {"network", "preferences-system-network"}},
+        {"shell:quick-controls", {"quick-controls", "preferences-system"}},
+        {"shell:software-update", {"software-update", "system-software-update"}},
+        {"shell:sound", {"sound", "preferences-desktop-sound"}}
     };
     QImage image;
     const auto known = classic.constFind(identity);
@@ -1297,7 +1326,7 @@ void NativeManager::createWindow(QWaylandXdgToplevel *top, QWaylandXdgSurface *x
             record->identity = {++m_nextWindow};
             record->top = top;
             record->xdg = xdg;
-            // Every Firefox gets the Platinum frame. With normal application settings (psn_tch,
+            // Every Firefox gets the Platinum frame. With normal application settings (Lily Hewitt,
             // 2026-10-20) their own profile otherwise drew its own title bar: no Platinum title
             // bar or resize box, and its shadow moved the window when focus changed.
             record->classicBrowserFrame = firefoxClient(liveSurfaceClientPid(xdg->surface()));
@@ -1568,6 +1597,12 @@ void NativeManager::synchronize()
         record->visible = !m_state.applications.at(it->second.application).hidden;
         record->shadeAllowed = it->second.shade_eligible;
         record->selected = m_state.active.window == record->identity;
+        if (record->popUpWindow)
+        {
+            record->popUpShown = record->selected;
+            if (record->popUpShown && popUpPosition(record) != QPoint(record->x(), record->y()))
+                QTimer::singleShot(0, this, [this, id = record->id()] { placePopUp(find(id)); });
+        }
         if (record->top && liveSurfaceClientPid(record->xdg ? record->xdg->surface() : nullptr) &&
             record->configuredActive != record->selected)
         {
@@ -1707,6 +1742,112 @@ void NativeManager::setShadeInMotion(qulonglong id, bool running)
         window->fillPending = false;
         fillScreen(id);
     }
+}
+// The frame around a pop-up's content: 3 px each side, the 20 px tab and its 3 px edge above
+// (where a title bar would be), the 13 px grip strip, and 4 px below.
+QPoint NativeManager::popUpPosition(const ManagedWindow *w) const
+{
+    const auto screen = w->popUpArea;
+    const int top = screen.y() + (screen.contains(effectiveDisplayLayout().primaryRect().topLeft())
+                                      ? platinumMenuBarHeight : 0);
+    const int x = std::clamp(w->tabX, screen.x(), std::max(screen.x(), screen.right() + 1 - (w->width() + 6)));
+    return {x, std::max(top, screen.bottom() + 1 - (w->height() + 27 + 13))};
+}
+void NativeManager::placePopUp(ManagedWindow *w)
+{
+    if (!w || !w->popUpWindow || shellModal())
+        return;
+    const auto at = popUpPosition(w);
+    if (at != QPoint(w->x(), w->y()))
+        dispatch(SetPosition{w->identity, {at.x(), at.y()}});
+}
+bool NativeManager::setPopUp(qulonglong id, bool popUp)
+{
+    auto *w = find(id);
+    if (!w || shellModal() || w->shadeInMotion || (popUp && !w->canPopUp()))
+        return false;
+    if (w->popUpWindow == popUp)
+        return true;
+    if (w->collapsed())
+        dispatch(SetCollapsed{{id}, false});
+    w->popUpWindow = popUp;
+    w->popUpShown = false;
+    if (popUp)
+    {
+        w->popUpArea = windowScreen(w);
+        w->tabX = w->x();
+    }
+    emit w->changed();
+    // It opens where it is: active, standing on the bottom of its screen.
+    activate(id);
+    if (popUp)
+        placePopUp(w);
+    else
+        moveWindow(id, w->x(), w->y());
+    synchronize();
+    return true;
+}
+void NativeManager::togglePopUp(qulonglong id)
+{
+    auto *w = find(id);
+    if (!w || !w->popUpWindow || shellModal())
+        return;
+    if (w->popUpShown)
+    {
+        activateDesktop();
+        return;
+    }
+    activate(id);
+    placePopUp(w);
+}
+bool NativeManager::dropAtScreenBottom(qulonglong id, QPointF pointer)
+{
+    auto *w = find(id);
+    if (!w || !w->canPopUp() || w->popUpWindow)
+        return false;
+    const auto screen = effectiveDisplayLayout().screenForWindow(QRect(pointer.toPoint(), QSize(1, 1)));
+    if (!screen.contains(pointer.toPoint()) || pointer.y() < screen.bottom() - 2)
+        return false;
+    return setPopUp(id, true);
+}
+void NativeManager::movePopUpTab(qulonglong id, int x)
+{
+    auto *w = find(id);
+    if (!w || !w->popUpWindow || shellModal())
+        return;
+    const auto screen = w->popUpArea;
+    w->tabX = std::clamp(x, screen.x(), std::max(screen.x(), screen.right() + 1 - 40));
+    emit w->changed();
+    if (w->popUpShown)
+        placePopUp(w);
+}
+void NativeManager::releasePopUp(qulonglong id, int x, int y)
+{
+    auto *w = find(id);
+    if (!w || !w->popUpWindow || !setPopUp(id, false))
+        return;
+    moveWindow(id, x, y);
+}
+void NativeManager::resizePopUp(qulonglong id, int x, int width, int height)
+{
+    auto *w = find(id);
+    if (!w || !w->popUpShown)
+        return;
+    w->tabX = x;
+    resizeWindow(id, width, height);
+    placePopUp(w);
+}
+bool NativeManager::popUpForSurface(uint pid, uint surfaceId, int request)
+{
+    for (auto *w : m_windows)
+    {
+        auto *surface = w->xdg ? w->xdg->surface() : nullptr;
+        if (!surface || !surface->resource() || wl_resource_get_id(surface->resource()) != surfaceId ||
+            liveSurfaceClientPid(surface) != qint64(pid))
+            continue;
+        return request < 0 ? w->popUpWindow : setPopUp(w->id(), request > 0);
+    }
+    return false;
 }
 QVariantList NativeManager::displayOutputs() const
 {
@@ -1921,7 +2062,7 @@ void NativeManager::setDisplayLayout(const DisplayLayout &layout)
             window->restoreNeedsRescue=true;
         if(reachable!=position) position=layout.reachablePosition(position,size,true);
         // A window sized for a bigger monitor that went away shrinks to the one it is now on, as
-        // new windows are fitted, with its title bar and resize box on screen (psn_tch, 2026-10-22).
+        // new windows are fitted, with its title bar and resize box on screen (Lily Hewitt, 2026-10-22).
         if(!window->fullScreen && window->top && window->canResize()) {
             const auto screen=layout.screenForWindow(QRect(position,size));
             const auto fit=boundedContentSize(size.boundedTo(QSize(screen.width()-12,screen.height()-60)),
@@ -2146,7 +2287,7 @@ void NativeManager::setFullScreen(ManagedWindow *w, bool fullScreen, QWaylandOut
         return;
     if (m_state.move && m_state.move->window == w->identity)
         finishWindowMove(w->id(), false);
-    // Too big to show framed (psn_tch, 2026-10-22: such windows open full screen); a request to
+    // Too big to show framed (Lily Hewitt, 2026-10-22: such windows open full screen); a request to
     // leave full screen keeps it there while the window cannot fit.
     if (!fullScreen && oversizedFixedWindow(w))
         fullScreen = true;

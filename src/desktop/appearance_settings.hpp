@@ -21,7 +21,7 @@ class AppearanceSettings final : public QObject
     Q_PROPERTY(QUrl wallpaper READ wallpaper NOTIFY changed)
     Q_PROPERTY(QString wallpaperPath READ wallpaperPath NOTIFY changed)
     Q_PROPERTY(QString wallpaperLayout READ wallpaperLayout NOTIFY changed)
-    // A picture of its own for a monitor (psn_tch, 2026-11-06), by output name ("DP-2"):
+    // A picture of its own for a monitor (Lily Hewitt, 2026-11-06), by output name ("DP-2"):
     // {name: {path, layout, url}}; path "" is the solid desktop colour there. Every other monitor
     // shows the desktop picture above, each monitor its own copy, never one spread across them.
     Q_PROPERTY(QVariantMap monitorPictures READ monitorPictures NOTIFY changed)
@@ -45,7 +45,8 @@ class AppearanceSettings final : public QObject
     Q_PROPERTY(QVariantMap clock READ clock NOTIFY changed)
     // General Controls (9.2.2): {showDesktop (the desktop's icons while another application is in
     // front), menuBlinks (times a chosen menu item blinks, 0-3), caretBlink (0 slow, 1 medium,
-    // 2 fast)}.
+    // 2 fast), barSize (the menu bar, its menus and the Control Strip, 100-150 percent; not in
+    // 9.2.2, Lily Hewitt's request 2026-11-09)}.
     Q_PROPERTY(QVariantMap general READ general NOTIFY changed)
     // The insertion point's full on-and-off cycle in milliseconds, from caretBlink.
     Q_PROPERTY(int caretFlashTime READ caretFlashTime NOTIFY changed)
@@ -170,6 +171,7 @@ class AppearanceSettings final : public QObject
     // As 9.2.2 ships: the desktop shown, menus blink three times, medium insertion point.
     bool m_showDesktop = true;
     int m_menuBlinks = 3, m_caretBlink = 1;
+    int m_barSize = 100;
     bool m_switcherVisible = false;
     int m_switcherX = 0, m_switcherY = 0;
     QMap<QString, bool> m_clock{{"visible", true}, {"hours24", false}, {"seconds", false},

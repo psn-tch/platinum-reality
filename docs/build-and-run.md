@@ -182,7 +182,7 @@ certified Mac OS 9.2.2. No proprietary assets are needed.
 The seventh native workflow uses actual Finder icon/list views: right-click a
 background folder, drag to the desktop, Option-copy, Escape-cancel, preserve a
 name collision, move between folder windows and duplicate from the desktop
-context menu. This workflow and the eighth desktop-to-folder-window workflow passed in psn_tch's
+context menu. This workflow and the eighth desktop-to-folder-window workflow passed in Lily Hewitt's
 graphical terminal. The eighth now also checks marquee selection and a group
 transfer; that extension passed the 11:09 complete native run.
 Native execution remains unavailable in the socket-restricted executor. The private `frankenstein-drop-receiver` executable is a build dependency;

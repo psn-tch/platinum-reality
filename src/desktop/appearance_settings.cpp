@@ -165,6 +165,8 @@ AppearanceSettings::AppearanceSettings(QString profile, QObject *parent)
         m_menuBlinks = blinks;
     if (const auto caret = general.value("caretBlink").toInt(-1); caret >= 0 && caret <= 2)
         m_caretBlink = caret;
+    if (const auto size = general.value("barSize").toInt(-1); size >= 100 && size <= 150 && size % 5 == 0)
+        m_barSize = size;
     const auto switcher = object.value("switcher").toObject();
     if (const auto x = switcher.value("x").toInt(-1), y = switcher.value("y").toInt(-1);
         switcher.value("visible").isBool() && x >= 0 && x <= 65536 && y >= 0 && y <= 65536)
@@ -211,7 +213,8 @@ bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x,
                                                  {"clock", clock},
                                                  {"general", QJsonObject{{"showDesktop", m_showDesktop},
                                                                          {"menuBlinks", m_menuBlinks},
-                                                                         {"caretBlink", m_caretBlink}}},
+                                                                         {"caretBlink", m_caretBlink},
+                                                                         {"barSize", m_barSize}}},
                                                  {"switcher", QJsonObject{{"visible", m_switcherVisible},
                                                                           {"x", m_switcherX},
                                                                           {"y", m_switcherY}}}})
@@ -298,7 +301,8 @@ bool AppearanceSettings::setClockOption(QString key, bool on)
 }
 QVariantMap AppearanceSettings::general() const
 {
-    return {{"showDesktop", m_showDesktop}, {"menuBlinks", m_menuBlinks}, {"caretBlink", m_caretBlink}};
+    return {{"showDesktop", m_showDesktop}, {"menuBlinks", m_menuBlinks}, {"caretBlink", m_caretBlink},
+            {"barSize", m_barSize}};
 }
 QColor AppearanceSettings::highlightColor() const
 {
@@ -364,17 +368,18 @@ void AppearanceSettings::applyCaretFlash() const
 bool AppearanceSettings::setGeneralOption(QString key, QVariant value)
 {
     const auto number = value.toInt();
+    const bool whole = value.typeId() != QMetaType::Bool && value.canConvert<int>() && value.toDouble() == number;
     const bool valid = key == "showDesktop" ? value.typeId() == QMetaType::Bool
-                     : (key == "menuBlinks" || key == "caretBlink") && value.typeId() != QMetaType::Bool &&
-                           value.canConvert<int>() && value.toDouble() == number &&
+                     : key == "barSize" ? whole && number >= 100 && number <= 150 && number % 5 == 0
+                     : (key == "menuBlinks" || key == "caretBlink") && whole &&
                            number >= 0 && number <= (key == "menuBlinks" ? 3 : 2);
     if (!valid)
     {
         emit errorOccurred("That General Controls setting is not available.");
         return false;
     }
-    auto &slot = key == "menuBlinks" ? m_menuBlinks : m_caretBlink;
-    const auto previous = std::tuple{m_showDesktop, m_menuBlinks, m_caretBlink};
+    auto &slot = key == "menuBlinks" ? m_menuBlinks : key == "barSize" ? m_barSize : m_caretBlink;
+    const auto previous = std::tuple{m_showDesktop, m_menuBlinks, m_caretBlink, m_barSize};
     if (key == "showDesktop")
         m_showDesktop = value.toBool();
     else
@@ -385,7 +390,7 @@ bool AppearanceSettings::setGeneralOption(QString key, QVariant value)
         applyCaretFlash();
         return true;
     }
-    std::tie(m_showDesktop, m_menuBlinks, m_caretBlink) = previous;
+    std::tie(m_showDesktop, m_menuBlinks, m_caretBlink, m_barSize) = previous;
     return false;
 }
 bool AppearanceSettings::setKeepScreenAwake(bool keepAwake)

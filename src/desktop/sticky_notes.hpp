@@ -3,7 +3,7 @@
 #include <QDateTime>
 #include <QTimer>
 
-// Sticky Notes (psn_tch, 2026-11-02): small colored notes on the desktop, kept in the profile's
+// Sticky Notes (Lily Hewitt, 2026-11-02): small colored notes on the desktop, kept in the profile's
 // stickies.json and restored at login where they were left. Each note is a row; StickyNote.qml
 // draws it. Text is saved a moment after typing stops (and when the desktop quits), never on
 // every key. Bounded: at most 100 notes of 32,768 characters, inside a 4 MB file.

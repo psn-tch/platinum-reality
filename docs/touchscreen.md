@@ -60,7 +60,7 @@ and the Rust bridge were not instrumented.
 
 Browser tests inject the desktop window's Quick touch events. They do not emulate
 the physical panel or the upstream Wayland input driver. Read-only inspection of
-psn_tch's session found the NVTK touchscreen enabled on the rotated eDP-1 display;
+Lily Hewitt's session found the NVTK touchscreen enabled on the rotated eDP-1 display;
 a nonexclusive contact counter observed hardware events, and they confirmed Apple
 menu taps. No coordinates or keystrokes were retained, no exclusive grab was used,
 and no live input, calibration, hardware setting or session was changed.
@@ -72,7 +72,7 @@ behavior remain qualification limits. Production Mirror remains disabled.
 
 ## Files by finger (2026-10-29)
 
-psn_tch: "cant copy paste cant drag files from one to another" — on the handheld's touchscreen
+Lily Hewitt: "cant copy paste cant drag files from one to another" — on the handheld's touchscreen
 there was no way to reach file commands and no file drag. Now:
 
 - **Long press = right click** in Finder folders (icon and list views): a finger held still for

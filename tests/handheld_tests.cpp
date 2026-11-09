@@ -145,7 +145,7 @@ class HandheldTests final : public QObject
     }
     void theBuiltInControllerTurnsOffAndBackToItsMode()
     {
-        // psn_tch, 2026-11-06: off so an external controller is player 1, then back as it was.
+        // Lily Hewitt, 2026-11-06: off so an external controller is player 1, then back as it was.
         HandheldDaemon hhd(base, tokenFile);
         hhd.refresh();
         QTRY_VERIFY(hhd.available() && !hhd.busy());

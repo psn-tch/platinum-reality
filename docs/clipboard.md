@@ -1,6 +1,6 @@
 # Copy and paste
 
-psn_tch asked for copy and paste that works everywhere, with Control-C/Control-V and with
+Lily Hewitt asked for copy and paste that works everywhere, with Control-C/Control-V and with
 Command (their Super key, Finishing School D06). Source: `src/desktop/clipboard.*`,
 `src/desktop/command_keys.*`, the key paths in `src/desktop/client_surface_item.cpp`,
 the Edit menus and `ClipboardWindow.qml`.

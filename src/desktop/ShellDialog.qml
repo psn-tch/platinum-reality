@@ -79,7 +79,7 @@ Dialog {
         background: Rectangle {color:"transparent"}
     }
     // Return and Enter press the default (ringed) button, which is Cancel for destructive
-    // commands; Command-period (Super, psn_tch's Command key) and Escape cancel (Finishing School
+    // commands; Command-period (Super, Lily Hewitt's Command key) and Escape cancel (Finishing School
     // FS-D01/FS-E01). Only the dialog holding keyboard focus answers, so a dialog opened over
     // another takes the key. A focused field that handles Return itself sets `ownsReturn`.
     readonly property bool hasAcceptButton:

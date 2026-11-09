@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 
 // Handheld, a panel of the Control Panels window: the built-in controller On or Off
-// (psn_tch, 2026-11-06). With an external controller plugged in, games often made the built-in
+// (Lily Hewitt, 2026-11-06). With an external controller plugged in, games often made the built-in
 // one player 1; Off hides it from games (Handheld Daemon's Hidden mode), On brings back the mode
 // it had. Listed only when this computer's Handheld Daemon offers that (HandheldDaemon).
 Item {

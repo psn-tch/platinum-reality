@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 
-// Control Panels: one modeless window for every control panel (psn_tch, 2026-11-01: the Control Strip is
+// Control Panels: one modeless window for every control panel (Lily Hewitt, 2026-11-01: the Control Strip is
 // for quick changes; this is where things are set up properly). The panels are listed on the left and
 // the chosen one is shown on the right. Each panel is a child Item with `panelId`, `title` and `glyph`;
 // the window sets its `host`, `visible` and `shown`, so a panel only talks to its service while it is

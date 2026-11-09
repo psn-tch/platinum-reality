@@ -64,6 +64,13 @@ class ManagedWindow final : public QObject
     Q_PROPERTY(bool fullScreen READ isFullScreen NOTIFY changed)
     Q_PROPERTY(QRect fullScreenRect READ fullScreenRect NOTIFY changed)
     Q_PROPERTY(QObject *shell READ shell CONSTANT)
+    // Pop-up windows (Mac OS 9 Finder, View ▸ as Pop-up Window): a folder window that lives
+    // as a tab at the bottom of its screen and opens upward from it. popUpScreen is that screen.
+    Q_PROPERTY(bool canPopUp READ canPopUp NOTIFY changed)
+    Q_PROPERTY(bool popUp READ isPopUp NOTIFY changed)
+    Q_PROPERTY(bool popUpOpen READ isPopUpOpen NOTIFY changed)
+    Q_PROPERTY(int popUpTabX READ popUpTabX NOTIFY changed)
+    Q_PROPERTY(QRect popUpScreen READ popUpScreen NOTIFY changed)
   public:
     explicit ManagedWindow(QObject *parent = nullptr) : QObject(parent) {}
     qulonglong id() const
@@ -141,6 +148,16 @@ class ManagedWindow final : public QObject
     {
         return xdg;
     }
+    // Only the Finder's own folder windows, as in 9.2.2.
+    bool canPopUp() const
+    {
+        return top && serverDecorated() && !modal() && !fullScreen && !viaX11Bridge &&
+               top->appId() == QLatin1String("org.frankenstein.Finder");
+    }
+    bool isPopUp() const { return popUpWindow; }
+    bool isPopUpOpen() const { return popUpWindow && popUpShown; }
+    int popUpTabX() const { return tabX; }
+    QRect popUpScreen() const { return popUpArea; }
     frankenstein::policy::WindowId identity;
     frankenstein::policy::ContentGeometry geometry;
     QPointer<QWaylandXdgToplevel> top;
@@ -162,6 +179,9 @@ class ManagedWindow final : public QObject
     bool restoreNeedsRescue = false;
     QSize restoreSize;
     bool configuredActive = false;
+    bool popUpWindow = false, popUpShown = false;
+    int tabX = 0;
+    QRect popUpArea;
     bool shadeInMotion = false;
   signals:
     void changed();
@@ -171,7 +191,7 @@ class NativeManager final : public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(QString activeApplication READ activeApplication NOTIFY contextChanged)
-    Q_PROPERTY(int menuBarHeight READ menuBarHeight CONSTANT)
+    Q_PROPERTY(int menuBarHeight READ menuBarHeight NOTIFY menuBarHeightChanged)
     Q_PROPERTY(bool canCloseActiveWindow READ canCloseActiveWindow NOTIFY contextChanged)
     Q_PROPERTY(qulonglong activeWindowId READ activeWindowId NOTIFY contextChanged)
     Q_PROPERTY(bool shellMenuKeyboardMode MEMBER m_shellMenuKeyboardMode)
@@ -350,6 +370,20 @@ class NativeManager final : public QAbstractListModel
     Q_INVOKABLE void contextClickWindow(qulonglong id, QPointF scenePoint);
     Q_INVOKABLE void activateApplication(qulonglong id);
     Q_INVOKABLE void shade(qulonglong id);
+    // Pop-up windows. setPopUp: View ▸ as Pop-up Window / as Window. A pop-up is open exactly
+    // while it is the active window: togglePopUp activates it or hands activation to the desktop.
+    Q_INVOKABLE bool setPopUp(qulonglong id, bool popUp);
+    Q_INVOKABLE void togglePopUp(qulonglong id);
+    // A title bar released at the very bottom of its screen makes a Finder window a pop-up there.
+    Q_INVOKABLE bool dropAtScreenBottom(qulonglong id, QPointF pointer);
+    // The tab dragged along the bottom (its new left edge), or up and away: a regular window
+    // again, its frame's top left where the tab was dropped.
+    Q_INVOKABLE void movePopUpTab(qulonglong id, int x);
+    Q_INVOKABLE void releasePopUp(qulonglong id, int x, int y);
+    // The corner grips: a new left edge and content size, still standing on the screen's bottom.
+    Q_INVOKABLE void resizePopUp(qulonglong id, int x, int width, int height);
+    // For the Finder over D-Bus: request 1 or 0 sets, -1 asks. Only that client's own surface.
+    bool popUpForSurface(uint pid, uint surfaceId, int request);
     Q_INVOKABLE void setShadeInMotion(qulonglong id, bool running);
     Q_INVOKABLE void moveWindow(qulonglong id, int x, int y);
     Q_INVOKABLE void beginWindowMove(qulonglong id, QPointF pointer);
@@ -451,6 +485,7 @@ class NativeManager final : public QAbstractListModel
   signals:
     void hostScaleChanged();
     void displayLayoutChanged();
+    void menuBarHeightChanged();
     void displayRequestChanged();
     void useAllDisplaysChanged();
     void contextChanged();
@@ -484,6 +519,8 @@ class NativeManager final : public QAbstractListModel
     // The live output presenting that screen rectangle, else the default output.
     QWaylandOutput *outputForScreen(const QRect &screen) const;
     QRect windowScreen(const ManagedWindow *window) const;
+    QPoint popUpPosition(const ManagedWindow *window) const;
+    void placePopUp(ManagedWindow *window);
     void refitFullScreens();
     void rescueRestoredWindow(ManagedWindow *window);
     QList<QWaylandXdgToplevel::State> configureStates(const ManagedWindow *window) const;

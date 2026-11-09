@@ -16,7 +16,7 @@ unbounded fix they made 96 threads and an old offer pasted a later copy. The pri
 keeps the installed session bus's limits, and tray and application-menu clicks expect no reply.
 Before that, 128 of 600 clicks on a hung application arrived and the desktop's later calls
 failed, as in the live session. Release gate: `build/artifacts/sam-clipboard-safety-gate-20261022`.
-Not selected until that gate passes and psn_tch selects it. Details:
+Not selected until that gate passes and Lily Hewitt selects it. Details:
 [transfer safety](clipboard-transfer-safety.md), [tray and notifications](tray-and-notifications.md).
 
 ## Clipboard integration candidate — 2026-10-21 (superseded by the safety candidate above)
@@ -86,7 +86,7 @@ budget correction, not a Vulkan product fix. Real games/authentication/wallet/au
 production Mirror and broad physical qualification remain open.
 
 Touchscreen is the next priority: hardware contacts detected without grabbing
-the device; psn_tch confirms Apple-menu taps but reports app taps/swiping broken.
+the device; Lily Hewitt confirms Apple-menu taps but reports app taps/swiping broken.
 No touchscreen fix had been installed at that checkpoint. Earlier sections retain their counts.
 
 ## Earlier Bluetooth launcher update — 2026-10-21
@@ -224,7 +224,7 @@ EGL_WL_bind_wayland_display initialization path. Client SHM remains supported;
 this is not measured proof of browser/emulator hardware acceleration. Earlier
 Firefox context-menu stalls remain an open limitation. The two current gates
 pass, but neither a root cause nor a universal fix is claimed. Qt 6.12.0 popup
-keyboard grabs, Chromium chooser Return, actual ChatGPT saving with psn_tch's
+keyboard grabs, Chromium chooser Return, actual ChatGPT saving with Lily Hewitt's
 profile, Xwayland and wider GPU applications remain open.
 
 The [selected user-local release](evidence/native-update-20261019/deployment-review.json)
@@ -334,7 +334,7 @@ The chronological entries below describe earlier revisions, including the former
 socket restriction and browser alignment failures. They do not override the
 current results above.
 
-psn_tch subsequently reports Firefox opening successfully inside Platinum Reality.
+Lily Hewitt subsequently reports Firefox opening successfully inside Platinum Reality.
 This is a user-observed launch result, not an automated browser qualification.
 Version/backend and browsing, downloads, clipboard, media and restart behavior
 remain unrecorded. See [application observations](application-compatibility.md).
@@ -343,7 +343,7 @@ build from the automatic qualification gate. The later application-style and bro
 earlier user launch observation remains separate from automatic qualification.
 
 **Native experimental desktop foundation; not a finished desktop.** The combined
-native core, Finder/editor and desktop-file workflows have passed in psn_tch's graphical terminal. The agent executor
+native core, Finder/editor and desktop-file workflows have passed in Lily Hewitt's graphical terminal. The agent executor
 still cannot bind Unix sockets, so new live checks require that terminal.
 The complete eight-workflow native gate passed at 10:58, including desktop-to-owned
 folder-window move, child-folder copy, collision preservation and shared-client
@@ -393,7 +393,7 @@ The application/Open With/owned-alert images were inspected.
 The sixth native workflow exercises the browser, project-local style
 in a separately launched Qt probe, SSD versus frameless content, Finder's actual
 document opening, rejection of an impersonating bus peer, Open With, and saved
-application preferences. It passed with the other five workflows in psn_tch's
+application preferences. It passed with the other five workflows in Lily Hewitt's
 [04:55 run](evidence/20261018T105533-348013/native-tests.txt), 9.373 seconds,
 test/cleanup 0 and empty stderr. All 73 pre-run hashes match the preceding local
 manifest, not the subsequently changed source. The recorded
@@ -415,7 +415,7 @@ production, waits for entry focus before typing, asserts checkbox state, and emi
 bounded numeric surface geometry with failure captures. These changes compile in
 both builds but have not run natively. They do not establish the cause of the
 window closure or resolve Firefox bounds. The agent socket preflight still returns
-77/EPERM after psn_tch reported changing session permissions. No host-side relay or
+77/EPERM after Lily Hewitt reported changing session permissions. No host-side relay or
 security-setting edit was introduced.
 
 ## WindowShade, Control Strip and typography
@@ -462,7 +462,7 @@ workflow also clicks the Finder strip module. **These changes passed the 05:30 n
 | [02:33](evidence/20261018T083318-285536/native-tests.txt) | All four native workflows passed in 6.327 seconds at 1.5x DPR, including desktop create/cancel/rename, real folder drop, nonempty-folder duplicate, Trash/Put Away, collision preservation and background-document isolation. Background configure took 51 ms. Test and cleanup returned 0, stderr empty, all 54 pre-run hashes matched at archival |
 | [03:59](evidence/20261018T095947-319448/native-tests.txt) | First dialog/menu revision stopped at the first File-menu click, then crashed during failure cleanup (test exit 139, cleanup 0). The render-thread stack shows ClientBuffer release through a torn-down Wayland resource. All 55 hashes matched. Menu-bar layout readiness and renderer/display destruction ordering were corrected; the crash evidence is retained |
 | [04:03](evidence/20261018T100304-321023/native-tests.txt) | All four functional workflows passed, including retained/disabled modal menus, rejected current/stale Save actions, fixed alert controls, Cancel focus and exact subsequent save. The new fifth teardown workflow failed because its probe connection remained open; no compositor crash or stderr. Test 1, cleanup 0, all 56 hashes matched. Explicit connection retirement after renderer destruction and abrupt-probe-exit coverage were then added |
-| [04:06](evidence/20261018T100646-323175/native-tests.txt) | The first three functional workflows passed; the new retirement path hung during teardown and the final desktop-launch workflow was not reached. psn_tch interrupted it with Ctrl+C after about 99 seconds in that case. No test-exit file was written; cleanup returned 0. All 56 hashes matched at archival. Retirement now runs after the renderer but before protocol destruction; the next native gate is pending |
+| [04:06](evidence/20261018T100646-323175/native-tests.txt) | The first three functional workflows passed; the new retirement path hung during teardown and the final desktop-launch workflow was not reached. Lily Hewitt interrupted it with Ctrl+C after about 99 seconds in that case. No test-exit file was written; cleanup returned 0. All 56 hashes matched at archival. Retirement now runs after the renderer but before protocol destruction; the next native gate is pending |
 | [04:12](evidence/20261018T101222-325857/native-tests.txt) | All five workflows passed in 7.204 seconds at 1.5x DPR, including the four functional workflows plus connected-client display shutdown and abrupt probe exit. Explicit retirement completed; background configure took 51 ms. Test and cleanup returned 0, stderr empty, all 56 hashes matched at archival. Manifest records the 30000 ms function watchdog |
 | [04:55](evidence/20261018T105533-348013/native-tests.txt) | All six workflows passed in 9.373 seconds at 1.5x DPR, adding the real application browser, dynamic Qt style, SSD/frameless geometry, Finder document bridge/peer rejection and Open With choices. Test and cleanup 0, stderr empty, all 73 hashes match the preceding local evidence ledger. This predates Charcoal, the local Apple icon, animated WindowShade and the Control Strip |
 | [05:30](evidence/20261018T113057-363421/native-tests.txt) | All six workflows passed in 10.557 seconds at 1.5x DPR, including live rolling frames, retained client dimensions, guarded input, focus restoration and the Finder strip module. Native/cleanup exits 0, empty stderr, all 79 pre-run hashes match the preceding local ledger. This predates the new drag/context-menu revision |
@@ -766,7 +766,7 @@ button clicks, computed Charcoal fonts, captures and closure. Test and cleanup
 exit zero. All 95 pre-run hashes matched before the subsequent browser-frame
 work. GTK accessibility-bus warnings remain in stderr; no accessibility service
 or support is being certified. The two GTK captures were visually inspected.
-psn_tch also reports the styled Firefox looking good and requests classic frame
+Lily Hewitt also reports the styled Firefox looking good and requests classic frame
 controls; that manual report is separate from the automated GTK result.
 
 ## Firefox frame and requested wallpaper — current slice
@@ -793,7 +793,7 @@ and the default background preview pass; they are not a native browser pass.
 
 The 11:35 native run (`20261018T173511-513512`) passed its ten functional workflows,
 including Firefox frame actions and clean process exit, but its actual capture
-and psn_tch's `~/o/issue1.png` reveal a browser-content offset and overflow. That run
+and Lily Hewitt's `~/o/issue1.png` reveal a browser-content offset and overflow. That run
 does not establish correct frame/content alignment. The correction removes native
 Firefox decoration margins only for the owned browser launch and removes GTK
 decoration shadows. The Firefox native workflow now checks window geometry,

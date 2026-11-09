@@ -62,7 +62,7 @@ FocusScope {
             Text {id: title; anchors.centerIn: parent; text: "Clipboard"; font.pixelSize: 12; font.bold: true}
         }
     }
-    // As in 9.2.2 (checked in psn_tch's VM): the description sits in a grey strip with an inset
+    // As in 9.2.2 (checked in Lily Hewitt's VM): the description sits in a grey strip with an inset
     // edge, above a white pane where the contents are indented.
     Rectangle {
         id: strip

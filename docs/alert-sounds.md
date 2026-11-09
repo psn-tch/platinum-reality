@@ -4,7 +4,7 @@ Mac OS 9 played the chosen alert sound when an alert appeared, or when you click
 modal dialog. With the alert volume at zero, it flashed the menu bar instead. Platinum Reality
 does the same (Finishing School Phase 11, 2026-10-21).
 
-## Sounds, and psn_tch's personal assets
+## Sounds, and Lily Hewitt's personal assets
 
 - The public build ships **one original sound**, "Simple Beep": a 1 kHz square tone with a quick
   decay, synthesized at runtime into `<profile>/sounds/Simple Beep.wav`. No Apple sound is ever
@@ -12,7 +12,7 @@ does the same (Finishing School Phase 11, 2026-10-21).
 - **Personal sounds:** any valid WAV in `$XDG_DATA_HOME/platinum-reality/assets/sounds/`
   (normally `~/.local/share/platinum-reality/assets/sounds/`) joins the list under its file name.
   - Files must have a RIFF/WAVE header and be 4 MB or smaller; broken stubs are skipped.
-  - That's how psn_tch's copy uses the classic sounds (Sosumi, Wild Eep) while a public release
+  - That's how Lily Hewitt's copy uses the classic sounds (Sosumi, Wild Eep) while a public release
     stays clean. The folder belongs to the user and is never part of the repository or a release.
   - `scripts/import-macos9-assets.py <disk image>` fills it from the user's own Mac OS 9
     installation, read through a private copy that is never written. The System file's alert
@@ -49,7 +49,7 @@ does the same (Finishing School Phase 11, 2026-10-21).
   once per boot, when the Log In first appears. The session supervisor plays it
   (`scripts/standalone-session.py` `startup_chime`), not the desktop. Nothing is bundled: Macs played
   it from ROM.
-- **Sound ▸ Startup** (the fourth tab; psn_tch asked for it on 2026-10-29) has three controls:
+- **Sound ▸ Startup** (the fourth tab; Lily Hewitt asked for it on 2026-10-29) has three controls:
   - a checkbox to turn the sound on or off;
   - a volume slider, which plays a sample when you let go, like the alert slider;
   - a Play button.

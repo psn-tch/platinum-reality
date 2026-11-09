@@ -41,7 +41,7 @@ image. Waiting for udev and bounded reread retries fixed it before cc5ed36d's
 successful same-disk reinstall; the failed run is retained as 094758Z.
 Receipts, logs and frames are in `build/distro/install-*` of the owned distro
 review checkout. Completed target disk images were subsequently deleted with
-psn_tch's authorization and deletion receipts; their recorded hashes are historical
+Lily Hewitt's authorization and deletion receipts; their recorded hashes are historical
 test evidence, not a claim those deleted disks can still be independently read.
 
 The first graphical test failed because its UART selected a text console.
@@ -81,7 +81,7 @@ product or counted as authentication passes. See the VM/engine READMEs for paths
 
 ## Backup and recovery are a separate user-controlled phase
 
-Before a physical pilot, psn_tch must authorize the exact hardware/destination and
+Before a physical pilot, Lily Hewitt must authorize the exact hardware/destination and
 have a verified external backup and a tested recovery path. The backup scope
 must include personal documents/downloads, browser profiles and sign-ins,
 password-store/wallet material, projects, relevant configuration and recovery
@@ -124,7 +124,7 @@ The previous update-29 image evidence remains historical. Update30 replaced
 separate settings dialogs with one Control Panels window and added input and
 energy preferences. Update31 changes keyboard shortcut delivery. Neither
 change is qualified by an older installed-target screenshot or a synthetic
-QTest key. After psn_tch selects31, pin the exact native and distribution
+QTest key. After Lily Hewitt selects31, pin the exact native and distribution
 commits in a fresh immutable image and record these independently:
 
 | Gate | Required observation | Insufficient substitute |
@@ -155,4 +155,4 @@ and expired keys, interrupted-update recovery, dependency/ABI compatibility
 and production signing-key custody. Keep test keys private and unpublished.
 Independent rescue boot, encrypted-volume recovery and restoration from the
 external backup must be demonstrated before requesting a physical pilot.
-Only psn_tch can authorize that pilot's exact destination and guard change.
+Only Lily Hewitt can authorize that pilot's exact destination and guard change.

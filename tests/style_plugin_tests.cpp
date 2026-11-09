@@ -66,7 +66,7 @@ class StylePluginTests : public QObject
     }
     void scrollBarsAreDrawnAsInMacOS922()
     {
-        // Measured in a 9.2.2 Finder window with Smart Scrolling (psn_tch's setting, 2026-10-23): a
+        // Measured in a 9.2.2 Finder window with Smart Scrolling (Lily Hewitt's setting, 2026-10-23): a
         // 16 x 184 bar whose scroll box covers 114 of its 154 travel rows, at the top.
         std::unique_ptr<QStyle> style(QStyleFactory::create("Frankenstein"));
         QVERIFY(style);

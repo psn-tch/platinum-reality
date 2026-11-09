@@ -141,7 +141,7 @@ GPU, failure/recovery or historical behavior.
 The runner uses an activation-free same-user private bus. This avoids unrelated
 portal/systemd helpers during the test. Cleanup is nonrecursive and separately
 reported. It does not test real portals or imply a general-purpose desktop bus.
-The agent's executor still returns EPERM for Unix binding; psn_tch's normal terminal
+The agent's executor still returns EPERM for Unix binding; Lily Hewitt's normal terminal
 supplies the live venue. No permission rejection is involved.
 
 ## Required next evidence

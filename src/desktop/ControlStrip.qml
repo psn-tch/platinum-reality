@@ -28,6 +28,9 @@ Item {
     // {command: "status:<key>", name, icon, statusId}.
     property var extraModules: []
     readonly property rect screenRect: sessionManager.primaryDisplayRect
+    // General Controls ▸ Menu Bar Size enlarges the strip with the menu bar. Everything inside is
+    // laid out at the measured size; the strip, its slider and its outline are scaled from there.
+    property real zoom: 1
     // In the order 9.2.2 lists its modules (alphabetically by file), with Platinum Reality's own.
     readonly property var modules: [
         {command:"applications",name:"Applications"},
@@ -73,7 +76,7 @@ Item {
     }
     readonly property int fittingModules: {
         let count = 0, used = fixedWidth
-        while (count < modules.length && used + moduleWidth(modules[count]) + 1 <= screenRect.width)
+        while (count < modules.length && used + moduleWidth(modules[count]) + 1 <= screenRect.width / zoom)
             used += moduleWidth(modules[count++]) + 1
         return Math.max(1, count)
     }
@@ -96,20 +99,21 @@ Item {
     property real outlineY
     property bool outlineRight
     property real outlineLength
-    readonly property real topLimit: screenRect.y + 27
+    readonly property real topLimit: screenRect.y + sessionManager.menuBarHeight + 7
     // The edge comes from the saved position, so a strip saved on the right stays there when the
     // screen changes size; free positions saved by older versions go to the nearer edge.
-    readonly property bool rightEdge: settings.controlStripX + width / 2 > screenRect.width / 2
+    readonly property bool rightEdge: settings.controlStripX + width * zoom / 2 > screenRect.width / 2
     readonly property int viewportWidth: spanOf(firstModule, visibleModules)
     // Parts are placed from the screen edge outwards, mirrored on the right edge. Bindings rather
     // than a Row keep hit-testing correct before the next frame's polish.
     function place(offset, partWidth) { return rightEdge ? width - offset - partWidth : offset }
     width: collapsed ? tabWidth : fixedWidth + viewportWidth
     height: stripHeight
-    x: screenRect.x + (rightEdge ? screenRect.width - width : 0)
-    y: screenRect.y + Math.max(27, Math.min(settings.controlStripY < 0 ? screenRect.height - height
-                                                                        : settings.controlStripY,
-                                            screenRect.height - height))
+    scale: zoom; transformOrigin: Item.TopLeft
+    x: screenRect.x + (rightEdge ? screenRect.width - width * zoom : 0)
+    y: Math.max(topLimit, screenRect.y + Math.min(settings.controlStripY < 0 ? screenRect.height - height * zoom
+                                                                             : settings.controlStripY,
+                                                  screenRect.height - height * zoom))
     visible: settings.controlStripVisible
     enabled: !sessionManager.shellModal && !sessionManager.menuOpen
 
@@ -302,12 +306,12 @@ Item {
                     if (mode === "move") {
                         strip.outlineRight = point.x >= screen.x + screen.width / 2
                         strip.outlineY = Math.max(strip.topLimit, Math.min(point.y - strip.grabY,
-                                                  screen.y + screen.height - strip.height))
+                                                  screen.y + screen.height - strip.height * strip.zoom))
                         strip.moving = true
                     } else {
                         // Only the length follows the pointer; the height stays.
                         strip.outlineLength = Math.max(strip.tabWidth, Math.min(
-                            strip.width + (strip.rightEdge ? -dx : dx), strip.fixedWidth + strip.spanOf(0, strip.fittingModules)))
+                            strip.width + (strip.rightEdge ? -dx : dx) / strip.zoom, strip.fixedWidth + strip.spanOf(0, strip.fittingModules)))
                         strip.resizing = true
                     }
                 }
@@ -355,7 +359,8 @@ Item {
         visible: strip.sliderModule !== null
         readonly property point origin: strip.sliderModule
             ? strip.sliderModule.mapToItem(strip.parent, 0, 0) : Qt.point(0, 0)
-        x: origin.x + 5; y: origin.y - 1 - 63
+        scale: strip.zoom; transformOrigin: Item.TopLeft
+        x: origin.x + 5 * strip.zoom; y: origin.y - (1 + 63) * strip.zoom
         width: 22; height: 66
         readonly property int thumbTop: 3
         readonly property int travel: 46
@@ -411,8 +416,9 @@ Item {
         visible: strip.dragging
         readonly property bool onRight: strip.moving ? strip.outlineRight : strip.rightEdge
         readonly property real span: strip.moving ? strip.width : strip.outlineLength
-        x: (onRight ? strip.screenRect.x + strip.screenRect.width - span : strip.screenRect.x) - 1
-        y: (strip.moving ? strip.outlineY : strip.y) - 1
+        scale: strip.zoom; transformOrigin: Item.TopLeft
+        x: (onRight ? strip.screenRect.x + strip.screenRect.width - span * strip.zoom : strip.screenRect.x) - strip.zoom
+        y: (strip.moving ? strip.outlineY : strip.y) - strip.zoom
         width: span + 2; height: strip.height + 2
         Canvas {
             id: outlineShape

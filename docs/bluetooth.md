@@ -20,7 +20,7 @@ Initial Bluetooth release: `0.1.0-bluetooth-20261021T061204Z`, qualified for the
 logout/login. All software gates passed; real-device pairing and reconnection
 still need a hardware trial. See the [release summary](evidence/bluetooth-update-20261021/summary.json).
 
-psn_tch asked (2026-10-21) for Bluetooth in the native session that works like KDE, with all the
+Lily Hewitt asked (2026-10-21) for Bluetooth in the native session that works like KDE, with all the
 devices they had paired there. Pairings live in BlueZ (`/var/lib/bluetooth`), not in KDE, so every
 device paired under KDE is already available. KDE's Bluetooth applet (bluedevil) only showed them
 and answered BlueZ's pairing questions. The native session now does both.
@@ -119,7 +119,7 @@ and answered BlueZ's pairing questions. The native session now does both.
   (`FRANKENSTEIN_NATIVE_TEST` guard in `NativeManager`), so no test registers an agent with the
   host.
 - Nothing here changed a real adapter or device. Hardware behavior (their headsets, mice, controller,
-  speaker and the Govee light) needs psn_tch's feedback.
+  speaker and the Govee light) needs Lily Hewitt's feedback.
 
 ## Not yet
 

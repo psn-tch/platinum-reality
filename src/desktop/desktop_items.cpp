@@ -1037,7 +1037,7 @@ bool DesktopItems::receiveFiles(QStringList paths, QPoint point, bool copy)
     {
         const auto parent = QFileInfo(path).dir().canonicalPath();
         // From the home folder or a mounted drive (/run/media/<user>): dropping from a flash drive
-        // was refused as "outside the selected workspace" (psn_tch, 2026-11-07).
+        // was refused as "outside the selected workspace" (Lily Hewitt, 2026-11-07).
         if (!QDir::isAbsolutePath(path) || path.contains(QChar::Null) ||
             (parent != m_root && !parent.startsWith(m_root + '/') &&
              !m_operations.readableFile(path) && !m_operations.readableDirectory(path)) ||

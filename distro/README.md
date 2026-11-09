@@ -7,7 +7,7 @@ This branch is a VM-only engineering prototype, not a host installer or a
 release. Do not write it to a physical device or install it on a real disk.
 R1 is the live ISO; R2 is the installer engine, after R1 passes; R3 will be
 the complete installed-disk gate. R4 signing/update hosting needs a separate
-go-ahead from Sammy. None of this selects a desktop release for psn_tch.
+go-ahead from Sammy. None of this selects a desktop release for Lily Hewitt.
 
 - [ISO build and provenance](iso/README.md)
 - [Installer engine and limits](installer-engine/README.md)

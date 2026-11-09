@@ -260,6 +260,12 @@ def install(source, report, keyring=KEYRING, state=STATE, run=subprocess.run, no
             staging.rmdir()
 
 
+def package_version(package):
+    """'platinum-reality-0.42-1-x86_64.pkg.tar.zst' -> '0.42-1' (the file name when it is not ours)."""
+    match = re.fullmatch(re.escape(NAME) + r'-([^-]+-[^-]+)-[^-]+\.pkg\.tar\.zst', package.name)
+    return match.group(1) if match else package.name
+
+
 def restore_previous(report, keyring=KEYRING, state=STATE, run=subprocess.run):
     """Reinstall the release that was installed before the last update (a deliberate downgrade)."""
     package = kept_package(state / 'previous')
@@ -267,10 +273,10 @@ def restore_previous(report, keyring=KEYRING, state=STATE, run=subprocess.run):
         raise UpdateError('No previous version was kept. (One is kept from the second update on.)')
     if not gpg_verify(keyring, package, Path(str(package) + '.sig')):
         raise UpdateError('The kept previous version is not signed by the Platinum Reality release key.')
-    report({'step': 'install', 'version': package.name})
+    report({'step': 'install', 'version': package_version(package)})
     result = pacman_install(run, package, state)
     if result.returncode != 0:
         last = (result.stderr or result.stdout).strip().splitlines()[-1:] or ['']
         raise UpdateError('pacman could not restore the previous version: ' + last[0])
     keep(package, Path(str(package) + '.sig'), state / 'current')
-    return package.name
+    return package_version(package)

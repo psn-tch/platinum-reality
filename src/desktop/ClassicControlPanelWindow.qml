@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 
-// Control Panel, the desk accessory after the System 6 Control Panel (psn_tch's reference,
+// Control Panel, the desk accessory after the System 6 Control Panel (Lily Hewitt's reference,
 // 2026-11-05): one black-and-white window to keep open, a scrolling list of icons on the left and
 // the chosen one's settings on the right. General has the desktop pattern, insertion point and
 // menu blinking, the time and date, the speaker volume and the menu bar clock; Keyboard, Mouse and

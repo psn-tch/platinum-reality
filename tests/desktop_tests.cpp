@@ -24,6 +24,7 @@
 #include "desktop/surface_client.hpp"
 #include "desktop/screenshot_service.hpp"
 #include <QBuffer>
+#include <QJSValue>
 #include <QMimeData>
 #include <QStyleHints>
 #include <QClipboard>
@@ -289,6 +290,108 @@ class DesktopTests : public QObject
         const auto evidence=qEnvironmentVariable("FRANKENSTEIN_EVIDENCE_DIR");
         if(!evidence.isEmpty()){QDir().mkpath(evidence);QVERIFY(view.grabWindow().save(evidence+"/menu-bar-measured.png"));}
     }
+    void menuBarSizeEnlargesBarMenusAndStripTogether()
+    {
+        QTemporaryDir root;QQuickView view;view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status()!=QQuickView::Error);
+        const auto clearView=qScopeGuard([&]{view.setSource({});});
+        view.show();QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop=view.rootObject();auto *bar=visualItem(desktop,"desktop-menu-bar");QVERIFY(bar);
+        auto *appearance=manager.appearance();
+        QCOMPARE(manager.menuBarHeight(),20);QCOMPARE(bar->scale(),qreal(1));
+        // Every Apple menu item but About This Computer has an icon (Lily Hewitt 2026-11-09).
+        QVariant apple;
+        QVERIFY(QMetaObject::invokeMethod(desktop,"shellMenuEntries",Q_RETURN_ARG(QVariant,apple),Q_ARG(QVariant,0)));
+        for(const auto &value:apple.toList()) {
+            const auto entry=value.toMap();
+            if(entry.value("separator").toBool())continue;
+            QCOMPARE(entry.value("glyph").toString().isEmpty(),entry.value("action").toString()=="about");
+            for(const auto &child:entry.value("children").toList())
+                if(child.toMap().value("action").toString().size()>0 && !child.toMap().value("separator").toBool() &&
+                   entry.value("action").toString()=="control-panels")
+                    QVERIFY(!child.toMap().value("glyph").toString().isEmpty());
+        }
+        const auto evidence=qEnvironmentVariable("FRANKENSTEIN_EVIDENCE_DIR");
+        auto *strip=visualItem(desktop,"control-strip");QVERIFY(strip);
+        for(const int size:{100,125}) {
+            bool accepted=false;
+            QVERIFY(QMetaObject::invokeMethod(appearance,"setGeneralOption",Q_RETURN_ARG(bool,accepted),
+                                              Q_ARG(QString,"barSize"),Q_ARG(QVariant,size)));
+            QVERIFY(accepted);
+            const qreal zoom=size/100.0;
+            QCOMPARE(manager.menuBarHeight(),qRound(20*zoom));
+            QCOMPARE(bar->scale(),zoom);QCOMPARE(strip->scale(),zoom);
+            QCOMPARE(bar->mapRectToScene(QRectF(0,0,bar->width(),bar->height())).width(),qreal(view.width()));
+            // The strip stays on screen and below the bar.
+            const auto stripRect=strip->mapRectToScene(QRectF(0,0,strip->width(),strip->height()));
+            QVERIFY(stripRect.top()>=manager.menuBarHeight());QVERIFY(stripRect.bottom()<=view.height());
+            auto *appleTitle=visualItem(desktop,"bar-entry-0");QVERIFY(appleTitle);
+            QTest::mouseClick(&view,Qt::LeftButton,{},appleTitle->mapToScene({appleTitle->width()/2,8}).toPoint());
+            QTRY_VERIFY(manager.menuOpen());
+            auto *popup=visualItem(desktop,"desktop-menu-popup");QVERIFY(popup);
+            QCOMPARE(popup->scale(),zoom);
+            // The menu's top edge lies over the bar's black lower border.
+            QCOMPARE(popup->y(),19*zoom);
+            auto *panels=visualItem(desktop,"desktop-command-control-panels");QVERIFY(panels);
+            QTest::mouseClick(&view,Qt::LeftButton,{},panels->mapToScene({panels->width()/2,panels->height()/2}).toPoint());
+            auto *submenu=visualItem(desktop,"desktop-submenu");QVERIFY(submenu);
+            QTRY_VERIFY(submenu->isVisible());
+            const auto popupRect=popup->mapRectToScene(QRectF(0,0,popup->width(),popup->height()));
+            QVERIFY(qAbs(submenu->x()-(popupRect.right()-4*zoom))<1);
+            if(!evidence.isEmpty()){QDir().mkpath(evidence);
+                QVERIFY(view.grabWindow().save(evidence+QString("/menu-bar-size-%1.png").arg(size)));}
+            QTest::keyClick(&view,Qt::Key_Escape);QTRY_VERIFY(!manager.menuOpen());
+        }
+        // Only whole steps of five, 100-150 percent.
+        for(const auto refused:{QVariant(95),QVariant(107),QVariant(155),QVariant(true),QVariant(112.5)}) {
+            bool accepted=true;
+            QVERIFY(QMetaObject::invokeMethod(appearance,"setGeneralOption",Q_RETURN_ARG(bool,accepted),
+                                              Q_ARG(QString,"barSize"),Q_ARG(QVariant,refused)));
+            QVERIFY(!accepted);
+        }
+    }
+    void exportedSubmenuRowsLineUpWithCommands()
+    {
+        QTemporaryDir root;QQuickView view;view.resize(800,600);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status()!=QQuickView::Error);
+        const auto clearView=qScopeGuard([&]{view.setSource({});});
+        view.show();QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop=view.rootObject();
+        auto entry=[](int id,QString label,QVariantList children={}){
+            return QVariantMap{{"id",id},{"label",label},{"visible",true},{"enabled",true},{"separator",false},
+                               {"checkable",false},{"checked",false},{"children",children}};};
+        // Konsole's Edit menu: commands, then a submenu row (Lily Hewitt's photo, 2026-11-09), built
+        // by the desktop's own menu factory as an application's menu is.
+        auto *factory=qobject_cast<QQmlComponent *>(qmlContext(desktop)->objectForName("menuFactory"));
+        QVERIFY(factory);
+        QScopedPointer<QObject> popupOwner(factory->create(qmlContext(desktop)));
+        auto *popup=popupOwner.data();QVERIFY(popup);
+        QVERIFY(popup->setProperty("parent",QVariant::fromValue(view.contentItem())));
+        const QVariantList items{entry(51,"Copy"),entry(52,"Copy Input To",{entry(53,"All Tabs")})};
+        QVERIFY(QMetaObject::invokeMethod(desktop,"populate",Q_ARG(QVariant,QVariant::fromValue(popup)),
+            Q_ARG(QVariant,items),Q_ARG(QVariant,0),Q_ARG(QVariant,1)));
+        QVERIFY(QMetaObject::invokeMethod(popup,"open"));
+        QTRY_VERIFY(popup->property("opened").toBool());
+        QQuickItem *command=nullptr,*submenuRow=nullptr;
+        QTRY_VERIFY((command=visualItem(view.contentItem(),"menu-command-51")));
+        for(int i=0;i<popup->property("count").toInt();++i){
+            QQuickItem *item=nullptr;
+            QMetaObject::invokeMethod(popup,"itemAt",Q_RETURN_ARG(QQuickItem*,item),Q_ARG(int,i));
+            if(item && item->property("subMenu").value<QObject *>())submenuRow=item;
+        }
+        QVERIFY(submenuRow);
+        auto textX=[](QQuickItem *row){
+            auto *text=row->property("contentItem").value<QQuickItem *>();
+            return text->mapToScene({text->property("leftPadding").toReal(),0}).x();};
+        QCOMPARE(textX(submenuRow),textX(command));
+        QCOMPARE(submenuRow->height(),command->height());
+    }
     void outlineStripsInvertCheckerPixelsAndRejectStaleSnapshots()
     {
         auto snapshot=std::make_shared<WindowMoveSnapshot>();
@@ -417,7 +520,7 @@ class DesktopTests : public QObject
     }
     void openControlPanelsAndAccessoriesAreListedAsApplications()
     {
-        // psn_tch, 2026-11-07: Control Panel didn't show in the Application Switcher. In 9.2.2 control
+        // Lily Hewitt, 2026-11-07: Control Panel didn't show in the Application Switcher. In 9.2.2 control
         // panels and desk accessories were applications, listed in the Application menu and switcher.
         QTemporaryDir root;
         QQuickView view;
@@ -1100,7 +1203,9 @@ class DesktopTests : public QObject
         QCOMPARE(visualItem(view.contentItem(), "software-update-notes")->property("text").toString(),
                  QString("Faster folders."));
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/software-update.png"));
-        // The same folder with a changed package is refused, and Install goes away.
+        // The same folder with a changed package is refused, and Install goes away. The first
+        // check's helper may still be exiting; a check asked for while busy is ignored.
+        QTRY_VERIFY_WITH_TIMEOUT(!service.busy(), 20000);
         QVERIFY(write(name, "test packagf"));
         service.useLocal(bundle);
         QTRY_VERIFY_WITH_TIMEOUT(!service.busy(), 20000);
@@ -1797,7 +1902,7 @@ class DesktopTests : public QObject
     }
     void monitorsPanelSavesUseAllDisplaysForTheNextLoginAtOnce()
     {
-        // psn_tch (2026-10-21): two monitors, opt-in. The choice is saved in the desktop profile for
+        // Lily Hewitt (2026-10-21): two monitors, opt-in. The choice is saved in the desktop profile for
         // the session supervisor to read at the next login; Cancel keeps the saved choice.
         QTemporaryDir root;
         const auto profile = root.path() + "/profile";
@@ -1855,7 +1960,7 @@ class DesktopTests : public QObject
     void dialogKeysFollowMacOS9()
     {
         // Finishing School FS-D01/FS-E01: Return and keypad Enter press the default (ringed)
-        // button once; Escape and Command-period (Super, psn_tch's Command key) cancel and discard
+        // button once; Escape and Command-period (Super, Lily Hewitt's Command key) cancel and discard
         // the draft; a destructive confirmation defaults to Cancel; only the dialog holding focus
         // answers; a field that handles Return itself keeps it.
         QTemporaryDir root;
@@ -2330,7 +2435,7 @@ class DesktopTests : public QObject
 
     void alertSoundsUseOriginalBeepPersonalWavsAndFlashWhenSilent()
     {
-        // Finishing School Phase 11 and psn_tch's personal assets (docs/alert-sounds.md): the public
+        // Finishing School Phase 11 and Lily Hewitt's personal assets (docs/alert-sounds.md): the public
         // build has one original sound; personal WAVs in the asset folder join the list; broken
         // files are skipped; volume 0 or no player flashes the menu bar. A fake player records
         // what would play, so no test ever makes a sound.
@@ -2347,7 +2452,7 @@ class DesktopTests : public QObject
         };
         QVERIFY(wave(assets + "/sounds/Sosumi Test.wav"));
         {
-            QFile stub(assets + "/sounds/Broken.wav"); // A 14-byte text stub, like two of psn_tch's files.
+            QFile stub(assets + "/sounds/Broken.wav"); // A 14-byte text stub, like two of Lily Hewitt's files.
             QVERIFY(stub.open(QIODevice::WriteOnly) && stub.write("not a sound!!\n") == 14);
             QFile other(assets + "/sounds/notes.txt");
             QVERIFY(other.open(QIODevice::WriteOnly));
@@ -2467,7 +2572,7 @@ class DesktopTests : public QObject
     }
     void startupSoundCanBeTurnedOffAndSetLouderOrQuieter()
     {
-        // psn_tch, 2026-10-29: "an option to enable / disable the beep on boot up and a volume slider".
+        // Lily Hewitt, 2026-10-29: "an option to enable / disable the beep on boot up and a volume slider".
         // Sound ▸ Startup saves both for the supervisor (scripts/standalone-session.py reads
         // startup-sound.json at the next Log In); Play previews through a fake player that records.
         QTemporaryDir root;
@@ -2605,7 +2710,7 @@ class DesktopTests : public QObject
     }
     void eachMonitorHasItsOwnDesktopPictureNeverOneSpreadAcrossThem()
     {
-        // psn_tch, 2026-11-06: "i'd like my wallpaper to not be stretched across two monitors", and
+        // Lily Hewitt, 2026-11-06: "i'd like my wallpaper to not be stretched across two monitors", and
         // different pictures on each monitor. Two outputs side by side, as in the Extend session.
         QTemporaryDir root;
         QVERIFY(QDir().mkpath(root.filePath("profile")));
@@ -2870,9 +2975,13 @@ class DesktopTests : public QObject
         QVERIFY(!entries().at(0).toMap().value("enabled").toBool());
     }
     // The Keychain module over a real Secret Service. Run under a private bus with an unlocked
-    // throwaway GNOME Keyring (scripts/test-keychain.sh); skipped where there is none.
+    // throwaway GNOME Keyring (scripts/test-keychain.sh); skipped anywhere else. The package
+    // build's check() has the real HOME: there the session bus started the user's own keyring,
+    // which this test would have locked (update 43's build, 2026-11-09).
     void keychainModuleLocksKeychainsByName()
     {
+        if (qEnvironmentVariable("PLATINUM_THROWAWAY_KEYRING") != "1")
+            QSKIP("Only against scripts/test-keychain.sh's throwaway keyring");
         KeychainService keychains(QDBusConnection::sessionBus());
         keychains.refresh();
         QTest::qWait(1500);
@@ -3852,7 +3961,7 @@ class DesktopTests : public QObject
         AppearanceSettings position(root.path() + "/profile");
         QCOMPARE(position.controlStripX(), 0);
         QCOMPARE(position.controlStripY(), qRound(strip->y()));
-        // A plain drag that starts up or down moves it too (Option is not needed: psn_tch found the
+        // A plain drag that starts up or down moves it too (Option is not needed: Lily Hewitt found the
         // strip impossible to move with a plain drag, which in 9.2.2 only changes the length).
         const auto beforePlain = strip->position();
         drag(QPoint(4, -60));
@@ -4644,7 +4753,7 @@ class DesktopTests : public QObject
         auto *title = visualItem(view.contentItem(), "application-menu");
         QVERIFY(title && visualItem(view.contentItem(), "application-menu-divider"));
         QVERIFY(!view.grabWindow().isNull());
-        // 9.2.2's etched strip: solid lines, not dots alone (psn_tch, 2026-10-22).
+        // 9.2.2's etched strip: solid lines, not dots alone (Lily Hewitt, 2026-10-22).
         {
             auto *divider = visualItem(view.contentItem(), "application-menu-divider");
             const auto shot = view.grabWindow();

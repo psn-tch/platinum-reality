@@ -142,7 +142,7 @@ class LockTests final : public QObject
                                                    "auth [success=1 default=bad] pam_unix.so try_first_pass\n"));
         QVERIFY(write(pam.filePath("login"), "auth include system-auth\n"));
         QVERIFY(write(pam.filePath("swaylock"), "auth include login\n"));
-        QVERIFY(pamServiceUsesFingerprint("swaylock", pam.path())); // psn_tch's chain, three deep.
+        QVERIFY(pamServiceUsesFingerprint("swaylock", pam.path())); // Lily Hewitt's chain, three deep.
         QVERIFY(write(pam.filePath("system-auth"), "#auth sufficient pam_fprintd.so\n"
                                                    "auth [success=1 default=bad] pam_unix.so\n"
                                                    "account required pam_fprintd.so\n"));
@@ -174,7 +174,7 @@ class LockTests final : public QObject
         QVERIFY(write(profile + "/appearance.json", "{" + QByteArray(1024 * 1024, ' ') + "}"));
         QCOMPARE(desktopPictureFrom(profile, home.path()), QUrl());
         QCOMPARE(userFullName("someone", ""), QString("someone"));
-        QCOMPARE(userFullName("psn_tch", "Pat Example,,,"), QString("Pat Example"));
+        QCOMPARE(userFullName("Lily Hewitt", "Pat Example,,,"), QString("Pat Example"));
     }
 
     void passwordsAreCheckedByPamOffTheUiThread()
@@ -209,7 +209,7 @@ class LockTests final : public QObject
         TestPam pam;
         QVERIFY(pam.ready());
         Authenticator authenticator("platinum-lock-test", "tester", pam.confdir());
-        LockController controller(&authenticator, "psn_tch", {}, {});
+        LockController controller(&authenticator, "Lily Hewitt", {}, {});
         QSignalSpy authenticated(&controller, &LockController::authenticated);
         QSignalSpy rejected(&controller, &LockController::rejected);
         QQuickView view;
@@ -225,7 +225,7 @@ class LockTests final : public QObject
         auto *message = root->findChild<QQuickItem *>("login-message");
         auto *hint = root->findChild<QQuickItem *>("login-fingerprint-hint");
         QVERIFY(password && message && hint);
-        QCOMPARE(root->findChild<QQuickItem *>("login-name")->property("text").toString(), QString("Welcome, psn_tch"));
+        QCOMPARE(root->findChild<QQuickItem *>("login-name")->property("text").toString(), QString("Welcome, Lily Hewitt"));
         QTRY_VERIFY(password->hasActiveFocus());
 
         // Before the screen is locked nothing can be submitted.

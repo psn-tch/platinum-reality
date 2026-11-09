@@ -82,7 +82,7 @@ class StartupSound final : public QObject
     void save() const;
     QString m_profile, m_assets, m_player, m_path;
     bool m_enabled = true;
-    // Half volume, as before this setting existed: full volume startled psn_tch (2026-10-23).
+    // Half volume, as before this setting existed: full volume startled Lily Hewitt (2026-10-23).
     int m_volume = 50;
     QProcess m_process;
     QTimer m_limit;

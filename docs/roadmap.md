@@ -10,7 +10,7 @@ suites, 87 full native cases and 12 two-monitor cases in normal and ASan/UBSan
 builds, with separate installed/session/wallet/login checks. Those results do not
 qualify later edits, physical suspend or uninstrumented external software.
 
-psn_tch's current priority is a native daily driver that replaces KDE. The next
+Lily Hewitt's current priority is a native daily driver that replaces KDE. The next
 steps are concrete service/application gaps; historical certification remains a
 separate workstream.
 

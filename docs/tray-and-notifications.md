@@ -1,6 +1,6 @@
 # Status items and notifications
 
-Status: **implemented (Claude, 2026-10-20)** with the defaults below. psn_tch can still choose a
+Status: **implemented (Claude, 2026-10-20)** with the defaults below. Lily Hewitt can still choose a
 different form; see "Open questions".
 
 ## As built
@@ -77,7 +77,7 @@ The native session runs applications on its own private session bus (`dbus-run-s
   Some refuse to minimise to the tray, and some keep a window open instead.
 - `notify-send`, browsers and chat apps get errors or silently drop notifications.
 
-## Period mapping (PROP, needs psn_tch's agreement on the look)
+## Period mapping (PROP, needs Lily Hewitt's agreement on the look)
 
 Mac OS 9 has no tray or notification centre. The closest period equivalents:
 
@@ -122,7 +122,7 @@ Mac OS 9 has no tray or notification centre. The closest period equivalents:
     (registration, icon, menu, activation, unregistration on exit)
   - `notify-send`-shaped calls through `QDBusInterface` (show, replace, timeout, close, action)
 
-## Open questions for psn_tch
+## Open questions for Lily Hewitt
 
 - Whether status items should sit in the Control Strip (period form, as above) or in a
   separate area of the menu bar (modern form).

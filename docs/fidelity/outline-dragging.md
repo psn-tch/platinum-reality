@@ -64,7 +64,7 @@ size bounds; outline resizing is not included.
   build/fidelity/rocky-20261108/run-outline-headless.sh`. Here it cannot start its
   private D-Bus because the agent sandbox denies Unix socket binding. The script
   uses `env -i`, private HOME, `dbus-run-session`, the owned headless Sway wrapper,
-  scale 1, and a 180-second timeout; it never uses psn_tch's display.
+  scale 1, and a 180-second timeout; it never uses Lily Hewitt's display.
 
 The remaining native fallback Command-W row, a CSD drag exercise, and
 physical/mixed-scale multi-monitor moves still require qualification before a

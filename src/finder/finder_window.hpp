@@ -93,6 +93,7 @@ class FinderWindow final : public QMainWindow
     void findItems(const QString &text);
     // Special ▸ Sleep, Restart and Shut Down appear only when the desktop session offers them.
     void setPowerAvailable(bool available);
+    void askDesktopPopUp(const QString &method, bool popUp);
     // Shows another folder in this window, as Dolphin does (Back returns). record: add to history.
     bool navigate(const QString &path, bool record = true);
 

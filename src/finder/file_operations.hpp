@@ -57,7 +57,7 @@ class FileOperations
     static qint64 measure(const QStringList &paths);
     FileResult move(const QString &source, const QString &directory) const;
     // Whether every item is on the same disk (filesystem) as the folder. As in the Mac OS Finder, a
-    // plain drag moves within a disk and copies to another one (psn_tch, 2026-11-07: flash drive).
+    // plain drag moves within a disk and copies to another one (Lily Hewitt, 2026-11-07: flash drive).
     static bool sameVolume(const QStringList &sources, const QString &directory);
     FileResult duplicate(const QString &source) const;
     FileResult rename(const QString &source, const QString &name) const;

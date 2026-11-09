@@ -500,7 +500,7 @@ class ApplicationTests : public QObject
     }
     void searchListsTheNamedApplicationBeforeOnesThatOnlyMentionIt()
     {
-        // psn_tch, 2026-11-02: typing "steam" listed every Steam game (each described as a Steam
+        // Lily Hewitt, 2026-11-02: typing "steam" listed every Steam game (each described as a Steam
         // game) above Steam itself, which was then far down the list.
         QTemporaryDir root;
         const auto directory = root.filePath("apps");

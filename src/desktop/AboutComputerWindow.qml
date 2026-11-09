@@ -41,7 +41,7 @@ DesktopWindow {
         }
     }
 
-    // Laid out as Mac OS 9.2's About This Computer (psn_tch's reference): a white banner with the
+    // Laid out as Mac OS 9.2's About This Computer (Lily Hewitt's reference): a white banner with the
     // mark and the system's name set large, a grey strip of facts in two columns, then the running
     // applications, each with its memory and a bar, the system's own row last. Original drawings.
     Rectangle {
@@ -98,7 +98,7 @@ DesktopWindow {
         }
         Text {
             anchors.right: parent.right; anchors.rightMargin: 6; y: 8 + 3 * 15
-            text: "An original desktop by psn_tch, 2026"; textFormat: Text.PlainText; font.pixelSize: 11
+            text: "An original desktop by Lily Hewitt, 2026"; textFormat: Text.PlainText; font.pixelSize: 11
         }
     }
     // The applications' list: white, edge to edge, with a scroll bar above the size box.

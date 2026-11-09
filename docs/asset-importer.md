@@ -38,7 +38,7 @@ copy first, and the import stops if the source changes meanwhile. Nothing is dow
 A Mac OS 9.2.2 install CD's own System Folder holds the System, Finder and System Resources but
 not the Control Strip modules, Platinum Sounds or desktop pictures (those are inside the
 installer's packages, which the importer does not unpack); an installed Mac OS 9 disk has all of
-them. Measured on psn_tch's 9.2.2 disk: 183 files; on the 9.2.2 install CD: 78.
+them. Measured on Lily Hewitt's 9.2.2 disk: 183 files; on the 9.2.2 install CD: 78.
 
 ## Licensing
 

@@ -7,7 +7,7 @@ qcow2 overlay. QEMU 11.1.2 ran headless, nice 19, without networking; `-snapshot
 remained enabled. QMP used stdin/stdout because this agent's sandbox refuses Unix
 socket creation. The explicit overlay avoids QEMU's unwritable `/var/tmp` snapshot
 location; `bootindex=0` on the IDE disk is necessary with this explicit block graph.
-Neither the original disk nor psn_tch's running desktop was opened or changed.
+Neither the original disk nor Lily Hewitt's running desktop was opened or changed.
 
 Raw PNGs and research scripts are private, gitignored files in
 `build/fidelity/rocky-20261108/`. Measurements below use the native 640 × 480 captures,

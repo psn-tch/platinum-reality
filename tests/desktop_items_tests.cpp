@@ -71,7 +71,7 @@ class DesktopItemsTests : public QObject
     }
     void aPlainDragFromAFlashDriveCopiesToTheDesktop()
     {
-        // psn_tch, 2026-11-07: files from her flash drive wouldn't go onto the desktop ("outside the
+        // Lily Hewitt, 2026-11-07: files from her flash drive wouldn't go onto the desktop ("outside the
         // selected workspace"); and as in Mac OS, a plain drag to another disk copies, never moves.
         QTemporaryDir root, profile, drives(QDir("/dev/shm").exists() ? "/dev/shm/drives-XXXXXX" : QString());
         QVERIFY(drives.isValid());
@@ -348,7 +348,7 @@ class DesktopItemsTests : public QObject
     }
     void typingSelectsTheNearestNameLikeMacOS9()
     {
-        // The names on the 9.2.2 desktop in psn_tch's VM, beside the disk and Trash. The disk is
+        // The names on the 9.2.2 desktop in Lily Hewitt's VM, beside the disk and Trash. The disk is
         // "Hard Disk" unless the profile's finder.ini names it, as this one does.
         QTemporaryDir root, profile;
         QSettings(profile.path() + "/finder.ini", QSettings::IniFormat).setValue("diskName", "Macintosh HD");

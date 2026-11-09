@@ -156,7 +156,7 @@ class BootSplashTests(unittest.TestCase):
             self.assertIn('--splash /usr/share/plymouth/themes/platinum-reality/splash.bmp',
                           (root / 'etc/mkinitcpio.d/linux.preset').read_text())
             self.assertNotIn('splash-arch', (root / 'etc/mkinitcpio.d/linux.preset').read_text())
-            # The quote after the path stays (psn_tch's first install lost it, 2026-10-22).
+            # The quote after the path stays (Lily Hewitt's first install lost it, 2026-10-22).
             self.assertIn('default_options="--splash /usr/share/plymouth/themes/platinum-reality/splash.bmp"\n',
                           (root / 'etc/mkinitcpio.d/linux.preset').read_text())
             self.assertIn('HOOKS=(base udev autodetect microcode modconf kms plymouth keyboard',
@@ -249,7 +249,7 @@ class BootSplashTests(unittest.TestCase):
             original_preset = 'default_uki="/boot/EFI/Linux/arch-linux.efi"\n' \
                               'default_options="--splash /usr/share/systemd/bootctl/splash-arch.bmp"\n'
             original_cmdline = 'root=x rw\n'
-            # As the first install left psn_tch's machine: originals backed up, the preset broken.
+            # As the first install left Lily Hewitt's machine: originals backed up, the preset broken.
             backups = root / 'var/lib/platinum-reality/boot-splash'
             backups.mkdir(parents=True)
             (backups / 'linux.preset').write_text(original_preset)

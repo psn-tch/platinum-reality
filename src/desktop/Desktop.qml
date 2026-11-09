@@ -55,6 +55,12 @@ Rectangle {
     property int exportedRoot: -1
     property var desktopFiles: manager.desktopItems
     property var appearance: manager.appearance
+    // General Controls ▸ Menu Bar Size (Lily Hewitt, 2026-11-09): the bar, its menus and the Control
+    // Strip keep their measured 9.2.2 layout and are enlarged together, 100-150 percent.
+    readonly property real barScale: (appearance.general.barSize || 100) / 100
+    readonly property real barRight: menuBar.x + menuBar.width * barScale
+    // A menu's top edge overlaps the bar's black lower border, as in 9.2.2.
+    readonly property real barBottom: menuBar.y + (menuBar.height - 1) * barScale
     // Mac OS 9 highlights menu titles and items with the Appearance accent: blue-violet by
     // default, or the graphite variation (sampled from 9.2 captures; historical review F01/F10).
     readonly property color menuAccent: desktop.appearance.accent==="blue" ? "#333399" : desktop.appearance.accentColor
@@ -65,7 +71,7 @@ Rectangle {
     property int menuSelection:-1
     property int submenuSelection:-1
     property bool navigatingSubmenu:false
-    // The desktop picture on each monitor by itself (psn_tch, 2026-11-06: one picture spread across
+    // The desktop picture on each monitor by itself (Lily Hewitt, 2026-11-06: one picture spread across
     // two monitors looked wrong), or the monitor's own picture (AppearanceSettings.monitorPictures).
     // The first is "desktop-wallpaper"; the others add their output's name.
     readonly property var wallpaperScreens: manager.displayOutputs.length > 0 ? manager.displayOutputs
@@ -372,11 +378,11 @@ Rectangle {
             "Are you sure you want to permanently remove "+(summary.items===1?"this item?":"these items?")
         emptyTrashDialog.open()
     }
-    // The Application menu lists applications by name, as 9.2.2 does (checked in psn_tch's 9.2.2 VM),
+    // The Application menu lists applications by name, as 9.2.2 does (checked in Lily Hewitt's 9.2.2 VM),
     // and Command-Tab / Command-Shift-Tab bring the next / previous one in that list forward at
     // once, wrapping, with no switcher palette.
     // In 9.2.2 control panels and desk accessories were applications of their own: open, each is
-    // listed in the Application menu and the Application Switcher (psn_tch, 2026-11-07: Control Panel
+    // listed in the Application menu and the Application Switcher (Lily Hewitt, 2026-11-07: Control Panel
     // wasn't). Their ids are "shell:<action>"; choosing one brings that window forward.
     function openShellApplications() {
         const windows=[{name:"Control Panels",action:"control-panels-window",item:controlPanels},
@@ -442,41 +448,45 @@ Rectangle {
             {text:"Show All",action:"show-all",enabled:manager.applications.some(function(a){return a.hidden})},
             {separator:true,action:"separator"}].concat(desktop.applicationsByName().map(function(a){return {text:a.name,action:"app",id:a.id,icon:a.icon,checked:a.active,marked:a.attention && !a.active,glyph:a.name==="Finder"?"disk":"application"}}))
         if(index===0){
-            let recent=manager.recentApplications.map(function(a){return {text:a.name,action:"launch",id:a.id,glyph:"application"}})
+            // Every item but About This Computer has its icon, as in 9.2.2: applications their own,
+            // folders a folder, each control panel its own (imported when there is one).
+            const icon=function(name){return manager.applicationIcon("shell:"+name)}
+            const panel=function(text,action){return {text:text,action:action,glyph:"control-panel",icon:icon(action)}}
+            let recent=manager.recentApplications.map(function(a){return {text:a.name,action:"launch",id:a.id,glyph:"application",icon:manager.applicationIcon(a.id)}})
             return [
                 {text:"About This Computer",action:"about"},
                 {separator:true,action:"separator"},
-                {text:"Applications…",action:"applications",glyph:"application"},
-                {text:"Asset Importer",action:"asset-importer",glyph:"application"},
-                {text:"Calculator",action:"calculator",glyph:"application"},
-                {text:"Control Panel",action:"control-panel",glyph:"application"},
-                {text:"Control Panels",action:"control-panels",glyph:"application",children:[
-                    {text:"All Control Panels…",action:"control-panels-window"},
+                {text:"Applications…",action:"applications",glyph:"folder",icon:icon("folder")},
+                {text:"Asset Importer",action:"asset-importer",glyph:"application",icon:icon("asset-importer")},
+                {text:"Calculator",action:"calculator",glyph:"application",icon:icon("calculator")},
+                {text:"Control Panel",action:"control-panel",glyph:"application",icon:icon("control-panel")},
+                {text:"Control Panels",action:"control-panels",glyph:"folder",icon:icon("folder"),children:[
+                    {text:"All Control Panels…",action:"control-panels-window",glyph:"control-panel",icon:icon("control-panels-window")},
                     {separator:true,action:"separator"},
-                    {text:"Appearance…",action:"appearance"},
-                    {text:"Bluetooth…",action:"bluetooth"},
-                    {text:"Control Strip",action:"control-strip",checked:desktop.appearance.controlStripVisible},
-                    {text:"Date & Time…",action:"date-time"},
-                    {text:"Desktop Picture…",action:"desktop-picture"},
-                    {text:"Energy Saver…",action:"energy"},
-                    {text:"Keyboard…",action:"keyboard"},
-                    {text:"Monitors…",action:"monitors"},
-                    {text:"Mouse & Trackpad…",action:"mouse"},
-                    {text:"Network…",action:"network"},
-                    {text:"Quick Controls…",action:"quick-controls"},
-                    {text:"Software Update…",action:"software-update"},
-                    {text:"Sound…",action:"sound"}]},
-                {text:"Key Caps",action:"key-caps",glyph:"application"},
-                {text:"Note Pad",action:"note-pad",glyph:"application"},
-                {text:"Puzzle",action:"puzzle",glyph:"application"},
-                {text:"Scrapbook",action:"scrapbook",glyph:"application"},
-                {text:"Stickies",action:"sticky-notes",glyph:"application",children:[
+                    panel("Appearance…","appearance"),
+                    panel("Bluetooth…","bluetooth"),
+                    {text:"Control Strip",action:"control-strip",checked:desktop.appearance.controlStripVisible,glyph:"control-panel",icon:icon("control-panel")},
+                    panel("Date & Time…","date-time"),
+                    panel("Desktop Picture…","desktop-picture"),
+                    panel("Energy Saver…","energy"),
+                    panel("Keyboard…","keyboard"),
+                    panel("Monitors…","monitors"),
+                    panel("Mouse & Trackpad…","mouse"),
+                    panel("Network…","network"),
+                    panel("Quick Controls…","quick-controls"),
+                    panel("Software Update…","software-update"),
+                    panel("Sound…","sound")]},
+                {text:"Key Caps",action:"key-caps",glyph:"application",icon:icon("key-caps")},
+                {text:"Note Pad",action:"note-pad",glyph:"application",icon:icon("note-pad")},
+                {text:"Puzzle",action:"puzzle",glyph:"application",icon:icon("puzzle")},
+                {text:"Scrapbook",action:"scrapbook",glyph:"application",icon:icon("scrapbook")},
+                {text:"Stickies",action:"sticky-notes",glyph:"application",icon:icon("sticky-notes"),children:[
                     {text:"New Note",action:"sticky-new"},
                     {separator:true,action:"separator"},
                     {text:manager.stickies.hidden?"Show All Notes":"Hide All Notes",action:"sticky-toggle",enabled:manager.stickies.count>0}]},
-                {text:"Recent Applications",action:"recent-applications",glyph:"application",
+                {text:"Recent Applications",action:"recent-applications",glyph:"folder",icon:icon("folder"),
                  children:recent.length?recent:[{text:"No Recent Applications",action:"none",enabled:false}]},
-                {text:"Terminal",action:"terminal",glyph:"application"}]
+                {text:"Terminal",action:"terminal",glyph:"application",icon:icon("terminal")}]
         }
         let kind=barEntries[index]?barEntries[index].kind:""
         let ready=!desktopFiles.busy
@@ -496,7 +506,7 @@ Rectangle {
             {text:"Rename…",action:"rename",enabled:Boolean(desktopFiles.renameTarget.key) && ready},
             {separator:true,action:"separator"},
             {text:"Open Desktop Folder",action:"desktop-folder"}]
-        // Edit as in the 9.2.2 Finder (checked in psn_tch's 9.2.2 VM): no separator before Show Clipboard.
+        // Edit as in the 9.2.2 Finder (checked in Lily Hewitt's 9.2.2 VM): no separator before Show Clipboard.
         // Copy with icons selected copies their names as text, one per line, as the Finder does.
         // For an application without menus of its own, each command is that application's shortcut,
         // sent as Command and the key shown (command_keys.hpp); Clear sends Delete.
@@ -558,8 +568,7 @@ Rectangle {
         if(manager.shellModal)return
         if(stripModule===module){closeMenu();return}
         closeMenu(false);manager.beginMenu()
-        let origin=anchor.mapToItem(desktop,0,0)
-        stripAnchor=Qt.rect(origin.x,origin.y,anchor.width,anchor.height)
+        stripAnchor=anchor.mapToItem(desktop,0,0,anchor.width,anchor.height)
         stripMenuOpenedAt=Date.now()
         stripModule=module
         if(["monitors","wifi"].includes(module))quickControls.service.refresh()
@@ -907,12 +916,15 @@ Rectangle {
                 let entry=barEntries[index];exportedRoot=entry.id
                 exportPopup=menuFactory.createObject(desktop,{rootMenu:true})
                 populate(exportPopup,entry.children,broker.generation,broker.revision)
-                exportPopup.popup(menuX(index),menuBar.y+menuBar.height-1);broker.prepare(entry.id)
+                exportPopup.popup(menuX(index),barBottom);broker.prepare(entry.id)
             }
         }
     }
-    Component {id:menuFactory;Menu {id:exportedMenu;property bool rootMenu:false; width:240;padding:1; font.pixelSize:12; font.family:desktop.appearance.fontFamily; font.bold:desktop.menuFontBold;enabled:!desktop.broker.busy && !desktop.broker.interactionBlocked
+    Component {id:menuFactory;Menu {id:exportedMenu;property bool rootMenu:false; width:240;padding:1;scale:desktop.barScale;transformOrigin:Popup.TopLeft; font.pixelSize:12; font.family:desktop.appearance.fontFamily; font.bold:desktop.menuFontBold;enabled:!desktop.broker.busy && !desktop.broker.interactionBlocked
         background:Rectangle{color:"#ddd";border.color:"black"}
+        // A submenu's own row is made by the Menu: the same row as a command, or it took the
+        // style's padding and sat left of the others (Lily Hewitt's Konsole Edit menu, 2026-11-09).
+        delegate:itemFactory
         onClosed:if(rootMenu && desktop.exportPopup===exportedMenu)desktop.closeMenu()
     }}
     Component {id:itemFactory;MenuItem {id:nativeItem;height:16
@@ -993,7 +1005,7 @@ Rectangle {
     // Command-? opens the Help Center, as on a Mac (? is Shift-/ on most layouts).
     // A shifted chord has several spellings (Command-Shift-3 is also Command-#). A real keyboard's
     // layout offers Qt all of them, so more than one listed sequence matches and Qt reports the
-    // match as ambiguous instead of activating it: both signals do the same (psn_tch, 2026-11-02:
+    // match as ambiguous instead of activating it: both signals do the same (Lily Hewitt, 2026-11-02:
     // the screenshot keys did nothing; the tests' synthetic keys carry no layout and matched once).
     Shortcut {sequences:["Meta+?","Meta+Shift+?","Meta+Shift+/"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging
               onActivated:{desktop.closeMenu();desktop.showHelp("welcome")}
@@ -1001,7 +1013,7 @@ Rectangle {
     // Frees a pointer that a game locked or confined. Only bound while one is captured, so the
     // chord otherwise reaches the application. See docs/relative-pointer-plan.md.
     Shortcut {sequence:"Ctrl+Alt+Escape";autoRepeat:false;enabled:manager.pointerCaptured;onActivated:manager.releasePointerCapture()}
-    // Super is Command (psn_tch, D06); Command-D stays Duplicate, so Applications keeps psn_tch's Alt+D.
+    // Super is Command (Lily Hewitt, D06); Command-D stays Duplicate, so Applications keeps Lily Hewitt's Alt+D.
     // The other Alt forms are their earlier explicit requests, kept as aliases.
     Shortcut {sequence:"Alt+D";autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging;onActivated:{desktop.closeMenu();applicationBrowser.browse("")}}
     Shortcut {sequences:["Meta+Q","Alt+Q"];autoRepeat:false;enabled:!manager.shellModal && !manager.menuOpen && !manager.nativeDragging;onActivated:manager.requestQuitActiveApplication()}
@@ -1011,7 +1023,7 @@ Rectangle {
               onActivated:desktop.copyScreenshot(false);onActivatedAmbiguously:activated()}
     Shortcut {sequences:["Meta+Shift+4","Meta+Shift+$","Meta+$"];autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging
               onActivated:desktop.copyScreenshot(true);onActivatedAmbiguously:activated()}
-    // Command-Shift-P does the same as Command-Shift-4 (psn_tch, 2026-11-04). Command-P stays Print.
+    // Command-Shift-P does the same as Command-Shift-4 (Lily Hewitt, 2026-11-04). Command-P stays Print.
     Shortcut {sequence:"Meta+Shift+P";autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging
               onActivated:desktop.copyScreenshot(true);onActivatedAmbiguously:activated()}
     Shortcut {sequence:"Escape";enabled:manager.desktopActive && !manager.shellModal && (desktopFiles.dragging || desktopFiles.selecting);onActivated:desktopFiles.selecting ? desktopFiles.cancelSelection() : desktopFiles.cancelDrag()}
@@ -1155,8 +1167,14 @@ Rectangle {
             // A client's full screen covers the desktop without chrome; while it
             // is active it also covers the menu bar and Control Strip.
             readonly property bool chrome: record.serverDecorated && !record.fullScreen
+            // A Finder pop-up window (View ▸ as Pop-up Window): a tab in place of the title bar.
+            // Closed, only the tab shows, on the bottom of its screen, above other windows.
+            readonly property bool popUp: chrome && record.popUp
+            readonly property bool tabOnly: popUp && !record.popUpOpen
+            readonly property int bodyTop: popUp ? 19 : 0
+            topExtra: popUp ? 13 : 0
             x: record.fullScreen ? record.fullScreenRect.x : record.x; y: record.fullScreen ? record.fullScreenRect.y : record.y
-            z: record.fullScreen && record.active ? 10002 : record.layer
+            z: record.fullScreen && record.active ? 10002 : tabOnly ? 7000 : record.layer
             width: record.width + (chrome ? 6 : 0)
             contentHeight:record.height;serverDecorated:chrome;collapsed:record.collapsed
             animationDuration:desktop.appearance.shadeDuration
@@ -1166,17 +1184,31 @@ Rectangle {
             enabled: !manager.shellModal
             onXChanged: if (!record.fullScreen && Math.round(x) !== record.x) manager.moveWindow(record.id, Math.round(x), Math.round(y))
             onYChanged: if (!record.fullScreen && Math.round(y) !== record.y) manager.moveWindow(record.id, Math.round(x), Math.round(y))
-            Rectangle {visible:frame.chrome; x: 3; y: 3; width: parent.width; height: parent.height; color: "#50000000" }
-            Rectangle {visible:frame.chrome; anchors.fill: parent; color: record.active ? "#ccc" : "#ddd"; border.width: 1; border.color: record.active ? "#000" : "#555" }
-            // The active Platinum bevel is light above/left and dark below/right.
-            // Inactive windows have a flat field and a single gray outline.
-            Rectangle {visible:frame.chrome && record.active; x:1;y:1;width:parent.width-3;height:1;color:"#fff"}
-            Rectangle {visible:frame.chrome && record.active; x:1;y:2;width:1;height:parent.height-4;color:"#fff"}
-            Rectangle {visible:frame.chrome && record.active; x:parent.width-2;y:2;width:1;height:parent.height-3;color:"#999"}
-            Rectangle {visible:frame.chrome && record.active; x:2;y:parent.height-2;width:parent.width-4;height:1;color:"#999"}
+            Item {
+                // The frame's body: the whole frame, or below a pop-up's tab.
+                visible: frame.chrome && !frame.tabOnly
+                y: frame.bodyTop; width: parent.width; height: parent.height - y
+                Rectangle {x: 3; y: 3; width: parent.width; height: parent.height; color: "#50000000" }
+                Rectangle {anchors.fill: parent; color: record.active ? "#ccc" : "#ddd"; border.width: 1; border.color: record.active ? "#000" : "#555" }
+                // The active Platinum bevel is light above/left and dark below/right.
+                // Inactive windows have a flat field and a single gray outline.
+                Rectangle {visible:record.active; x:1;y:1;width:parent.width-3;height:1;color:"#fff"}
+                Rectangle {visible:record.active; x:1;y:2;width:1;height:parent.height-4;color:"#fff"}
+                Rectangle {visible:record.active; x:parent.width-2;y:2;width:1;height:parent.height-3;color:"#999"}
+                Rectangle {visible:record.active; x:2;y:parent.height-2;width:parent.width-4;height:1;color:"#999"}
+            }
+            PopUpTab {
+                id: popUpTab
+                // Above the content: the grips lie over its header's corners.
+                z: 2
+                visible: frame.popUp
+                window: record; frameItem: frame; sessionManager: manager
+                fontFamily: desktop.appearance.fontFamily; bold: desktop.menuFontBold
+                icon: manager.applicationIcon("shell:folder")
+            }
             Rectangle {
                 id: titlebar
-                visible: frame.chrome
+                visible: frame.chrome && !frame.popUp
                 x: 2; y: 2; width: parent.width-4; height: 18
                 color: record.active ? "#ccc" : "#ddd"
                 Repeater {
@@ -1207,7 +1239,9 @@ Rectangle {
                         }
                         manager.beginWindowMove(record.id,mapToItem(desktop,mouse.x,mouse.y))
                     }
-                    onReleased:manager.finishWindowMove(record.id)
+                    // Released at the very bottom of the screen, a Finder window becomes a pop-up.
+                    onReleased:function(mouse){manager.finishWindowMove(record.id)
+                        manager.dropAtScreenBottom(record.id,mapToItem(desktop,mouse.x,mouse.y))}
                     onCanceled:manager.finishWindowMove(record.id,false)
                     onDoubleClicked: {
                         manager.finishWindowMove(record.id,false)
@@ -1241,14 +1275,14 @@ Rectangle {
                 screens: manager.displayOutputs
                 deferDragRelease:manager.nativeDragOnDesktop
                 // A self-decorated window's own shadow lies outside its position (Chromium could
-                // not reach the menu bar: psn_tch, 2026-10-22).
-                x: frame.chrome ? 3 : -record.contentOffset.x; y: frame.chrome ? 23 : -record.contentOffset.y
+                // not reach the menu bar: Lily Hewitt, 2026-10-22).
+                x: frame.chrome ? 3 : -record.contentOffset.x; y: frame.chrome ? 23 + frame.topExtra : -record.contentOffset.y
                 shellSurface: record.shell
                 // Qt's shell integration mutates moveItem on fullscreen ack,
                 // sometimes before its view has the requested output. Keep
                 // those writes off the frame's policy-owned QML bindings.
                 moveItem: clientMoveProxy
-                visible: frame.reveal > 0
+                visible: frame.reveal > 0 && !frame.tabOnly
                 inputEventsEnabled: visible && !record.collapsed && !frame.animating && record.active && !manager.menuOpen && !manager.shellModal
                 focus: frame.focus
                 focusOnClick: false
@@ -1274,8 +1308,8 @@ Rectangle {
                 }
             }
             MouseArea {
-                x:frame.chrome?3:0;y:frame.chrome?23:0;width:record.width;height:record.height
-                visible: !record.collapsed && !frame.animating && !record.active
+                x:frame.chrome?3:0;y:frame.chrome?23+frame.topExtra:0;width:record.width;height:record.height
+                visible: !record.collapsed && !frame.animating && !record.active && !frame.tabOnly
                 acceptedButtons:Qt.LeftButton|Qt.RightButton
                 onPressed:function(mouse){
                     if(mouse.button===Qt.RightButton)manager.contextClickWindow(record.id,mapToItem(desktop,mouse.x,mouse.y))
@@ -1284,7 +1318,7 @@ Rectangle {
             }
             Rectangle {
                 objectName:"resize-box-"+record.id
-                visible: frame.chrome && !record.collapsed && !frame.animating && record.canResize; anchors.right: parent.right; anchors.rightMargin:4; anchors.bottom: parent.bottom; anchors.bottomMargin:4; width: 15; height: 15; color: record.active ? "#ccc" : "#ddd"
+                visible: frame.chrome && !frame.popUp && !record.collapsed && !frame.animating && record.canResize; anchors.right: parent.right; anchors.rightMargin:4; anchors.bottom: parent.bottom; anchors.bottomMargin:4; width: 15; height: 15; color: record.active ? "#ccc" : "#ddd"
                 Canvas {
                     anchors.fill:parent;visible:record.active
                     // Three short beveled diagonals, measured at 1:1 in the Finder grow box.
@@ -1338,9 +1372,10 @@ Rectangle {
     }
     Rectangle {
         id: menuBar; objectName: "desktop-menu-bar"; z: 10000
-        x:manager.primaryDisplayRect.x;y:manager.primaryDisplayRect.y;width:manager.primaryDisplayRect.width
-        // Menus and the menu bar are #dddddd, as in 9.2.2 (psn_tch chose to match it, 2026-10-22).
-        height: manager.menuBarHeight; color: "#ddd";enabled:!manager.shellModal
+        x:manager.primaryDisplayRect.x;y:manager.primaryDisplayRect.y;width:manager.primaryDisplayRect.width/desktop.barScale
+        scale:desktop.barScale;transformOrigin:Item.TopLeft
+        // Menus and the menu bar are #dddddd, as in 9.2.2 (Lily Hewitt chose to match it, 2026-10-22).
+        height: 20; color: "#ddd";enabled:!manager.shellModal
         Rectangle {x:0;y:0;width:parent.width;height:1;color:"white"}
         Rectangle {x:0;y:parent.height-2;width:parent.width;height:1;color:"#999"}
         Rectangle {x:0;y:parent.height-1;width:parent.width;height:1;color:"black"}
@@ -1410,7 +1445,7 @@ Rectangle {
             MouseArea {anchors.fill:parent;hoverEnabled:true;onPressed:desktop.showMenu(desktop.keyboardMenuIndex)
                 onEntered:if(desktop.openMenu>=0 && desktop.openMenu!==desktop.keyboardMenuIndex)desktop.showMenu(desktop.keyboardMenuIndex)}
         }
-        // The application menu's etched strip, as in 9.2.2 (psn_tch's About This Computer capture):
+        // The application menu's etched strip, as in 9.2.2 (Lily Hewitt's About This Computer capture):
         // a solid white line, four grip dots, then a solid grey line through the top highlight.
         Item {
             id:appDivider;objectName:"application-menu-divider";anchors.right:appMenu.left;y:1;width:6;height:menuBar.height-2
@@ -1424,7 +1459,7 @@ Rectangle {
         }
         Rectangle {id:appMenu;objectName:"application-menu";anchors.right:parent.right;anchors.rightMargin:6;width:appTitle.implicitWidth+16;height:menuBar.height-1;color:desktop.openMenu===desktop.barEntries.length?desktop.menuAccent:"transparent"
             // While an application asks for attention, the title alternates about once a second
-            // with that application's icon alone, as 9.2.2 does (checked in psn_tch's 9.2.2 VM).
+            // with that application's icon alone, as 9.2.2 does (checked in Lily Hewitt's 9.2.2 VM).
             readonly property var current:desktop.applicationsByName().find(function(a){return a.active})
             readonly property var waiting:manager.applications.find(function(a){return a.attention && !a.active})
             property bool alternate:false
@@ -1532,12 +1567,14 @@ Rectangle {
                 onClicked:if(modelData.children)desktop.openShellSubmenu(index,modelData.children,row.mapToItem(desktop,0,0).y);else desktop.chooseShellEntry(row.objectName,modelData.action,modelData.id)}
         }
     }
-    Rectangle {visible:popup.visible;z:10000.5;x:popup.x+1;y:popup.y+2;width:popup.width;height:popup.height-1;color:"#222"}
+    Rectangle {visible:popup.visible;z:10000.5;x:popup.x+desktop.barScale;y:popup.y+2*desktop.barScale;width:popup.width;height:popup.height-1;color:"#222"
+        scale:desktop.barScale;transformOrigin:Item.TopLeft}
     Rectangle {
         id: popup; objectName: "desktop-menu-popup"; z: 10001; visible:desktop.openMenu>=0 && desktop.exportedRoot<0
-        x:Math.max(menuBar.x,Math.min(desktop.openMenu===desktop.barEntries.length?menuBar.x+menuBar.width-width-2
-              :desktop.openMenu===desktop.keyboardMenuIndex?keyboardMenu.mapToItem(desktop,0,0).x:desktop.menuX(desktop.openMenu),menuBar.x+menuBar.width-width))
-        y:menuBar.y+menuBar.height-1
+        scale:desktop.barScale;transformOrigin:Item.TopLeft
+        x:Math.max(menuBar.x,Math.min(desktop.openMenu===desktop.barEntries.length?desktop.barRight-(width+2)*desktop.barScale
+              :desktop.openMenu===desktop.keyboardMenuIndex?keyboardMenu.mapToItem(desktop,0,0).x:desktop.menuX(desktop.openMenu),desktop.barRight-width*desktop.barScale))
+        y:desktop.barBottom
         width:desktop.shellMenuWidth(desktop.openMenu>=0 ? desktop.shellMenuEntries(desktop.openMenu) : [],false);height:items.height+2;color:"#ddd";border.color:"black"
         Rectangle {x:1;y:1;width:parent.width-3;height:1;color:"white"}
         Rectangle {x:1;y:2;width:1;height:parent.height-4;color:"white"}
@@ -1548,13 +1585,17 @@ Rectangle {
             Repeater {model:desktop.openMenu>=0 && desktop.exportedRoot<0 ? desktop.shellMenuEntries(desktop.openMenu) : [];delegate:shellMenuRow}
         }
     }
-    Rectangle {visible:submenu.visible;z:10001.5;x:submenu.x+1;y:submenu.y+2;width:submenu.width;height:submenu.height-1;color:"#222"}
+    Rectangle {visible:submenu.visible;z:10001.5;x:submenu.x+desktop.barScale;y:submenu.y+2*desktop.barScale;width:submenu.width;height:submenu.height-1;color:"#222"
+        scale:desktop.barScale;transformOrigin:Item.TopLeft}
     Rectangle {
         id: submenu; objectName:"desktop-submenu"; z: 10002; visible:owner.visible && desktop.openSubmenu>=0
         // Beside the menu it belongs to: the menu bar's, or a Control Strip module's.
         readonly property Item owner: desktop.stripModule!=="" ? stripMenu : popup
-        x:owner.x+owner.width+width-4<=menuBar.x+menuBar.width?owner.x+owner.width-4:Math.max(menuBar.x,owner.x-width+4)
-        y:Math.max(menuBar.y+menuBar.height,Math.min(desktop.submenuY-1,menuBar.y+manager.primaryDisplayRect.height-height-2))
+        scale:desktop.barScale;transformOrigin:Item.TopLeft
+        x:owner.x+(owner.width+width-4)*desktop.barScale<=desktop.barRight?owner.x+(owner.width-4)*desktop.barScale
+            :Math.max(menuBar.x,owner.x-(width-4)*desktop.barScale)
+        y:Math.max(desktop.barBottom+desktop.barScale,Math.min(desktop.submenuY-desktop.barScale,
+            menuBar.y+manager.primaryDisplayRect.height-(height+2)*desktop.barScale))
         width:desktop.shellMenuWidth(desktop.submenuEntries,false);height:subitems.height+2;color:"#ddd";border.color:"black"
         Rectangle {x:1;y:1;width:parent.width-3;height:1;color:"white"}
         Rectangle {x:1;y:2;width:1;height:parent.height-4;color:"white"}
@@ -1566,7 +1607,8 @@ Rectangle {
                 onItemAdded:function(index,item){item.submenuRow=true}}
         }
     }
-    Rectangle {visible:stripMenu.visible;z:10000.5;x:stripMenu.x+3;y:stripMenu.y+3;width:stripMenu.width;height:stripMenu.height;color:"#50000000"}
+    Rectangle {visible:stripMenu.visible;z:10000.5;x:stripMenu.x+3*desktop.barScale;y:stripMenu.y+3*desktop.barScale;width:stripMenu.width;height:stripMenu.height;color:"#50000000"
+        scale:desktop.barScale;transformOrigin:Item.TopLeft}
     Rectangle {
         id: stripMenu; objectName:"control-strip-menu"; z: 10001; visible:desktop.stripModule!==""
         // The rows, rebuilt only when they change: the entries read every module's live state
@@ -1578,12 +1620,15 @@ Rectangle {
         width:220;height:stripItems.height+6;color:"#ddd";border.color:"#222"
         // Measured in 9.2.2: the menu's left edge 1 px left of the module, its bottom edge over the
         // strip's top line and the module's top 2 px (docs/fidelity/control-strip.md).
-        x:Math.max(menuBar.x,Math.min(desktop.stripAnchor.x-1,menuBar.x+menuBar.width-width))
+        scale:desktop.barScale;transformOrigin:Item.TopLeft
+        readonly property real shownHeight:height*desktop.barScale
+        readonly property real barEnd:menuBar.y+manager.menuBarHeight
+        x:Math.max(menuBar.x,Math.min(desktop.stripAnchor.x-desktop.barScale,desktop.barRight-width*desktop.barScale))
         // Above the module (V922 E12), or below it when the strip sits under the menu bar.
-        y:desktop.stripAnchor.y+2-height>=menuBar.y+menuBar.height?desktop.stripAnchor.y+2-height
-          :desktop.stripAnchor.y+desktop.stripAnchor.height-2+height<=manager.primaryDisplayRect.y+manager.primaryDisplayRect.height
-            ?desktop.stripAnchor.y+desktop.stripAnchor.height-2
-          :Math.max(menuBar.y+menuBar.height,manager.primaryDisplayRect.y+manager.primaryDisplayRect.height-height)
+        y:desktop.stripAnchor.y+2*desktop.barScale-shownHeight>=barEnd?desktop.stripAnchor.y+2*desktop.barScale-shownHeight
+          :desktop.stripAnchor.y+desktop.stripAnchor.height-2*desktop.barScale+shownHeight<=manager.primaryDisplayRect.y+manager.primaryDisplayRect.height
+            ?desktop.stripAnchor.y+desktop.stripAnchor.height-2*desktop.barScale
+          :Math.max(barEnd,manager.primaryDisplayRect.y+manager.primaryDisplayRect.height-shownHeight)
         Column {
             id:stripItems;x:3;y:3;width:parent.width-6
             Repeater {model:stripMenu.entries;delegate:shellMenuRow}
@@ -1996,7 +2041,7 @@ Rectangle {
             for(let x=0;x<width;x+=2){c.fillRect(x,0,1,1);c.fillRect(x,height-1,1,1)}
             for(let y=0;y<height;y+=2){c.fillRect(0,y,1,1);c.fillRect(width-1,y,1,1)}}
     }
-    ControlStrip {id:desktopControlStrip;z:8000;sessionManager:manager;settings:desktop.appearance;openModule:desktop.stripModule
+    ControlStrip {id:desktopControlStrip;z:8000;sessionManager:manager;settings:desktop.appearance;openModule:desktop.stripModule;zoom:desktop.barScale
         personalFolder:manager.personalAssets
         extraModules:manager.statusItems ? manager.statusItems.items.map(function(i){return {command:"status:"+i.key,name:i.title,icon:i.icon,statusId:i.id}}) : []
         onModuleRequested:function(module,anchor){desktop.openStripModule(module,anchor)}

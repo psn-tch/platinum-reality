@@ -81,13 +81,13 @@ compatibility compromise. The browser does not recreate Apple's application
 loading, Desktop Database, resource forks or original type/creator dispatch.
 No uncertainty item is closed by these software tests.
 
-psn_tch also explicitly requested file drags out of folders and standard right-click
+Lily Hewitt also explicitly requested file drags out of folders and standard right-click
 menus, with modern convenience taking priority where useful. The native context
 action set, Ctrl-copy alternative, background-window right-click activation and
 desktop file-drop receiver are deliberate adaptations (M). They are not evidence
 that these exact controls, modifiers or action lists shipped in Mac OS 9.2.2.
 
-psn_tch explicitly selected Charcoal, a rainbow Apple menu image and a classic
+Lily Hewitt explicitly selected Charcoal, a rainbow Apple menu image and a classic
 Control Strip, and requested visible adjustable WindowShade. These are accepted
 product requirements (M). Current local font/icon use does not authenticate an
 original 9.2.2 resource or factory configuration. The 0–1200 ms speed control,
@@ -107,7 +107,7 @@ They do not close historical questions. No original OS installation, ROM,
 historical application, VM/emulator or reference machine has been executed.
 
 
-psn_tch requested hold-left-button multi-file selection and direct desktop-to-open-
+Lily Hewitt requested hold-left-button multi-file selection and direct desktop-to-open-
 folder drops. The current rectangle, additive Shift/Ctrl convention, Escape
 restoration and group-preserving drag behavior are explicit native convenience
 choices (M). They do not close U01/U02 or authenticate the exact 9.2.2 selection,

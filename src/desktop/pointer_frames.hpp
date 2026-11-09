@@ -10,7 +10,7 @@ struct wl_global;
 
 // Modern pointers for every client. Qt 6.12.0 announces wl_seat version 4 (qwaylandseat.cpp) and
 // its pointer never sends wl_pointer.frame. Chromium gathers scroll steps until a frame, so at
-// version 4 it never scrolled (psn_tch, 2026-10-22). The seat is announced again at version 8, and
+// version 4 it never scrolled (Lily Hewitt, 2026-10-22). The seat is announced again at version 8, and
 // each group of pointer events sent to a version 5+ pointer (by Qt or by this desktop) is closed
 // with a frame before the next host pointer event is delivered, or before the event loop waits.
 class PointerFrames final : public QObject

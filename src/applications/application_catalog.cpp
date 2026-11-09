@@ -205,7 +205,7 @@ bool ApplicationCatalog::matchesDocument(const DesktopEntry &entry) const
 namespace
 {
 // How well a name answers the search, best first: the name itself, the name's start, the start of
-// a word in it, anywhere in it, then only in its description or keywords (psn_tch, 2026-11-02:
+// a word in it, anywhere in it, then only in its description or keywords (Lily Hewitt, 2026-11-02:
 // typing "steam" listed every Steam game, whose descriptions mention Steam, above Steam itself).
 int nameRank(const QString &name, const QString &query)
 {

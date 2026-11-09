@@ -7,11 +7,13 @@ FocusScope {
     property bool collapsed: false
     property bool serverDecorated: true
     property real contentHeight: 430
+    // Chrome between the title (or a pop-up's tab) and the content: a pop-up's grip strip.
+    property int topExtra: 0
     property int animationDuration: 240
     property bool initialized: false
     property real reveal: collapsed && serverDecorated ? 0 : 1
     readonly property bool animating: motion.running
-    height: serverDecorated ? Math.round(23 + (contentHeight + 4) * reveal) : contentHeight
+    height: serverDecorated ? Math.round(23 + topExtra + (contentHeight + 4) * reveal) : contentHeight
     clip: serverDecorated && (collapsed || animating)
     Component.onCompleted: initialized = true
     Behavior on reveal {

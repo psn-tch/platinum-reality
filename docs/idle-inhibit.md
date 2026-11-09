@@ -2,7 +2,7 @@
 
 Status: **implemented and qualified in the headless harness (Claude, 2026-10-20).**
 
-psn_tch requested no automatic idle-timeout lock; the supervisor now listens only
+Lily Hewitt requested no automatic idle-timeout lock; the supervisor now listens only
 for explicit lock and before-sleep events. Video players, browsers playing video, and games ask the desktop
 to stay awake. Platinum Reality turns any such request into one idle inhibitor on its own window at
 the host Sway. Sway pauses its idle timers, and therefore the lock, while a visible surface holds

@@ -39,7 +39,7 @@ int main(int argc, char **argv)
     previousMessageHandler = qInstallMessageHandler(messageHandler);
     // The desktop is a client of its private backend, which runs no input method, so text-input-v3
     // there only made Qt warn on every focus change (about 360 "disableSurface … 0x0 is focused"
-    // lines a day in psn_tch's journal, 2026-10-30). Hidden from Qt while it connects, then put back:
+    // lines a day in Lily Hewitt's journal, 2026-10-30). Hidden from Qt while it connects, then put back:
     // applications started from the desktop inherit this environment and keep their text input.
     const bool hadDisabled = qEnvironmentVariableIsSet("QT_WAYLAND_DISABLED_INTERFACES");
     const auto disabled = qgetenv("QT_WAYLAND_DISABLED_INTERFACES");

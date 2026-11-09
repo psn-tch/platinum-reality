@@ -38,7 +38,7 @@ reinstallation, not resumption or preservation of the interrupted system.
 
 Exact image/source/engine pins and remaining physical-install blockers are in
 `../docs/physical-install-readiness.md`. The guard stays on. Completed test disk
-images were later removed with psn_tch's approval; receipts/logs/frames remain.
+images were later removed with Lily Hewitt's approval; receipts/logs/frames remain.
 Standard VGA and QXL single-screen enumeration now pass; current headless
 two-output activation is not qualified. See `../docs/vm-display-matrix.md`.
 

@@ -30,7 +30,7 @@ The biggest fidelity gaps are in **everyday visual signals** and **menu structur
 
 Two behaviours are **verified historical differences that are currently deliberate product
 choices**: window dragging (9.2 drags a grey outline) and WindowShade timing (9.2.2 is instant).
-They are listed for psn_tch's decision, not as defects.
+They are listed for Lily Hewitt's decision, not as defects.
 
 ## What was inspected
 
@@ -57,7 +57,7 @@ No audio was analysed beyond the existing transcripts. No emulator or Mac OS ins
 | **DOC** | Original Apple documentation catalogued in the earlier research (scholar S-IDs, microscope H-IDs, phase-2 C-IDs), with its own version limits. |
 | **PRIOR** | A finding from the earlier packages, attributed and not re-verified here. |
 | **CODE / CAP** | Our source (file:line) or a capture from the latest full native gate. |
-| **INF / PROP / PROD** | Inference, design proposal, or an existing product decision (psn_tch). None of these is a historical fact. |
+| **INF / PROP / PROD** | Inference, design proposal, or an existing product decision (Lily Hewitt). None of these is a historical fact. |
 
 Limits that apply throughout: recordings are re-encoded and scaled, so colours are approximate
 and **no pixel dimensions are measured**. One recording shows one configuration, so defaults
@@ -158,7 +158,7 @@ F06 (divided zoom box, two-bar collapse box, diagonal size grip).
 
 Priority: **P1** = highly visible daily difference, strong evidence, small to moderate effort;
 **P2** = structural or moderate effort; **P3** = polish or optional. "Decision" marks items that
-need psn_tch's choice because current behaviour is intentional.
+need Lily Hewitt's choice because current behaviour is intentional.
 
 | ID | Pri | Area | 9.x evidence | Current behaviour |
 | --- | --- | --- | --- | --- |
@@ -237,7 +237,7 @@ pattern ("Trash", "Get me on the Internet" in italics).
 (or `#8995a2` when the desktop is inactive). Our link-type icons draw a badge, but labels are never italic.
 
 **Recommendation (PROP).** Use the boxed label style, which also keeps labels readable on busy
-photographs. Use black for the selected box, or the accent if psn_tch prefers. Italicise labels of
+photographs. Use black for the selected box, or the accent if Lily Hewitt prefers. Italicise labels of
 symlinks and aliases, noting that they are a visual cue only, not Classic alias semantics (DOC
 S20, FD11). Apply the same treatment in Finder icon views.
 
@@ -360,7 +360,7 @@ Show Control Strip. Desktop Picture is a separate dialog. Double-click collapse 
 **Recommendation (PROP).** Consolidate into a tabbed Appearance panel: Desktop (current picture
 chooser plus patterns, F16), Fonts (F11), Options (double-click collapse toggle; scroll-arrow layout if
 the Qt style supports it), Sound (F17). Move Control Strip visibility to its own panel (F09). PROD
-(WM05): psn_tch approved double-click collapse **on by default**. Keep that default and add the toggle.
+(WM05): Lily Hewitt approved double-click collapse **on by default**. Keep that default and add the toggle.
 
 ### F11 — Separate font roles (P2)
 
@@ -384,7 +384,7 @@ release (02:45). DOC S16 (older HIG) describes outline feedback for resizing too
 
 **Current.** `Desktop.qml:319-322` moves the window live on every pointer move.
 
-**Decision for psn_tch.** Live dragging is a modern usability improvement. A "Classic outline dragging"
+**Decision for Lily Hewitt.** Live dragging is a modern usability improvement. A "Classic outline dragging"
 Appearance option would allow faithful behaviour without forcing it.
 
 ### F13 — WindowShade is instantaneous in 9.2.2 (Decision)
@@ -399,7 +399,7 @@ Appearance option would allow faithful behaviour without forcing it.
 **Current.** A 240 ms animated roll by default (`appearance_settings.hpp:82`, `WindowRoll.qml`), with
 an "Instant" setting in the Appearance dialog.
 
-**Decision for psn_tch.** Keep the animation (PROD), or offer a "Mac OS 9 (instant)" preset or default.
+**Decision for Lily Hewitt.** Keep the animation (PROD), or offer a "Mac OS 9 (instant)" preset or default.
 
 ### F14 — Command key and shown equivalents (Decision)
 
@@ -408,10 +408,10 @@ V92 E19 shows **no equivalent for Hide** in the Application menu. V922 E13 shows
 in Finder.
 
 **Current.** `Desktop.qml:188-198` uses Meta+H to hide, Alt+D for Applications, Alt+Q to quit and
-Alt+Shift+S for screenshots (psn_tch's explicit requests). Desktop file commands accept both Meta and Ctrl.
+Alt+Shift+S for screenshots (Lily Hewitt's explicit requests). Desktop file commands accept both Meta and Ctrl.
 The Finder uses Ctrl (`finder_window.cpp:334-466`).
 
-**Decision for psn_tch.** Pick one modifier to stand for Command, then show equivalents in every shell
+**Decision for Lily Hewitt.** Pick one modifier to stand for Command, then show equivalents in every shell
 menu with a consistent glyph. Keep the requested Alt shortcuts if that is the chosen mapping. Note that
 "Hide" had no shortcut historically. DOC KB01 warns against blind global remaps (IME, accessibility).
 
@@ -486,7 +486,7 @@ view, the Window menu and spring-loaded folders, using the scanner in `tools/sca
 3. **F07, F08, F10**: menu restructuring and the tabbed Appearance panel. These touch many tests, so
    do them in one planned pass.
 4. **F09**: Control Strip modules backed by the existing `system_controls` helper.
-5. **F11–F17**: after psn_tch decides the "Decision" items.
+5. **F11–F17**: after Lily Hewitt decides the "Decision" items.
 
 Each change should be qualified like any other release: local and native gates, capture inspection,
 and no regression of the browser, X11 or Vulkan workflows.

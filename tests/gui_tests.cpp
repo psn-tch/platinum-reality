@@ -544,7 +544,7 @@ class GuiTests : public QObject
     }
     void rightClickMenusOfferTheFileCommandsLikeDolphin()
     {
-        // psn_tch, 2026-10-29: Finder should be as usable as Dolphin. Right-click is where
+        // Lily Hewitt, 2026-10-29: Finder should be as usable as Dolphin. Right-click is where
         // Cut, Copy and Paste are looked for.
         QTemporaryDir root, profile;
         QVERIFY(QDir(root.path()).mkpath("Folder"));
@@ -1103,7 +1103,7 @@ class GuiTests : public QObject
     }
     void foldersOpenInTheSameWindowWithBackForwardAndPlacesLikeDolphin()
     {
-        // psn_tch, 2026-10-29: as usable as Dolphin. A folder opens in the same window; Back,
+        // Lily Hewitt, 2026-10-29: as usable as Dolphin. A folder opens in the same window; Back,
         // Forward and Enclosing Folder, the path field and the Places list move around; Option
         // still opens a folder in its own window, as on a Mac.
         QTemporaryDir root, profile;
@@ -1554,7 +1554,7 @@ class GuiTests : public QObject
     }
     void hiddenFilesAreShownInEveryWindowAndRemembered()
     {
-        // psn_tch, 2026-10-22: "make it so that you can hide and show hidden files".
+        // Lily Hewitt, 2026-10-22: "make it so that you can hide and show hidden files".
         QTemporaryDir root;
         QTemporaryDir profile;
         QDir(root.path()).mkdir("Folder");

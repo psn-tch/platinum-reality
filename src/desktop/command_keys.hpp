@@ -4,7 +4,7 @@
 #include <Qt>
 #include <optional>
 
-// Command is the Super key (psn_tch's choice, Finishing School D06). Linux
+// Command is the Super key (Lily Hewitt's choice, Finishing School D06). Linux
 // applications expect Control for the same commands, so a Command chord is
 // delivered to the application as the key it understands:
 //   letters, digits, punctuation  -> Control (Command-C copies, Command-V pastes)

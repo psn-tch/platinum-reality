@@ -213,10 +213,10 @@ class WifiTests final : public QObject
         // A user name and password, for a company network.
         auto both = f.fake.ask("RequestUserNameAndPassword", {QVariant::fromValue(QDBusObjectPath(neighbour))});
         QTRY_COMPARE(service.request().value("kind").toString(), QString("user-password"));
-        service.answer(true, "secret", "psn_tch");
+        service.answer(true, "secret", "Lily Hewitt");
         QTRY_VERIFY(both.isFinished());
         QVERIFY(!both.isError());
-        QCOMPARE(both.reply().arguments(), (QVariantList{QString("psn_tch"), QString("secret")}));
+        QCOMPARE(both.reply().arguments(), (QVariantList{QString("Lily Hewitt"), QString("secret")}));
     }
 
     void iwdStartingLaterIsFollowedAndWithoutABusNothingIsOffered()

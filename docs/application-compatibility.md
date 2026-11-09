@@ -56,7 +56,7 @@ The entries below preserve earlier qualification and user observations.
 
 ## Standalone feedback and keyboard correction — 2026-10-18 local time
 
-psn_tch is now using the standalone session. Editor accepts text; Firefox in the
+Lily Hewitt is now using the standalone session. Editor accepts text; Firefox in the
 original installed release did not, including after Ctrl+L. This supersedes any
 inference that earlier frame/launch qualification established browser typing.
 The regression was reproduced in a disposable Firefox profile with global
@@ -73,14 +73,14 @@ The [keyboard evidence](evidence/keyboard-broadcast-20261019/20261019T014933-728
 establishes real text entry, focus loss/reacquisition and additional text entry,
 alongside the earlier frame/bounds/lifecycle assertions. All ten workflows also
 pass in the instrumented run, and nine smoke checks pass against the installed
-updated payload. The selected next-login release contains the fix; psn_tch has not
+updated payload. The selected next-login release contains the fix; Lily Hewitt has not
 yet restarted to provide physical-session confirmation. Browser media, clipboard,
 downloads, IME and general application compatibility remain separate questions.
 
 Kitty 0.49.2 fails against the current inner display: its GLFW backend requests
 data-device-manager v3 while Qt advertises v1. GPU/EGL initialization also fails.
 An isolated, undeployed backend experiment did not complete its build under
-GCC 16's format-truncation warning policy. psn_tch subsequently chose Konsole and
+GCC 16's format-truncation warning policy. Lily Hewitt subsequently chose Konsole and
 explicitly deprioritized Kitty. No system Kitty files or configuration were
 changed, and no Kitty compatibility success is claimed. The Apple menu's
 Terminal action already launches Konsole with `--separate`.
@@ -97,7 +97,7 @@ and earlier table below remain distinct from those automatic results.
 
 | Application | Evidence | Established scope | Still to check |
 | --- | --- | --- | --- |
-| Firefox | psn_tch's 2026-10-18 hands-on report: “firefox opened perfect inside it” | User-observed successful opening inside Platinum Reality | Exact version/build and launch method; browsing and text input; additional windows and dialogs; clipboard; downloads/uploads; audio/video; restart and profile behavior |
+| Firefox | Lily Hewitt's 2026-10-18 hands-on report: “firefox opened perfect inside it” | User-observed successful opening inside Platinum Reality | Exact version/build and launch method; browsing and text input; additional windows and dialogs; clipboard; downloads/uploads; audio/video; restart and profile behavior |
 | Owned Finder and Editor | Eight-workflow native gate, latest archive `20261018T170917-495823` | Recorded folder/document operations, native input, menus, save/cancel, transfers and lifecycle assertions | Broader filesystem, recovery, accessibility and application interactions |
 | Qt test probe | Same native gate | Specific decorations, input, menu, modality and lifecycle assertions | General Qt application compatibility |
 
@@ -112,7 +112,7 @@ The existing nested launcher permits those hands-on checks without rerunning the
 entire qualification gate on every launch. See [hands-on instructions](try-it.md).
 
 
-Later on 2026-10-18, psn_tch reports the separate-profile styled Firefox “looking
+Later on 2026-10-18, Lily Hewitt reports the separate-profile styled Firefox “looking
 good” and requests classic square title-bar controls. The compositor/profile
 adapter for those controls is new work and needs a separate native result.
 The preceding [nine-workflow run](evidence/20261018T172632-507871/native-tests.txt)

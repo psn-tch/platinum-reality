@@ -4,7 +4,7 @@ import QtQuick.Controls
 // General Controls, a panel of the Control Panels window, laid out as 9.2.2's (captured in the
 // reference VM, 2026-11-04): whether the desktop's icons show while another application is in
 // front, how many times a chosen menu item blinks, and how fast the insertion point blinks in
-// the desktop's own text fields. Saved in appearance.json (AppearanceSettings.general).
+// the desktop's own text fields; and, added, the menu bar's size. Saved in appearance.json (AppearanceSettings.general).
 Item {
     id: panel
     required property var settings
@@ -62,6 +62,22 @@ Item {
                     value: panel.general.caretBlink
                     onCommitted: function(value) { panel.settings.setGeneralOption("caretBlink", Math.round(value)) }
                 }
+            }
+        }
+        // Not in 9.2.2 (Lily Hewitt's request, 2026-11-09): on a large modern screen the measured
+        // 20-pixel bar can be a little small. It enlarges the bar, its menus and the Control Strip.
+        PlatinumGroup {
+            title: "Menu Bar Size"
+            PlatinumSlider {
+                objectName: "general-bar-size"
+                width: parent.width; from: 100; to: 150; stepSize: 5; snapMode: Slider.SnapAlways
+                tickCount: 11; tickLabels: ["100%", "", "", "", "", "125%", "", "", "", "", "150%"]
+                value: panel.general.barSize || 100
+                onCommitted: function(value) { panel.settings.setGeneralOption("barSize", Math.round(value / 5) * 5) }
+            }
+            Text {
+                width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 11; color: "#444"; textFormat: Text.PlainText
+                text: "Makes the menu bar, its menus and the Control Strip larger. 100% is Mac OS 9’s size."
             }
         }
         PlatinumGroup {

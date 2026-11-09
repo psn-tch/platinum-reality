@@ -195,7 +195,7 @@ session. Nesting is not a security sandbox.
 
 ## Authorization and limits
 
-psn_tch expanded the source-only authorization to implementation, builds and tests,
+Lily Hewitt expanded the source-only authorization to implementation, builds and tests,
 and authorized native implementation, automatic tests and per-user desktop deployment.
 The former executor IPC restriction is resolved. No root actions, system package
 installation, repository initialization, commits or pushes occurred. No Apple

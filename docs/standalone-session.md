@@ -11,7 +11,7 @@ Bluetooth hardware checks remain pending. Existing pairings are available
 through BlueZ; the panel and default pairing agent are qualified with fakes.
 
 The older sections below retain the session's development history. The protected
-`.bash_profile` rotation command now has psn_tch's terminal guard; agent shells must
+`.bash_profile` rotation command now has Lily Hewitt's terminal guard; agent shells must
 still use `login:false`. The selected release uses Platinum lock with swaylock
 fallback, and retains the user's choice of no automatic idle-timeout lock.
 
@@ -24,7 +24,7 @@ support, KDE rotation/scale import and the Monitors panel. This source batch add
 touch/scroll corrections and a model-specific OneXPlayer panel fallback. It is
 being qualified separately; passing older release gates do not qualify new code.
 
-psn_tch requested **no automatic idle-timeout lock**. The physical session therefore
+Lily Hewitt requested **no automatic idle-timeout lock**. The physical session therefore
 starts swayidle only for `before-sleep` and logind `lock` requests; Ctrl+Alt+L
 continues to request swaylock. Idle inhibitors still propagate to the host.
 

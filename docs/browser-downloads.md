@@ -1,6 +1,6 @@
 # Browser saving and popup focus
 
-psn_tch reported two failures: right-click Save As opened nothing in Firefox and
+Lily Hewitt reported two failures: right-click Save As opened nothing in Firefox and
 Chromium; ChatGPT's download button said it could not save the file. These are
 tracked separately. A successful local fixture is not proof of the actual site's
 workflow with the user's profile, account and extensions.

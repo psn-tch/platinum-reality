@@ -101,7 +101,7 @@ frame workflow now does so using a disposable profile. No user browsing data is 
 
 The [11:26 native result](evidence/20261018T172632-507871/native-tests.txt) passes
 the nine-workflow GTK/owned-app gate, with accessibility-bus warnings retained.
-psn_tch's separate manual Firefox report confirms the new appearance looked good,
+Lily Hewitt's separate manual Firefox report confirms the new appearance looked good,
 then requests the classic title bar. The subsequent adapter uses the existing
 compositor frame for peers whose executable resolves to installed Firefox and
 whose bounded `/proc/PID/cmdline` selects exactly the canonical owned profile.
@@ -121,7 +121,7 @@ applies, and full-screen/dialog/subsurface behavior remains to qualify.
 
 The 11:35 native run (`20261018T173511-513512`) passed its ten functional workflows,
 including Firefox frame actions and clean process exit, but its actual capture
-and psn_tch's `~/o/issue1.png` reveal a browser-content offset and overflow. That run
+and Lily Hewitt's `~/o/issue1.png` reveal a browser-content offset and overflow. That run
 does not establish correct frame/content alignment. The correction removes native
 Firefox decoration margins only for the owned browser launch and removes GTK
 decoration shadows. The Firefox native workflow now checks window geometry,

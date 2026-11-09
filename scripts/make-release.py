@@ -5,7 +5,7 @@
 
 Makes build/releases/<version>-<rel>/ holding the package, release.json and their signatures,
 checks it exactly as Software Update will, and optionally copies it to a disk (the external SSD)
-and compares the copy. Publishing to GitHub is a separate, deliberate step that needs psn_tch's go:
+and compares the copy. Publishing to GitHub is a separate, deliberate step that needs Lily Hewitt's go:
 this script never contacts GitHub.
 """
 import argparse

@@ -195,7 +195,7 @@ void ClientSurfaceItem::reconcileChildren()
 // that item's children for presses outside it. Client menus are added several levels below a
 // window's frame and may hang past its edges, but the frame's cached answer was not refreshed:
 // a click on the overhanging part of Konsole's ☰ menu reached the desktop instead, deactivated
-// Konsole and closed the menu (psn_tch, 2026-10-31). Forget the answer up to the scene's root
+// Konsole and closed the menu (Lily Hewitt, 2026-10-31). Forget the answer up to the scene's root
 // whenever a popup is placed, so the next press recomputes it.
 static void forgetChildBounds(QQuickItem *item)
 {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""psn_tch runs this themselves: switch tty1 from the text fingerprint gate to the Platinum Log In, or back.
+"""Lily Hewitt runs this themselves: switch tty1 from the text fingerprint gate to the Platinum Log In, or back.
 
 tty1 already logs in automatically (getty@tty1 autologin.conf), so today the fingerprint gate is
 the only authentication there, and three failed scans leave an unauthenticated shell. With the

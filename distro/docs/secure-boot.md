@@ -16,7 +16,7 @@ insufficient evidence of a supported chain.
 This is engineering judgment: owner-key OVMF controls give the smallest
 independently reviewable proof without committing to a distribution signing
 service or changing anyone's firmware. Actual hardware support remains a later,
-explicitly authorized phase, selected by psn_tch.
+explicitly authorized phase, selected by Lily Hewitt.
 
 ## Current project evidence
 

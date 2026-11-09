@@ -1,7 +1,7 @@
 # Platinum Software Update
 
 Platinum Software Update installs new Platinum Reality releases from the project's GitHub
-Releases, or from a release bundle on a local disk (such as psn_tch's external SSD), through
+Releases, or from a release bundle on a local disk (such as Lily Hewitt's external SSD), through
 `pacman`. It looks like Mac OS 9's Software Update; underneath, every package is authenticated,
 checked against what is installed, and installed by pacman, never copied over the system.
 
@@ -90,7 +90,7 @@ package repairs Platinum Reality's own files.
 On potato, `scripts/make-release.py --notes <file> [--copy-to <SSD folder>]` builds the
 package with makepkg (whose `check()` runs the tests), signs it and `release.json` with the
 release key, checks the folder exactly as Software Update will, and can copy it to the SSD and
-compare the copy. It never contacts GitHub: publishing is a separate step on psn_tch's word. On the other computer, Software
+compare the copy. It never contacts GitHub: publishing is a separate step on Lily Hewitt's word. On the other computer, Software
 Update ▸ **Install from Local Package…** takes the folder; it is checked exactly as a download.
 
 ## Checking

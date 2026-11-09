@@ -28,7 +28,7 @@
 #include <QTimeZone>
 #include <QTimer>
 
-// The look follows the Mac OS 9.2.2 Installer ("Install Macintosh Software"), captured in psn_tch's
+// The look follows the Mac OS 9.2.2 Installer ("Install Macintosh Software"), captured in Lily Hewitt's
 // 9.2.2 VM on 2026-11-06: a 45-pixel band fading from #dddddd to #ccccff with the step's icons, name
 // and a ? button; an #eeeeee page; a #dddddd footer with the step's buttons at the left and Go Back
 // and the default button at the right. Every drawing here is original: none of Apple's art.

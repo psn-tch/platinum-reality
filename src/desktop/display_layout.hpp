@@ -6,7 +6,10 @@
 #include <optional>
 
 // Measured native Mac OS 9.2.2 menu bar, including its lower border.
-inline constexpr int platinumMenuBarHeight = 20;
+inline constexpr int platinumMenuBarBaseHeight = 20;
+// The bar as shown: General Controls ▸ Menu Bar Size enlarges it (100-150 percent). The manager
+// sets it from that setting; window placement and the desktop keep below it.
+inline int platinumMenuBarHeight = platinumMenuBarBaseHeight;
 
 struct DisplayOutput
 {

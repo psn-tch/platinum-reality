@@ -14,6 +14,11 @@
 #include "platinum_style.hpp"
 #include "window_surface_id.hpp"
 #include <QActionGroup>
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusPendingCallWatcher>
+#include <QDBusPendingReply>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QCryptographicHash>
@@ -282,7 +287,7 @@ QStyledItemDelegate *makeFolderIconDelegate(QListView *view)
     return new FolderIconDelegate(view);
 }
 // A finger held still for 0.6 s on a folder view opens its menu, as a right click does: the
-// handheld's touchscreen has no right button (psn_tch, 2026-10-29). Touch arrives here as Qt's
+// handheld's touchscreen has no right button (Lily Hewitt, 2026-10-29). Touch arrives here as Qt's
 // synthesized mouse events from a touchscreen device; moving more than a few pixels cancels.
 class LongPressMenu final : public QObject
 {
@@ -1040,7 +1045,7 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
                perform("Putting away…", [ops, path = p.first()] { return ops.restore(path); });
            });
     // Mac OS 9's Finder has no Quit command (docs/historical-fidelity-review.md F07).
-    // Edit as in the 9.2.2 Finder (checked in psn_tch's 9.2.2 VM): with items selected, Copy copies
+    // Edit as in the 9.2.2 Finder (checked in Lily Hewitt's 9.2.2 VM): with items selected, Copy copies
     // their names as text, one per line in display order. Native adaptation: the items themselves
     // travel too (text/uri-list, and the GNOME and KDE copy/cut markers), so Cut, Copy and Paste
     // work with other file managers; Paste copies, or after Cut moves, into this folder.
@@ -1093,6 +1098,23 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
     auto *view = menuBar()->addMenu("View");
     action(view, "as Icons", "icons", {}, [this] { setViewMode(false); });
     action(view, "as List", "list", {}, [this] { setViewMode(true); });
+    // as Window / as Pop-up Window (9.2.2): the desktop draws the window, so it makes the change.
+    // Only inside Platinum Reality's own session, where that desktop is there to ask.
+    if (qEnvironmentVariable("FRANKENSTEIN_ISOLATED") == "1")
+    {
+        view->addSeparator();
+        auto *kinds = new QActionGroup(view);
+        for (const bool popUp : {false, true})
+        {
+            auto *kind = action(view, popUp ? "as Pop-up Window" : "as Window",
+                                popUp ? "asPopUpWindow" : "asWindow", {},
+                                [this, popUp] { askDesktopPopUp("SetPopUpWindow", popUp); });
+            kind->setCheckable(true);
+            kind->setChecked(!popUp);
+            kinds->addAction(kind);
+        }
+        connect(view, &QMenu::aboutToShow, this, [this] { askDesktopPopUp("IsPopUpWindow", false); });
+    }
     view->addSeparator();
     auto *hidden = action(view, "Show Hidden Files", "showHidden", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Period),
                           [this] { setShowHidden(!(m_model->filter() & QDir::Hidden)); });
@@ -1810,6 +1832,30 @@ void FinderWindow::closeEvent(QCloseEvent *e)
     QMainWindow::closeEvent(e);
 }
 
+// Asks the desktop to make this window a pop-up (or not), or whether it is one; either reply
+// sets the View menu's check. The desktop changes only this Finder's own windows.
+void FinderWindow::askDesktopPopUp(const QString &method, bool popUp)
+{
+    const auto surface = finderSurfaceId(windowHandle());
+    if (!surface)
+        return;
+    auto message = QDBusMessage::createMethodCall("org.frankenstein.Desktop", "/Desktop",
+                                                  "org.frankenstein.Desktop", method);
+    message << surface;
+    if (method == "SetPopUpWindow")
+        message << popUp;
+    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(message, 2000), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher, method, popUp]
+    {
+        const QDBusPendingReply<bool> reply = *watcher;
+        watcher->deleteLater();
+        if (reply.isError())
+            return;
+        const bool isPopUp = method == "SetPopUpWindow" ? (reply.value() ? popUp : !popUp) : reply.value();
+        if (auto *kind = findChild<QAction *>(isPopUp ? "asPopUpWindow" : "asWindow"))
+            kind->setChecked(true);
+    });
+}
 void FinderWindow::setPowerAvailable(bool available)
 {
     for (auto *item : m_powerActions)

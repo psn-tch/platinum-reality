@@ -253,7 +253,7 @@ class InstallerTests final : public QObject
         const auto restore = qScopeGuard([&] { QApplication::setFont(font); QApplication::setStyle("Fusion"); });
         EngineClient engine(QFINDTESTDATA("fake_install_engine.py"));
         InstallerWindow window(&engine, "Platinum Reality is a Mac OS 9-style desktop for Arch Linux.\n\n"
-                               "The installer erases the whole disk you choose.", "MIT License\n\nCopyright (c) psn_tch");
+                               "The installer erases the whole disk you choose.", "MIT License\n\nCopyright (c) Lily Hewitt");
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
         const auto evidence = qEnvironmentVariable("FRANKENSTEIN_EVIDENCE_DIR");
@@ -664,7 +664,7 @@ class InstallerTests final : public QObject
     }
     void anEngineRefusalSaysWhyOnTheDestinationPage()
     {
-        // psn_tch's first boot of the live USB on a real computer said only "could not list disks".
+        // Lily Hewitt's first boot of the live USB on a real computer said only "could not list disks".
         QTemporaryDir root;
         qputenv("FAKE_ENGINE_LOG", root.filePath("engine.jsonl").toLocal8Bit());
         qputenv("FAKE_ENGINE_REFUSE_HOST", "1");
@@ -679,7 +679,7 @@ class InstallerTests final : public QObject
     }
     void onARealComputerInternalDisksAreDimmedAndAUsbDriveIsChosen()
     {
-        // psn_tch's potato: several internal disks, a USB SSD for a portable install.
+        // Lily Hewitt's potato: several internal disks, a USB SSD for a portable install.
         QTemporaryDir root;
         qputenv("FAKE_ENGINE_LOG", root.filePath("engine.jsonl").toLocal8Bit());
         qputenv("FAKE_ENGINE_PHYSICAL", "usb");
