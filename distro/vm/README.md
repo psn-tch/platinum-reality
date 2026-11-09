@@ -1,5 +1,48 @@
 # Owned VM proofs
 
+## Explicit update37 installer adapter
+
+`qualify-install.py IMAGE.iso --gui --gui-version 37 --greeter platinum
+--unlock-ui plymouth --repeat-login` selects the separate new-label adapter.
+It requires its exact pinned native source (`NATIVE` in `gui-drive-v37.py`);
+unknown pins refuse before input. Legacy mode remains the default. The adapter
+uses the actual selected Destination Disk pop-up, Select and Start, checks the
+summary's account/encryption, and recognizes the final Quit/Restart alert.
+It never presses that Restart until the enclosing controller detaches both CDs.
+Question recognition requires actual target/loss text and an aligned Cancel /
+Erase and Install pair. Where OCR misses a ringed default button, that button's
+row or label is read alone; where it reads the occupied path's "1" as "l", only
+the exact pixels of the reviewed update37 frame are accepted, for that exact
+native installer and engine (Sammy, 2026-11-07; every adapter region was
+measured on an actual frame of the new image first). Occupied Return checks preserve the full
+disk hash and require the Start summary before any deliberate reopening.
+
+Eight synthetic refusal controls cover the recognizers. Actual image results
+(2026-11-07, native 3053688 / distribution c4487f3, ISO 261dcef7…): blank-target
+GUI install, encrypted unlock, Platinum password login and Finder Restart plus
+second login PASS (install-20261107T063952Z). Source/widget tests alone are
+never consent, install or release evidence.
+Missing labels or unknown frames refuse rather than guessing a legacy button.
+
+## Occupied-disk cancellation-only control
+
+For an already-qualified image, a separate non-installing safety observation is:
+
+```bash
+python3 -I distro/vm/install-proof.py IMAGE.iso --image-engine --gui \
+  --occupied-gui --verify-erase-return --erase-return-only --lease-wait 600
+```
+
+This creates its own virtual target and synthetic FAT partition. After the
+actual erase question is recognized, Return must visibly cancel to the summary
+and preserve the whole-disk hash. The controller stops there, verifies the hash
+again and shuts down its owned VM. It never reopens the erase question, clicks
+Erase, reads an installed system or boots the target. `installed` stays false;
+`ok` means only this requested cancellation control passed. Boot/repeat-login,
+display/refusal modes and graphical-unlock expectations cannot be combined.
+The retained disk is not deleted. This control does not replace the separate
+blank-target install/unlock/password-login acceptance or manual frame review.
+
 ## New source controls: repeated login and live-copy hygiene
 
 `qualify-install.py IMAGE.iso --gui --greeter platinum --unlock-ui plymouth

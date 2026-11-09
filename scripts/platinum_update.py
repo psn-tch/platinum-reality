@@ -232,8 +232,10 @@ def install(source, report, keyring=KEYRING, state=STATE, run=subprocess.run, no
         release, package = verify_bundle(staging, keyring, current_version(), now)
         needed = missing(package)
         if needed:
+            # pacman -Syu alone never installs a dependency that is new to this release.
             raise UpdateError('This release needs software that is not installed (' + ', '.join(needed) +
-                              '). Update the whole system first (pacman -Syu), then try again.')
+                              '). Install it first in Terminal with: sudo pacman -Syu ' + ' '.join(needed) +
+                              ', then try again.')
         # The release installed until now becomes the previous one, for Restore Previous Version.
         current = kept_package(state / 'current')
         if current is not None:

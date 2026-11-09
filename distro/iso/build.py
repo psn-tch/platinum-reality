@@ -59,8 +59,11 @@ def main():
     parser.add_argument('--base', type=Path, required=True, help='Explicit self-contained Arch cloud qcow2; never a physical device')
     parser.add_argument('--source-repo', type=Path, default=ROOT, help='Native source Git repository (default: this checkout)')
     parser.add_argument('--source-commit', required=True, help='Explicit native source commit; use Sammy-approved fixed canonical pin')
+    parser.add_argument('--lease-wait', type=float, default=0, help='Wait at most 1800 seconds for the shared builder/test lease')
     parser.add_argument('--date', default=datetime.now(timezone.utc).strftime('%Y.%m.%d'))
     args = parser.parse_args()
+    if not 0 <= args.lease_wait <= 1800:
+        parser.error('--lease-wait must be between 0 and 1800 seconds')
     if os.geteuid() == 0:
         raise SystemExit('Run as an ordinary host user. Root is used only inside the owned guest.')
     if args.bootstrap_profile and (ROOT/'distro/iso/profile').exists():
@@ -82,7 +85,7 @@ def main():
     evidence = state/(('bootstrap-' if args.bootstrap_profile else 'iso-build-') + stamp)
     evidence.mkdir()
     guest = owned.Guest(state/'builder')
-    with owned.Lease():
+    with owned.Lease(wait=args.lease_wait):
         try:
             guest.initialize_builder(args.base)
             guest.start()

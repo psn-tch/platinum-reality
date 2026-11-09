@@ -254,12 +254,18 @@ def verify_return_cancel(guest,receipt,remote,key):
 def confirm_erase(guest, receipt, remote=None, key=None):
     if receipt.get('verify_erase_return_requested') and (not callable(remote) or not callable(key)):
         raise ValueError('Actual Return cancellation requires owned transport and key input')
+    if receipt.get('erase_return_only_requested') and not receipt.get('verify_erase_return_requested'):
+        raise ValueError('Return-only proof requires verified cancellation; no erase click sent')
     point=recognize_erase(guest,receipt)
     if receipt.get('verify_erase_return_requested'):
         verify_return_cancel(guest,receipt,remote,key)
+        if receipt.get('erase_return_only_requested'):
+            receipt['gui_cancel_only'] = 'PASS: actual Return cancelled; full occupied target unchanged; no explicit erase requested'
+            return False
         button(guest,'gui-11-reopen-erase','Install')
         point=recognize_erase(guest,receipt)
     click(guest, point['x'], point['y'])
+    return True
 
 
 def drive(guest, password, receipt, remote, key, type_text):
@@ -306,7 +312,8 @@ def drive(guest, password, receipt, remote, key, type_text):
     if not matches(words, 'tester'):
         raise RuntimeError('Installation summary did not name the synthetic test account')
     button(guest, 'gui-10-summary-install', 'Install')
-    confirm_erase(guest, receipt, remote, key)
+    if not confirm_erase(guest, receipt, remote, key):
+        return
     # The only engine is the real immutable image wrapper, reached by Qt's
     # QProcess, stdin secret pipe and stdout JSONL. No test-answer shortcuts.
     deadline = time.monotonic()+1800

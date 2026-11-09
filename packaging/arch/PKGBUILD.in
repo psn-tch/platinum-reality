@@ -17,8 +17,9 @@ depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'qt6-svg' 'glib2' 'wayland' 
          'systemd-libs' 'dbus' 'python' 'fontconfig' 'xcb-util-cursor'
          # The whole session: its display backend, idle handling and the lock's PAM service;
          # polkit lets logind accept Special ▸ Sleep, Restart and Shut Down from the active session;
-         # udisks2 mounts flash drives as they are plugged in, and ejects them.
-         'sway' 'swayidle' 'swaylock' 'xorg-xwayland' 'polkit' 'udisks2')
+         # udisks2 mounts flash drives as they are plugged in, and ejects them;
+         # Software Update asks for the administrator password through KDE's polkit agent.
+         'sway' 'swayidle' 'swaylock' 'xorg-xwayland' 'polkit' 'polkit-kde-agent' 'udisks2')
 makedepends=('cmake' 'ninja' 'pkgconf' 'gcc' 'vulkan-headers' 'vulkan-icd-loader' 'wayland-protocols'
              # The X11 bridge (patched xwayland-satellite) is built from its pinned source.
              'cargo' 'clang' 'patch'

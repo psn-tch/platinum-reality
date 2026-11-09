@@ -418,9 +418,10 @@ class ContractChecks(unittest.TestCase):
                 engine.require_live_vm()
         command.assert_not_called()
 
-    def test_root_on_a_physical_host_or_container_refuses_before_disk_tools(self):
-        for virtual,container in [(SimpleNamespace(returncode=1,stdout=''),None),
-                                   (SimpleNamespace(returncode=0,stdout='kvm'),SimpleNamespace(returncode=0))]:
+    def test_containers_and_other_hypervisors_refuse_before_disk_tools(self):
+        for virtual,container in [(SimpleNamespace(returncode=0,stdout='kvm'),SimpleNamespace(returncode=0)),
+                                   (SimpleNamespace(returncode=1,stdout='none'),SimpleNamespace(returncode=0)),
+                                   (SimpleNamespace(returncode=0,stdout='vmware'),None)]:
             results=[virtual]+([container] if container is not None else [])
             with self.subTest(virtual=virtual.stdout), patch.object(engine.os,'geteuid',return_value=0), \
                     patch.object(engine.subprocess,'run',side_effect=results) as detect, \
@@ -429,12 +430,39 @@ class ContractChecks(unittest.TestCase):
             command.assert_not_called();inventory.assert_not_called()
             self.assertTrue(all(call.args[0][0]=='systemd-detect-virt' for call in detect.call_args_list))
 
+    def test_a_real_computer_booted_from_the_live_media_is_physical(self):
+        mount=Mock();mount.is_mount.return_value=True
+        with patch.object(engine.os,'geteuid',return_value=0), \
+                patch.object(engine.subprocess,'run',side_effect=[SimpleNamespace(returncode=1,stdout='none'),
+                                                                  SimpleNamespace(returncode=1)]), \
+                patch.object(engine,'BOOT_MOUNT',mount), patch.object(engine.Path,'is_file',return_value=True):
+            self.assertEqual(engine.require_live_vm(),'physical')
+
+    def test_on_a_real_computer_only_usb_disks_are_installable(self):
+        # Lily Hewitt, 2026-11-07: potato has 6-7 internal disks; the portable install goes on a USB SSD.
+        disks=engine.inventory_from({'blockdevices':[node('/dev/sr0','11:0','rom',rm=True,ro=True),
+            node('/dev/nvme0n1','259:0',tran='nvme'),node('/dev/sda','8:0',tran='sata'),
+            node('/dev/sdb','8:16',tran='usb',rm=False,model='USB SSD')]},media())
+        marked={d['path']:d for d in engine.installable_disks(disks,'physical')}
+        self.assertEqual({p for p,d in marked.items() if d['installable']},{'/dev/sdb'})
+        self.assertEqual(marked['/dev/sr0']['unavailable'],'the installation disk')
+        self.assertIn('internal disk',marked['/dev/nvme0n1']['unavailable'])
+        self.assertTrue({'installable','unavailable'} <= set(engine.public_disks(disks)[0]))
+        for path in ('/dev/nvme0n1','/dev/sda'):
+            with self.assertRaisesRegex(engine.Refused,'internal disk.*nothing changed'):
+                engine.select_disk(config()|{'disk':path},disks,'physical')
+        self.assertEqual(engine.select_disk(config()|{'disk':'/dev/sdb'},disks,'physical')['path'],'/dev/sdb')
+        # In an owned VM every whole disk except the live media stays installable.
+        vm={d['path']:d for d in engine.installable_disks(engine.inventory_from({'blockdevices':[
+            node('/dev/sr0','11:0','rom',rm=True,ro=True),node('/dev/vda','254:0')]},media()),'vm')}
+        self.assertTrue(vm['/dev/vda']['installable'])
+
     def test_qemu_without_actual_live_boot_mount_refuses_before_disk_tools(self):
         mount=Mock();mount.is_mount.return_value=False
         with patch.object(engine.os,'geteuid',return_value=0), \
                 patch.object(engine.subprocess,'run',side_effect=[SimpleNamespace(returncode=0,stdout='qemu'),SimpleNamespace(returncode=1)]), \
                 patch.object(engine,'BOOT_MOUNT',mount), patch.object(engine,'tool') as command:
-            with self.assertRaisesRegex(engine.Refused,'Arch live media'):engine.require_live_vm()
+            with self.assertRaisesRegex(engine.Refused,'live media'):engine.require_live_vm()
         mount.is_mount.assert_called_once();command.assert_not_called()
 
     def test_config_rejects_secret_fields_and_injection_values(self):
@@ -505,6 +533,29 @@ class ContractChecks(unittest.TestCase):
             self.assertEqual([c for c in calls if c[0] == 'umount'],
                              [['umount', str(work/'target/boot')], ['umount', str(work/'target')]])
 
+    def test_a_usb_target_is_portable_without_autodetect(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name in ['etc', 'boot', 'usr/share/zoneinfo', 'usr/lib/modules/test-kernel', 'var/lib/sddm']:
+                (root/name).mkdir(parents=True, exist_ok=True)
+            (root/'etc/passwd').write_text('sddm:x:222:222:SDDM:/var/lib/sddm:/usr/bin/nologin\n'
+                                           'tester:x:1000:1000:VM Test:/home/tester:/bin/bash\n')
+            (root/'home/tester').mkdir(parents=True)
+            (root/'usr/share/zoneinfo/UTC').write_bytes(b'TZif')
+            (root/'usr/lib/modules/test-kernel/pkgbase').write_text('linux\n')
+            (root/'usr/lib/modules/test-kernel/vmlinuz').write_bytes(b'fake-kernel')
+            for name in engine.SDDM_THEME_FILES:
+                (root/name).parent.mkdir(parents=True, exist_ok=True)
+                (root/name).write_text('theme fixture, never executed')
+            with patch.object(engine, 'tool'), patch.object(engine.os, 'chown'), \
+                    patch.object(engine, 'install_boot_theme'), \
+                    patch.object(engine, 'locale_definitions', return_value={'en_US.UTF-8': 'UTF-8'}):
+                engine.configure_target(root, config(), {'password': 'Literal-validation-only', 'passphrase': 'x'*12},
+                                        'ROOT-UUID', 'ESP-UUID', 'LUKS-UUID', portable=True)
+            hooks = (root/'etc/mkinitcpio.conf.d/10-platinum-reality.conf').read_text()
+            self.assertNotIn('autodetect', hooks)
+            self.assertIn('sd-encrypt', hooks)
+
     def test_target_configuration_keeps_secrets_on_stdin_and_encryption_hooks_active(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -533,6 +584,8 @@ class ContractChecks(unittest.TestCase):
             self.assertNotIn('ALL_config=', preset)
             self.assertIn('--cmdline /etc/kernel/cmdline', preset)
             self.assertIn('sd-encrypt', (root/'etc/mkinitcpio.conf.d/10-platinum-reality.conf').read_text())
+            # Installed on a fixed disk: only that computer's drivers (autodetect).
+            self.assertIn(' autodetect ', (root/'etc/mkinitcpio.conf.d/10-platinum-reality.conf').read_text())
             self.assertIn('rd.luks.name=LUKS-UUID=cryptroot', (root/'etc/kernel/cmdline').read_text())
             self.assertNotIn('archiso', (root/'etc/kernel/cmdline').read_text())
             self.assertFalse(list(root.rglob('displays.json')))

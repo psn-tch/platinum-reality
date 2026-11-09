@@ -222,3 +222,9 @@ that both archives still contain the original source. Earlier controllers
 resolved the distribution HEAD after bootstrap; their recorded `pin.json` is
 still authoritative, but a pre-build note could predict the wrong commit.
 The October30 cc19a5f image recorded native e05327e and distro **12ff1da**.
+
+When sharing the canonical heavy-work lease with another gate, use
+`--lease-wait 1800` to wait up to thirty minutes rather than starting another
+writer or immediately refusing. The default remains an immediate refusal if
+busy. Negative, nonfinite or longer waits refuse before resource setup; source
+pins are resolved before any permitted wait.

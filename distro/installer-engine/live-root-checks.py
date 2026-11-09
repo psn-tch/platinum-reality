@@ -364,7 +364,7 @@ class LiveRootPreflightChecks(unittest.TestCase):
                 call = [str(x) for x in args]; events.append(call)
                 if args[0] == 'lsblk': return b'/dev/vda1 1\n/dev/vda2 2\n'
                 if args[0] == 'blkid': return b'FIXTURE-UUID\n'
-            def configure(root, *args):
+            def configure(root, *args, portable=False):
                 events.append(['configure'])
                 for name in ('boot/EFI/Linux/arch-linux.efi', 'boot/EFI/BOOT/BOOTX64.EFI'):
                     path = root/name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'fixture')

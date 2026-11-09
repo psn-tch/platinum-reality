@@ -2589,6 +2589,13 @@ bool NativeManager::launch(QString program, QStringList arguments, QString direc
     }
     if (m_x11)
         m_x11->applyTo(environment);
+    // KDE's password window is Qt Quick: with our widget style named it looked for a Quick style of
+    // that name and crashed, and shared-memory buffers gave it no OpenGL (found in a VM, update 44).
+    if (executable.fileName() == "polkit-kde-authentication-agent-1")
+    {
+        environment.remove("QT_STYLE_OVERRIDE");
+        environment.insert("QT_QUICK_BACKEND", "software");
+    }
     const bool walletSettings = m_normalApplicationSettings && !owned;
     if (!configureKnownApplicationBackend(program, arguments, environment, appearanceError,
                                          walletSettings && m_wallet && m_wallet->ready(),
@@ -2619,6 +2626,24 @@ bool NativeManager::launch(QString program, QStringList arguments, QString direc
         return false;
     }
     return true;
+}
+// Outside Plasma nothing starts a polkit authentication agent, so pkexec could not ask for a
+// password at all: Software Update said "not accepted" with no box to type in (Lily Hewitt, update 43).
+// The first installed agent starts once, as an application of this session, so its password window
+// is a Platinum window; polkit registers one agent per session and a second one exits.
+void NativeManager::startAuthenticationAgent()
+{
+    static const QStringList agents{"/usr/lib/polkit-kde-authentication-agent-1",
+                                    "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1",
+                                    "/usr/bin/lxqt-policykit-agent",
+                                    "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1"};
+    for (const auto &agent : agents)
+        if (QFileInfo(agent).isExecutable())
+        {
+            launch(agent, {}, {}, true);
+            return;
+        }
+    qWarning("No polkit authentication agent is installed; Software Update cannot ask for a password.");
 }
 void NativeManager::launchFinder(QString path)
 {

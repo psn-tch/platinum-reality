@@ -201,6 +201,8 @@ int main(int argc, char **argv)
         QTimer::singleShot(150, &manager, [&] { manager.launchFinder(); });
     if (!preview)
         manager.initializeWallet();
+    if (!preview && qEnvironmentVariable("FRANKENSTEIN_ISOLATED") == "1")
+        manager.startAuthenticationAgent();
     if (parser.isSet("screenshot"))
         QTimer::singleShot(500, &app,
                            [&]

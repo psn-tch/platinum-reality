@@ -441,6 +441,8 @@ class NativeManager final : public QAbstractListModel
     void attachShell(QWaylandXdgShell *shell);
     void setX11Bridge(X11Bridge *bridge);
     void initializeWallet();
+    // pkexec (Software Update) asks for a password through the session's polkit agent.
+    void startAuthenticationAgent();
     // Only a validated host topology may be applied. This changes shell policy,
     // never physical outputs; the session controller owns hardware transactions.
     void setDisplayLayout(const DisplayLayout &layout);

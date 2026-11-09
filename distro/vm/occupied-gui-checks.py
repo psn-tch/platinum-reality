@@ -165,6 +165,43 @@ class OccupiedGuiChecks(unittest.TestCase):
             self.assertIn('--occupied-gui requires --gui',diagnostic.getvalue())
             uid.assert_not_called();process.assert_not_called()
 
+    def test_return_only_never_reopens_or_clicks_erase_after_cancel(self):
+        receipt={'erase_return_only_requested':True,'verify_erase_return_requested':True}
+        guest=Mock();remote=Mock();key=Mock()
+        with patch.object(gui,'recognize_erase',return_value={'x':600,'y':420}), \
+                patch.object(gui,'verify_return_cancel') as cancel, \
+                patch.object(gui,'button') as button,patch.object(gui,'click') as click:
+            self.assertIs(gui.confirm_erase(guest,receipt,remote,key),False)
+            cancel.assert_called_once_with(guest,receipt,remote,key)
+            button.assert_not_called();click.assert_not_called()
+        self.assertTrue(receipt['gui_cancel_only'].startswith('PASS:'))
+
+    def test_return_only_failed_cancel_cannot_fall_through_to_erase(self):
+        receipt={'erase_return_only_requested':True,'verify_erase_return_requested':True}
+        with patch.object(gui,'recognize_erase',return_value={'x':600,'y':420}), \
+                patch.object(gui,'verify_return_cancel',side_effect=RuntimeError('disk changed')), \
+                patch.object(gui,'button') as button,patch.object(gui,'click') as click:
+            with self.assertRaisesRegex(RuntimeError,'disk changed'):
+                gui.confirm_erase(Mock(),receipt,Mock(),Mock())
+            button.assert_not_called();click.assert_not_called()
+        self.assertNotIn('gui_cancel_only',receipt)
+
+    def test_return_only_missing_verification_refuses_without_recognition_or_click(self):
+        with patch.object(gui,'recognize_erase') as recognize,patch.object(gui,'click') as click:
+            with self.assertRaisesRegex(ValueError,'verified cancellation'):
+                gui.confirm_erase(Mock(),{'erase_return_only_requested':True})
+            recognize.assert_not_called();click.assert_not_called()
+
+    def test_return_only_cannot_be_combined_with_install_or_boot_modes(self):
+        required=['--erase-return-only','--gui','--image-engine','--occupied-gui','--verify-erase-return']
+        cases=[required+[flag] for flag in ('--boot-proof','--repeat-login','--unencrypted','--observe-displays')]
+        cases += [[flag for flag in required if flag!=missing] for missing in required[1:]]
+        for flags in cases:
+            with self.subTest(flags=flags),patch.object(proof,'Guest') as guest, \
+                    contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit) as error:
+                proof.main(['unused.iso',*flags])
+            self.assertEqual(error.exception.code,2);guest.assert_not_called()
+
     def test_legacy_plan_cannot_claim_partition_evidence(self):
         with self.assertRaisesRegex(ValueError,'existing test partition'):
             proof.check_occupied_plan({'ok':True,'erases':['/dev/vda'],'warnings':[]})

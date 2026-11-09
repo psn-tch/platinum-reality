@@ -193,7 +193,8 @@ def privileged(arguments):
     if not Path(HELPER).is_file() or not shutil.which('pkexec'):
         raise platinum_update.UpdateError('Software Update can install only on a computer where Platinum Reality '
                                           'itself was installed as a package.')
-    process = subprocess.Popen(['pkexec', HELPER, *arguments], stdout=subprocess.PIPE, text=True)
+    process = subprocess.Popen(['pkexec', HELPER, *arguments], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True)
     finished = False
     for line in process.stdout:
         try:
@@ -203,8 +204,14 @@ def privileged(arguments):
         finished = finished or 'done' in message or 'error' in message
         say(message)
     code = process.wait()
+    problem = process.stderr.read()
     if code in (126, 127) and not finished:
-        say({'error': 'Installation was cancelled.' if code == 126 else 'The administrator password was not accepted.'})
+        # With no authentication agent pkexec cannot ask at all (Lily Hewitt, update 43).
+        if 'authentication agent' in problem.lower():
+            say({'error': 'No password window could be shown. Log out and back in, then try again '
+                          '(Platinum Reality starts one at login), or install polkit-kde-agent.'})
+        else:
+            say({'error': 'Installation was cancelled.' if code == 126 else 'The administrator password was not accepted.'})
     return code
 
 

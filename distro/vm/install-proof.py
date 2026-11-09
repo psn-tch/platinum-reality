@@ -437,7 +437,9 @@ def main(argv=None):
     parser.add_argument('iso', type=Path)
     parser.add_argument('--gpu', choices=GPUS, default='virtio-vga')
     parser.add_argument('--outputs', type=int, choices=(1, 2), default=1)
+    parser.add_argument('--gui-version', choices=('legacy','37'), default='legacy', help='Explicit installer layout; 37 requires the source-pinned new native installer')
     parser.add_argument('--gui', action='store_true', help='Drive the actual image installer GUI (requires --image-engine --boot-proof)')
+    parser.add_argument('--erase-return-only', action='store_true', help='Occupied GUI cancellation control only; stop after Return cancels with unchanged full-disk hash, never install or boot target')
     parser.add_argument('--repeat-login', action='store_true', help='After GUI installation and first login, use the installed Finder Restart and repeat encrypted/password login')
     parser.add_argument('--occupied-gui', action='store_true', help='GUI proof with a synthetic existing partition; require its actual erase warning before confirmation')
     parser.add_argument('--verify-erase-return', action='store_true', help='With occupied GUI, require Return to cancel and preserve the full disk hash before explicit erase')
@@ -458,9 +460,13 @@ def main(argv=None):
     parser.add_argument('--unlock-ui', choices=('plain', 'plymouth'), default='plain',
                         help='Explicit expected encrypted-unlock UI; never guess before entering the synthetic credential')
     args = parser.parse_args(argv)
+    if args.gui_version != 'legacy' and not args.gui:
+        parser.error('--gui-version requires --gui')
     if args.interrupt_retry and (not args.image_engine or not args.boot_proof or args.unencrypted or args.gui or args.refusal_scenario or args.observe_displays or args.gpu!='virtio-vga' or args.outputs!=1):
         parser.error('--interrupt-retry requires encrypted --image-engine --boot-proof, one virtio output, and no GUI/refusal/display-observation scenario')
-    if args.gui and not (args.image_engine and args.boot_proof):
+    if args.erase_return_only and not (args.gui and args.image_engine and args.occupied_gui and args.verify_erase_return and not args.boot_proof and not args.repeat_login and not args.unencrypted and not args.refusal_scenario and not args.observe_displays and args.unlock_ui == 'plain'):
+        parser.error('--erase-return-only requires encrypted occupied GUI/verified Return/image engine, with no boot, repeat, refusal, display or graphical-unlock scenario')
+    if args.gui and not (args.image_engine and (args.boot_proof or args.erase_return_only)):
         parser.error('--gui requires --image-engine --boot-proof')
     if args.repeat_login and not (args.gui and args.boot_proof and args.image_engine and not args.unencrypted):
         parser.error('--repeat-login requires encrypted --gui --image-engine --boot-proof')
@@ -502,6 +508,7 @@ def main(argv=None):
                'gpu': args.gpu, 'requested_output_capacity': args.outputs,
                'guest_output_activity': 'NOT VERIFIED: separate Monitors/UI evidence required'}
     receipt['live_boot_metrics_requested']=args.collect_boot_metrics
+    receipt['erase_return_only_requested']=args.erase_return_only
     receipt['verify_erase_return_requested']=args.verify_erase_return
     receipt['interrupted_retry_requested']=args.interrupt_retry
     with Lease(wait=args.lease_wait):
@@ -511,6 +518,8 @@ def main(argv=None):
             snapshot = path/'controller-source'; snapshot.mkdir()
             for name in ('install-proof.py', 'owned.py', 'display_profiles.py', 'verify-iso.py', 'gui-drive.py', 'read-installed.py'):
                 shutil.copyfile(Path(__file__).with_name(name), snapshot/name)
+            if args.gui_version == '37':
+                shutil.copyfile(Path(__file__).with_name('gui-drive-v37.py'),snapshot/'gui-drive-v37.py')
             if args.interrupt_retry:
                 for name in ('package-write-probe.py','interrupted_retry.py'):
                     shutil.copyfile(Path(__file__).with_name(name),snapshot/name)
@@ -732,11 +741,20 @@ RemainAfterExit=yes
                 receipt['interrupted_retry']['retry_plan']=retry_plan
                 receipt['interrupted_retry']['explicit_retry_confirmation']='/dev/vda through the immutable engine --confirm-erase'
             if args.gui:
-                source = Path(__file__).with_name('gui-drive.py')
+                source = snapshot/'gui-drive-v37.py' if args.gui_version == '37' else Path(__file__).with_name('gui-drive.py')
+                if args.gui_version == '37':
+                    receipt['gui_support_sha256'] = sha256(snapshot/'gui-drive.py')
                 receipt['gui_controller_sha256'] = sha256(source)
                 spec = importlib.util.spec_from_file_location('gui_drive', source)
                 gui = importlib.util.module_from_spec(spec); spec.loader.exec_module(gui)
                 gui.drive(guest, password, receipt, remote, key, type_text)
+                if args.erase_return_only:
+                    if receipt.get('installed') or receipt.get('erase_return_cancel', {}).get('passed') is not True or not str(receipt.get('gui_cancel_only', '')).startswith('PASS:'):
+                        raise RuntimeError('Return-only proof did not attest unchanged cancelled target')
+                    if disk_hash('hash-final-return-only') != before:
+                        raise RuntimeError('Return-only final full-disk hash changed')
+                    receipt['ok'] = True
+                    return  # Finally stops guest; no readback, reboot or install accepted.
             else:
                 values = {'password': password}
                 if config['encrypt']:

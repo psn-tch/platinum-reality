@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Platinum Reality installer contract v1. Prototype: owned QEMU live media only.
+"""Platinum Reality installer contract v1: owned QEMU/KVM guests, and USB drives on real computers.
 
 Discovery and planning never partition, format, mount or configure anything.
 Passwords belong only on stdin, never configuration files, argv or progress.
@@ -142,15 +142,37 @@ def validate_config(config, *, zoneinfo=Path('/usr/share/zoneinfo')):
 
 
 def require_live_vm():
-    # Keep this guard until an independently reviewed physical install phase.
+    """'vm' in an owned QEMU/KVM guest, or 'physical' on a real computer booted from the live media.
+
+    On a real computer only USB-attached disks can be installed on (Lily Hewitt, 2026-11-07: a portable
+    install onto her USB SSD from potato); internal disks stay refused (installable_disks).
+    """
     if os.geteuid() != 0:
-        raise Refused('Run the engine as root inside the disposable live VM')
+        raise Refused('Run the engine as root from the live media')
     virtual = subprocess.run(['systemd-detect-virt', '--vm'], capture_output=True, text=True, check=False, env=TOOL_ENV)
-    if virtual.returncode or virtual.stdout.strip() not in ('qemu', 'kvm'):
-        raise Refused('This prototype refuses physical hosts and containers')
+    kind = virtual.stdout.strip()
+    if virtual.returncode == 0 and kind not in ('qemu', 'kvm'):
+        raise Refused('Only QEMU/KVM virtual machines and real computers are supported; nothing changed')
     container = subprocess.run(['systemd-detect-virt', '--container'], capture_output=True, check=False, env=TOOL_ENV)
     if container.returncode == 0 or not BOOT_MOUNT.is_mount() or not Path('/etc/arch-release').is_file():
-        raise Refused('Requires Arch live media in an owned QEMU guest')
+        raise Refused('Requires the Platinum Reality live media; nothing changed')
+    return 'vm' if virtual.returncode == 0 else 'physical'
+
+
+INTERNAL_REASON = 'internal disk: on a real computer this version installs only onto a USB drive'
+
+
+def installable_disks(disks, host):
+    """Mark each disk installable or not, with the reason shown in the Installer."""
+    for disk in disks:
+        reason = ''
+        if disk['is_boot_medium']:
+            reason = 'the installation disk'
+        elif host == 'physical' and disk.get('transport') != 'usb':
+            reason = INTERNAL_REASON
+        disk['installable'] = not reason
+        disk['unavailable'] = reason
+    return disks
 
 
 def read_json_command(argv):
@@ -223,26 +245,30 @@ def public_disks(disks):
     return [{key: value for key, value in disk.items() if not key.startswith('_')} for disk in disks]
 
 
-def select_disk(config, disks):
+def select_disk(config, disks, host='vm'):
     found = [disk for disk in disks if disk['path'] == config['disk']]
     if len(found) != 1:
         raise Refused('Destination is not one whole device returned by disks')
     disk = found[0]
     if disk['is_boot_medium']:
         raise Refused('The live boot medium cannot be an installation destination')
+    if host == 'physical' and disk.get('transport') != 'usb':
+        raise Refused('That is an '+INTERNAL_REASON+'; nothing changed')
     if disk['_type'] != 'disk' or disk['_readonly'] or disk['_busy']:
         raise Refused('Destination must be a writable, unmounted whole disk with no active swap')
     if disk['size_bytes'] < MIN_DISK_BYTES:
-        raise Refused('The VM prototype needs a destination of at least 16 GiB')
+        raise Refused('The destination needs at least 16 GiB')
     return disk
 
 
-def plan(config, disks):
-    disk = select_disk(config, disks)
+def plan(config, disks, host='vm'):
+    disk = select_disk(config, disks, host)
     partitions = [{key: partition[key] for key in ('path', 'fstype', 'label', 'size_bytes')}
                   for partition in disk['partitions']]
-    warnings = ['VM-only prototype; this erases the ENTIRE destination disk.',
-                'Unsigned offline prototype repository; Secure Boot is not supported.']
+    # Shown in the Installer's Erase Disk question. Since the live-copy source, nothing here is an
+    # "offline repository" any more; Secure Boot is still unsupported.
+    warnings = ['This erases the ENTIRE destination disk.',
+                'Secure Boot is not supported: turn it off in the computer\'s firmware settings first.']
     if partitions:
         warnings.append('The destination already contains '+str(len(partitions))+
                         ' partition(s); every listed partition will be removed.')
@@ -853,7 +879,7 @@ def install_boot_theme(root):
     tool(['arch-chroot', root, 'plymouth-set-default-theme', 'platinum-reality'])
 
 
-def configure_target(root, config, credentials, root_uuid, esp_uuid, luks_uuid):
+def configure_target(root, config, credentials, root_uuid, esp_uuid, luks_uuid, portable=False):
     def chroot(*args, **kwargs):
         return tool(['arch-chroot', root, *args], **kwargs)
     for name in SDDM_THEME_FILES:
@@ -909,7 +935,9 @@ def configure_target(root, config, credentials, root_uuid, esp_uuid, luks_uuid):
                     else 'root=UUID='+root_uuid+' rw')
     # Explicit cmdline prevents inheriting live archiso parameters into the UKI.
     write_target(root, 'etc/kernel/cmdline', command_line+'\n')
-    hooks = 'base systemd autodetect microcode modconf kms keyboard sd-vconsole block'
+    # A USB drive can be started on other computers: without autodetect the initramfs carries every
+    # storage/USB/graphics driver, not only those of the computer it was installed from.
+    hooks = 'base systemd' + ('' if portable else ' autodetect') + ' microcode modconf kms keyboard sd-vconsole block'
     if luks_uuid:
         hooks += ' sd-encrypt'
     hooks += ' filesystems fsck'
@@ -978,7 +1006,8 @@ def perform_install(config, expected, credentials, progress, *, source=None):
                 progress.update('packages', .4, 'Installing from the checked immutable live image')
                 copy_live_root(root, source)
             progress.update('configure', .7, 'Creating the account and system settings')
-            configure_target(root, config, credentials, root_uuid, esp_uuid, luks_uuid)
+            configure_target(root, config, credentials, root_uuid, esp_uuid, luks_uuid,
+                             portable=expected.get('transport') == 'usb')
             if source is not None:
                 remove = sorted(source['packages'] & LIVE_ONLY_PACKAGES)
                 if remove:
@@ -1029,8 +1058,8 @@ def perform_install(config, expected, credentials, progress, *, source=None):
 def install(config, confirm, progress):
     if confirm != config['disk']:
         raise Refused('--confirm-erase must exactly match the config disk; nothing changed')
-    require_live_vm()
-    expected = select_disk(config, inventory())
+    host = require_live_vm()
+    expected = select_disk(config, inventory(), host)
     if not Path('/sys/firmware/efi').is_dir():
         raise Refused('The VM must boot the live media under UEFI')
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -1069,16 +1098,15 @@ def main(argv=None):
             signal.signal(signal.SIGINT, interrupted)
             progress = Progress(args.progress_fd)
         if args.action == 'disks':
-            require_live_vm()
-            print(json.dumps(public_disks(inventory())))
+            print(json.dumps(public_disks(installable_disks(inventory(), require_live_vm()))))
         elif args.action == 'choices':
             require_live_vm()
             print(json.dumps(choices()))
         else:
             config = validate_config(read_config(args.config))
             if args.action == 'plan':
-                require_live_vm()
-                print(json.dumps(plan(config, inventory())))
+                host = require_live_vm()
+                print(json.dumps(plan(config, inventory(), host)))
             else:
                 install(config, args.confirm_erase, progress)
         return 0

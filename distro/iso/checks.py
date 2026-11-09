@@ -33,6 +33,14 @@ spec.loader.exec_module(verifier)
 
 
 class SourceChecks(unittest.TestCase):
+    def test_invalid_lease_wait_refuses_before_resource_or_source_work(self):
+        for value in ('-1', '1801', 'nan', 'inf'):
+            argv=['build.py','--base','/unused/base.qcow2','--source-commit','0'*40,'--lease-wait',value]
+            with self.subTest(value=value),patch('sys.argv',argv),patch('sys.stderr',new_callable=io.StringIO), \
+                    patch.object(builder.owned,'Guest') as guest,patch.object(builder,'require_host_space') as space:
+                with self.assertRaises(SystemExit) as result:builder.main()
+                self.assertEqual(result.exception.code,2);guest.assert_not_called();space.assert_not_called()
+
     def test_vendored_package_configuration_examples_are_comments_not_repositories(self):
         root_builder = load('guest-root')
         real = (HERE/'profile/pacman.conf').read_text()
