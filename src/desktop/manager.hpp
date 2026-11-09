@@ -219,6 +219,7 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(QObject *assetImporter READ assetImporter CONSTANT)
     Q_PROPERTY(QObject *softwareUpdate READ softwareUpdate CONSTANT)
     Q_PROPERTY(QObject *printers READ printers CONSTANT)
+    Q_PROPERTY(QObject *keychains READ keychains CONSTANT)
     Q_PROPERTY(QObject *audio READ audio CONSTANT)
     // BlueZ on the host's system bus (docs/bluetooth.md); unavailable without a compositor.
     Q_PROPERTY(QObject *bluetooth READ bluetooth CONSTANT)
@@ -314,6 +315,7 @@ class NativeManager final : public QAbstractListModel
     QObject *assetImporter() const { return m_assetImporter; }
     QObject *softwareUpdate() const { return m_softwareUpdate; }
     QObject *printers() const { return m_printers; }
+    QObject *keychains() const { return m_keychains; }
     QObject *audio() const { return m_audio; }
     QObject *bluetooth() const { return m_bluetooth; }
     QObject *wifi() const { return m_wifi; }
@@ -551,6 +553,7 @@ class NativeManager final : public QAbstractListModel
     QObject *m_assetImporter = nullptr;
     QObject *m_softwareUpdate = nullptr;
     QObject *m_printers = nullptr;
+    QObject *m_keychains = nullptr;
     QObject *m_audio;
     QObject *m_bluetooth;
     QObject *m_wifi;

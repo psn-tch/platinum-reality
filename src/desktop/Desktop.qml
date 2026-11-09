@@ -229,6 +229,9 @@ Rectangle {
         else if(action==="appearance")appearanceDialog.edit()
         else if(action==="desktop-picture")desktopPictureDialog.edit()
         else if(action==="monitors")monitorsPanel.edit()
+        else if(action==="keychain-lock")manager.keychains.lock(applicationId)
+        else if(action==="keychain-unlock")manager.keychains.unlock(applicationId)
+        else if(action==="keychain-lock-all")manager.keychains.lockAll()
         else if(action==="default-printer")manager.printers.setDefault(applicationId)
         else if(action==="display-mode")manager.setDisplayMode(applicationId.output,applicationId.width,applicationId.height,applicationId.refresh)
         else if(action==="network")networkPanel.edit()
@@ -562,6 +565,7 @@ Rectangle {
         if(["monitors","wifi"].includes(module))quickControls.service.refresh()
         if(module==="soundsource" && soundPanel.service)soundPanel.service.refresh()
         if(module==="printer" && manager.printers)manager.printers.refresh()
+        if(module==="keychain" && manager.keychains)manager.keychains.refresh()
         if(module==="handheld")manager.handheld.refresh()
         // Opening the Wi-Fi module looks for networks, as later AirPort menus do.
         if(module==="wifi")wifiAlert.service.scan()
@@ -678,6 +682,20 @@ Rectangle {
         if(module==="resolution")return resolutionMenuEntries()
         // Printer Selector, as 9.2.2's: the desktop printers, the default checked; choosing one makes
         // it the default. With none, its own "No Desktop Printers".
+        // Keychain, as 9.2.2's Keychain Strip: Lock or Unlock each keychain by name, then Lock All
+        // Keychains. Unlocking asks in the password store's own window. (9.2.2's Open Keychain
+        // Access has no counterpart unless a keychain application is installed, so it is left out.)
+        if(module==="keychain") {
+            let service=manager.keychains, list=service?service.keychains:[]
+            if(!list.length)return [{text:service&&service.available?"No Keychains":"Keychain Unavailable",
+                                     action:"none",name:"keychain-none",enabled:false}]
+            return list.map(function(k){return {text:k.locked?"Unlock “"+k.label+"”…":"Lock “"+k.label+"”",
+                                                 action:k.locked?"keychain-unlock":"keychain-lock",id:k.path,
+                                                 name:"keychain-"+k.label}})
+                .concat([{separator:true,action:"separator"},
+                         {text:"Lock All Keychains",action:"keychain-lock-all",name:"keychain-lock-all",
+                          enabled:list.some(function(k){return !k.locked})}])
+        }
         if(module==="printer") {
             let printers=manager.printers?manager.printers.printers:[]
             if(!printers.length)return [{text:manager.printers&&manager.printers.busy?"Checking…":"No Desktop Printers",

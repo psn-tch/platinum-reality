@@ -69,6 +69,7 @@ target_sources(frankenstein-desktop PRIVATE src/desktop/asset_importer.cpp src/d
 target_sources(frankenstein-desktop PRIVATE src/desktop/software_update.cpp src/desktop/software_update.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/window_move_outline.cpp src/desktop/window_move_outline.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/printer_selector.cpp src/desktop/printer_selector.hpp)
+target_sources(frankenstein-desktop PRIVATE src/desktop/keychain_service.cpp src/desktop/keychain_service.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/appearance_settings.cpp src/desktop/appearance_settings.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/input_settings.cpp src/desktop/input_settings.hpp src/desktop/energy_settings.cpp src/desktop/energy_settings.hpp src/desktop/sticky_notes.cpp src/desktop/sticky_notes.hpp src/desktop/note_pad.cpp src/desktop/note_pad.hpp src/desktop/scrapbook.cpp src/desktop/scrapbook.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/keyboard_broadcast.cpp src/desktop/keyboard_broadcast.hpp)

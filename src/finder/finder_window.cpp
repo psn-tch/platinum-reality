@@ -58,11 +58,17 @@
 #include <QtConcurrent>
 #include <algorithm>
 
+namespace
+{
+QStyledItemDelegate *makeFolderIconDelegate(QListView *view);
+}
+
 FolderIcons::FolderIcons(QWidget *parent) : QListView(parent)
 {
     m_spring.opened = [this](const QString &folder) { emit springOpen(folder); };
     setViewMode(QListView::IconMode);
     setIconSize({32, 32});
+    setItemDelegate(makeFolderIconDelegate(this));
     setGridSize({96, 78});
     setResizeMode(QListView::Adjust);
     setMovement(QListView::Free);
@@ -162,6 +168,40 @@ class FolderColumnHeader final : public QHeaderView
         painter->restore();
     }
 };
+QIcon selectedFolderIcon(const QIcon &icon, QSize size, qreal ratio)
+{
+    // Raster icons can carry explicit state artwork. Named theme engines may
+    // report sizes for generated states too; retain our default for those.
+    // Require this logical size, so a 32px state cannot leak into the 16px view.
+    if (icon.name().isEmpty() && icon.availableSizes(QIcon::Selected).contains(size))
+        // Isolate the logical slot before Qt scales for the target display.
+        // Requesting at ratio>1 here could choose the other slot's artwork.
+        return QIcon(icon.pixmap(size,1.0,QIcon::Selected));
+    // Measured list icons, Sherlock and the ordinary folder halve RGB. Some
+    // reference artwork uses a different mapping; do not apply it universally
+    // without source-family provenance (see docs/fidelity/desktop-icons.md).
+    const auto key = QString("platinum-finder-selected-rgb-half-%1-%2x%3-%4")
+        .arg(icon.cacheKey()).arg(size.width()).arg(size.height()).arg(ratio);
+    QPixmap pixmap;
+    if (!QPixmapCache::find(key,&pixmap))
+    {
+        auto image = icon.pixmap(size,ratio,QIcon::Normal).toImage().convertToFormat(QImage::Format_ARGB32);
+        if (image.isNull()) return icon;
+        for (int y=0;y<image.height();++y)
+        {
+            auto *pixels=reinterpret_cast<QRgb*>(image.scanLine(y));
+            for (int x=0;x<image.width();++x)
+            {
+                const auto pixel=pixels[x];
+                pixels[x]=qRgba(qRed(pixel)/2,qGreen(pixel)/2,qBlue(pixel)/2,qAlpha(pixel));
+            }
+        }
+        pixmap=QPixmap::fromImage(image);
+        QPixmapCache::insert(key,pixmap);
+    }
+    return QIcon(pixmap);
+}
+
 class FolderListDelegate final : public QStyledItemDelegate
 {
   public:
@@ -184,7 +224,7 @@ class FolderListDelegate final : public QStyledItemDelegate
         styled.state &= ~(QStyle::State_Selected | QStyle::State_HasFocus);
         styled.backgroundBrush = field;
         if (highlight && !styled.icon.isNull())
-            styled.icon = darkenedIcon(styled.icon,styled.decorationSize,m_view->devicePixelRatioF());
+            styled.icon = selectedFolderIcon(styled.icon,styled.decorationSize,m_view->devicePixelRatioF());
         auto *style = styled.widget ? styled.widget->style() : QApplication::style();
         style->drawControl(QStyle::CE_ItemViewItem, &styled, painter, styled.widget);
         painter->save();
@@ -207,33 +247,40 @@ class FolderListDelegate final : public QStyledItemDelegate
         painter->restore();
     }
   private:
-    static QIcon darkenedIcon(const QIcon &icon, QSize size, qreal ratio)
-    {
-        // The cursor-free reference icon strip halves opaque RGB channels. Preserve
-        // source alpha so its transparent edge still composites against the row.
-        const auto key = QString("platinum-finder-selected-%1-%2x%3-%4")
-            .arg(icon.cacheKey()).arg(size.width()).arg(size.height()).arg(ratio);
-        QPixmap pixmap;
-        if (!QPixmapCache::find(key,&pixmap))
-        {
-            auto image = icon.pixmap(size,ratio,QIcon::Normal).toImage().convertToFormat(QImage::Format_ARGB32);
-            if (image.isNull()) return icon;
-            for (int y=0;y<image.height();++y)
-            {
-                auto *pixels=reinterpret_cast<QRgb*>(image.scanLine(y));
-                for (int x=0;x<image.width();++x)
-                {
-                    const auto pixel=pixels[x];
-                    pixels[x]=qRgba(qRed(pixel)/2,qGreen(pixel)/2,qBlue(pixel)/2,qAlpha(pixel));
-                }
-            }
-            pixmap=QPixmap::fromImage(image);
-            QPixmapCache::insert(key,pixmap);
-        }
-        return QIcon(pixmap);
-    }
     QTreeView *m_view;
 };
+class FolderIconDelegate final : public QStyledItemDelegate
+{
+  public:
+    explicit FolderIconDelegate(QListView *view) : QStyledItemDelegate(view),m_view(view) {}
+    void paint(QPainter *painter,const QStyleOptionViewItem &option,const QModelIndex &index) const override
+    {
+        auto styled=option;initStyleOption(&styled,index);
+        const bool highlight=styled.state.testFlag(QStyle::State_Selected) && m_view->window()->isActiveWindow();
+        styled.state &= ~(QStyle::State_Selected | QStyle::State_HasFocus);
+        styled.backgroundBrush=Qt::white;
+        if(highlight && !styled.icon.isNull())
+            styled.icon=selectedFolderIcon(styled.icon,styled.decorationSize,m_view->devicePixelRatioF());
+        auto *style=styled.widget ? styled.widget->style() : QApplication::style();
+        style->drawControl(QStyle::CE_ItemViewItem,&styled,painter,styled.widget);
+        if(highlight && !styled.text.isEmpty()){
+            const int margin=style->pixelMetric(QStyle::PM_FocusFrameHMargin,&styled,styled.widget)+1;
+            const auto area=style->subElementRect(QStyle::SE_ItemViewItemText,&styled,styled.widget)
+                .adjusted(margin,0,-margin,0);
+            const auto text=styled.fontMetrics.elidedText(styled.text,styled.textElideMode,qMax(0,area.width()));
+            const auto label=style->itemTextRect(styled.fontMetrics,area,
+                styled.displayAlignment | Qt::TextSingleLine,true,text).adjusted(-1,0,1,0).intersected(option.rect);
+            painter->save();painter->setCompositionMode(QPainter::CompositionMode_Difference);
+            painter->fillRect(label,Qt::white);painter->restore();
+        }
+    }
+  private:
+    QListView *m_view;
+};
+QStyledItemDelegate *makeFolderIconDelegate(QListView *view)
+{
+    return new FolderIconDelegate(view);
+}
 // A finger held still for 0.6 s on a folder view opens its menu, as a right click does: the
 // handheld's touchscreen has no right button (psn_tch, 2026-10-29). Touch arrives here as Qt's
 // synthesized mouse events from a touchscreen device; moving more than a few pixels cancels.
@@ -555,9 +602,39 @@ FolderList::FolderList(QWidget *parent) : QTreeView(parent)
 }
 void FolderList::drawBranches(QPainter *painter, const QRect &rect, const QModelIndex &index) const
 {
-    painter->fillRect(rect, QColor(header()->sortIndicatorSection()==0 ? "#dddddd" : "#eeeeee"));
+    const QColor field(header()->sortIndicatorSection()==0 ? "#dddddd" : "#eeeeee");
+    painter->fillRect(rect, field);
     QTreeView::drawBranches(painter, rect, index);
     painter->save();
+    if (model() && (model()->hasChildren(index) || model()->canFetchMore(index)) &&
+        (rootIsDecorated() || index.parent()!=rootIndex()) && rect.width()>=indentation())
+    {
+        // Measured blue triangles, including their one-pixel gray shadows.
+        // Keep Qt's branch hit testing, indentation and expansion logic.
+        painter->fillRect(rect.right()-indentation()+1,rect.top(),indentation(),rect.height()-1,field);
+        const bool expanded=isExpanded(index);
+        const QPoint origin(rect.right()-indentation()/2-(expanded ? 5 : 1),
+                            rect.center().y()-(expanded ? 2 : 6));
+        static constexpr const char *closedRows[]={"K......","KK.....","KLK....","KLMK...",
+            "KLMMK..","KLMMDK.","KLMDKSs","KLDKSs.","KMKSs..","KKSs...","KSs....",".s....."};
+        static constexpr const char *expandedRows[]={"KKKKKKKKKKK.",".KLLLLLLMKSs",
+            "..KMMMMDKSs.","...KMMDKSs..","....KDKSs...",".....KSs....","......s....."};
+        const auto rows=expanded ? expandedRows : closedRows;
+        for (int y=0;y<(expanded ? 7 : 12);++y)for (int x=0;x<(expanded ? 12 : 7);++x)
+        {
+            QColor color;
+            switch(rows[y][x]){
+            case 'K':color=Qt::black;break;
+            case 'L':color=QColor("#ccccff");break;
+            case 'M':color=QColor("#9999ff");break;
+            case 'D':color=QColor("#6666cc");break;
+            case 'S':color=QColor("#888888");break;
+            case 's':color=QColor("#bbbbbb");break;
+            default:continue;
+            }
+            painter->fillRect(origin.x()+x,origin.y()+y,1,1,color);
+        }
+    }
     painter->fillRect(rect.left(), rect.bottom(), rect.width(), 1, Qt::white);
     painter->restore();
 }
@@ -1509,7 +1586,14 @@ void FinderWindow::showContextMenu(QAbstractItemView *view, QPoint point)
         menu->addSeparator();
         add("getInfo");
         if (auto *labels = findChild<QMenu *>("labelMenu"))
-            menu->addMenu(labels);
+        {
+            // Share real actions and checked-state updates, while keeping popup
+            // presentation independent of the File menu's persistent submenu.
+            auto *contextLabels=menu->addMenu(labels->title());
+            contextLabels->setObjectName("finderContextLabels");
+            contextLabels->addActions(labels->actions());
+            connect(contextLabels,&QMenu::aboutToShow,labels,&QMenu::aboutToShow);
+        }
         add("rename");
         add("duplicate");
         add("makeAlias");
@@ -1535,6 +1619,12 @@ void FinderWindow::showContextMenu(QAbstractItemView *view, QPoint point)
         views->addAction(findChild<QAction *>("list"));
         add("showHidden");
     }
+    const auto prepareMenu=[](QMenu *target) {
+        target->setProperty("platinumFinderContextMenu",true);
+        auto font=target->font();font.setBold(true);target->setFont(font);
+    };
+    prepareMenu(menu);
+    for(auto *action:menu->actions())if(action->menu())prepareMenu(action->menu());
     menu->popup(view->viewport()->mapToGlobal(point));
 }
 QString FinderWindow::dropDirectoryAt(QPoint windowPosition) const

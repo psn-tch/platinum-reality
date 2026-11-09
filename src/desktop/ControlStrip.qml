@@ -37,7 +37,8 @@ Item {
                  {command:"monitors",name:"Brightness"},
                  {command:"energy",name:"Energy Settings"}])
         .concat(handheld && handheld.available ? [{command:"handheld",name:"Handheld"}] : [])
-        .concat([{command:"resolution",name:"Monitor Resolution"},
+        .concat([{command:"keychain",name:"Keychain"},
+                 {command:"resolution",name:"Monitor Resolution"},
                  {command:"printer",name:"Printer Selector"},
                  {command:"sound",name:"Sound Volume",slider:true},
                  {command:"soundsource",name:"Sound Source"},

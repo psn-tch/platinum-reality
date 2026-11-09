@@ -26,6 +26,7 @@ reference. The remaining differences are explicitly listed below.
 | Element | Reference |
 | --- | --- |
 | Main field | `#cccccc`, black outer boundary, upper/left white and lower/right `#999999` bevel |
+| Title stipple | Three-pixel grid: white upper-left dot, `#777777` lower-right dot, remaining field `#cccccc` |
 | Close box | 10×10, at outer offset(2,3) |
 | Row well | Outer offset(3,15), width152, height2+24 per application, black edge |
 | Application rows | Offset(4,16), width150, height24, adjacent without gaps |
@@ -37,6 +38,12 @@ reference. The remaining differences are explicitly listed below.
 | Pressed bottom/right bevel | Outer `#444444`, inner `#aaaaaa` |
 | Released top/left bevel | Outer `#666666`, inner white |
 | Released bottom/right bevel | Outer `#333333`, inner `#888888` |
+
+The clear title patch x349..363/y179..190 in `switcher-two-apps-final.png`
+contains three rows of five raised pairs, with blank rows between. Relative to
+the palette origin (336,177), white dots begin at (14,4), dark dots at (15,5),
+both repeating every three pixels. The implementation paints this geometry;
+no reference bitmap is embedded. The title label still masks the center.
 
 A clear x450 column in the two-app capture has the first button at y193..216
 and second at217..240. Each interior is20px high between its two-pixel bevels;
@@ -83,13 +90,14 @@ and the original activation target ID. All fixture images are independently
 generated solid colors, never reference artwork.
 
 The reference has two additional palette title controls for options/collapse;
-this milestone does not add nonfunctional lookalikes. Title stipple, title font
+this milestone does not add nonfunctional lookalikes. Title font
 metrics without a local Charcoal font, full corner/bevel pixels, shadow and
-tear-off anchor/tracking still differ or require further measurement. Existing
-palette dragging is live, separate from managed-window outline movement. Hidden
+tear-off anchor/tracking still differ or require further measurement. Palette dragging now uses the shared shell-window outline transaction, committing
+its saved position on release and restoring on cancellation. Hidden
 application appearance is retained from the existing implementation and not
-claimed newly verified against the reference. Native activation, icon rendering
-at1.5 and mixed-monitor traversal remain coordinator headless checks.
+claimed newly verified against the reference. Mixed-monitor traversal and touch remain unqualified. Sammy subsequently
+qualified the managed/accessory outline checks at 1.0 and 1.5; the title raster
+check below is a local offscreen check, not a new native gate.
 
 Focused desktop verification passes9/9 including init/cleanup: the two icon tests,
 menu keyboard access, Appearance, pointer tracking, Control Strip/accessory-close
@@ -118,6 +126,27 @@ The getter now reads without starting asynchronous discovery. A production-QML
 regression constructs the shell with an absent applications directory, reads its
 icons/application list, verifies discovery stayed idle, then creates an entry and
 explicitly refreshes. It checks the discovered identity, filter count and valid
-launch plan. Existing identity/cache/refresh and menu/icon tests remain. Full
-native reruns in the coordinator's IPC-capable venue remain the acceptance check;
-source diagnosis and local offscreen tests do not claim those clients passed.
+launch plan. Existing identity/cache/refresh and menu/icon tests remain. Sammy subsequently verified the correction in the IPC-capable native venue:
+all four regressions disappeared; the full gate reported 145 passed, eight
+Chromium-absent failures and five skipped. Non-native ctest passed 44/44 and
+focused native fidelity passed 10/10 at 1.5 (HANDOFF, SAMMY20:42). These are
+coordinator results, not local native execution.
+
+## Title stipple follow-up
+
+The title now uses native one-pixel rectangles for the measured raised pairs.
+An initial Canvas version matched at 1.0 but blurred the dots at 1.5; that version
+was replaced before this milestone. Native rectangles retain crisp raster colors
+at both scales. No close-box, label, row or move-transaction geometry changed.
+
+The production-QML icon/activation test now also checks the independent 15×12
+reference patch: 15 white pixels, 15 dark pixels and 150 background pixels at
+logical pixel centers. Capture coordinates derive from image width divided by
+view width, because the software renderer can return physical pixels with DPR
+metadata 1. The existing red-icon check now uses that scale too.
+
+Focused switcher icons/target identity, outline commit/cancel and menu checks
+pass 5/5 including lifecycle at 1.0. Switcher raster/icons and outline checks
+pass 4/4 at 1.5. Production and native-test builds pass. These checks do not
+qualify the reference title glyphs, unimplemented auxiliary buttons, complete
+palette corners, tear-off tracking or mixed-monitor interaction.

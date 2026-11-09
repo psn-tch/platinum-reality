@@ -9,6 +9,7 @@
 #include "asset_importer.hpp"
 #include "software_update.hpp"
 #include "printer_selector.hpp"
+#include "keychain_service.hpp"
 #include "bluetooth.hpp"
 #include "wifi.hpp"
 #include "alert_sounds.hpp"
@@ -172,6 +173,7 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     // CUPS's own tools; tests name stand-ins.
     m_printers = new PrinterSelector(qEnvironmentVariable("FRANKENSTEIN_LPSTAT", "lpstat"),
                                      qEnvironmentVariable("FRANKENSTEIN_LPOPTIONS", "lpoptions"), this);
+    m_keychains = new KeychainService(QDBusConnection::sessionBus(), this);
     // The real battery only in a real session, like sound; tests may name a fake sysfs tree.
     m_battery = new BatteryStatus(qEnvironmentVariable("FRANKENSTEIN_POWER_SUPPLY_ROOT",
                                                        audible ? "/sys/class/power_supply" : ""), this);

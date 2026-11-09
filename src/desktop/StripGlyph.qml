@@ -38,6 +38,12 @@ Canvas {
         } else if(kind==="monitors") {
             c.beginPath();c.arc(8,8,3,0,Math.PI*2);c.fill()
             for(let i=0;i<8;++i){const a=i*Math.PI/4;line(8+Math.cos(a)*4.5,8+Math.sin(a)*4.5,8+Math.cos(a)*6.5,8+Math.sin(a)*6.5)}
+        } else if(kind==="keychain") {
+            // Keychain: a padlock.
+            c.beginPath();c.arc(8,6,3.5,Math.PI,0);c.stroke()
+            line(4.5,6,4.5,8);line(11.5,6,11.5,8)
+            c.fillStyle="#d8b84a";c.fillRect(2.5,7.5,11,7);c.strokeRect(2.5,7.5,11,7)
+            c.fillStyle="#222";c.fillRect(7,10,2,3)
         } else if(kind==="printer") {
             // Printer Selector: a desktop printer with its sheet.
             c.fillStyle="white";c.fillRect(4.5,1.5,7,5);c.strokeRect(4.5,1.5,7,5)

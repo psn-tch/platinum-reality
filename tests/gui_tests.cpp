@@ -16,6 +16,7 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFileDialog>
+#include <QFileIconProvider>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -167,6 +168,112 @@ class GuiTests : public QObject
         QTRY_COMPARE(row(0),selected);
         QCOMPARE(model->filePath(view->selectionModel()->selectedIndexes().first()),root.path()+"/Selected folder");
     }
+    void iconViewSelectionUsesMeasuredColorsAndKeepsManualPlacement()
+    {
+        QStandardItemModel model(1,1);const auto index=model.index(0,0);
+        model.setData(index,"Owned icon");
+        QPixmap artwork(32,32);artwork.fill(Qt::transparent);
+        const QList<QColor> colors{QColor(200,120,80),QColor(160,160,160),QColor(160,160,80),QColor(80,160,240)};
+        const QList<QColor> selectedColors{QColor(100,60,40),QColor(80,80,80),QColor(80,80,40),QColor(40,80,120)};
+        QPainter painter(&artwork);
+        for(int i=0;i<4;++i)painter.fillRect(4+(i%2)*16,4+(i/2)*16,8,8,colors[i]);
+        painter.end();model.setData(index,QIcon(artwork),Qt::DecorationRole);
+        FolderIcons view;view.resize(320,220);view.setModel(&model);view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));view.activateWindow();QTRY_VERIFY(view.isActiveWindow());
+        view.restorePosition(index,{130,80});QTRY_COMPARE(view.visualRect(index).topLeft(),QPoint(130,80));
+        const auto rect=view.visualRect(index);const auto point=QPoint(rect.center().x(),rect.top()+16);
+        view.setFocus();QTest::mouseMove(view.viewport(),point);view.selectionModel()->clearSelection();
+        const auto normal=view.viewport()->grab().toImage();const auto ratio=normal.devicePixelRatio();
+        QTest::mouseClick(view.viewport(),Qt::LeftButton,{},point);
+        QTRY_VERIFY(view.selectionModel()->isSelected(index));
+        const auto selected=view.viewport()->grab().toImage();
+        QList<int> found{0,0,0,0};int labelBlack=0;
+        for(int y=0;y<normal.height();++y)for(int x=0;x<normal.width();++x){
+            const auto color=normal.pixelColor(x,y);
+            const int at=y<qRound((rect.top()+34)*ratio) ? colors.indexOf(color) : -1;
+            if(at>=0){QCOMPARE(selected.pixelColor(x,y),selectedColors[at]);++found[at];}
+            if(y>=qRound((rect.top()+34)*ratio) && color==QColor(Qt::white) && selected.pixelColor(x,y)==QColor(Qt::black))++labelBlack;
+        }
+        for(const auto count:found)QVERIFY(count>=20);
+        QVERIFY(labelBlack>30);
+        const QPoint clear(qRound((rect.left()+.5)*ratio),qRound((rect.top()+16.5)*ratio));
+        QCOMPARE(normal.pixelColor(clear),QColor(Qt::white));QCOMPARE(selected.pixelColor(clear),QColor(Qt::white));
+        QCOMPARE(view.visualRect(index),rect);QCOMPARE(view.gridSize(),QSize(96,78));
+        QCOMPARE(view.movement(),QListView::Free);QCOMPARE(view.spacing(),8);QCOMPARE(view.iconSize(),QSize(32,32));
+        QWidget other;other.show();QVERIFY(QTest::qWaitForWindowExposed(&other));
+        other.activateWindow();QTRY_VERIFY(!view.isActiveWindow());
+        QTRY_COMPARE(view.viewport()->grab().toImage(),normal);
+        QVERIFY(view.selectionModel()->isSelected(index));
+        view.activateWindow();QTRY_VERIFY(view.isActiveWindow());
+        QTRY_COMPARE(view.viewport()->grab().toImage(),selected);
+        QCOMPARE(view.visualRect(index),rect);QCOMPARE(model.data(index).toString(),QString("Owned icon"));
+    }
+    void folderSelectionUsesSizeMatchedPrivateArtworkAndKeepsGenericFallbacks()
+    {
+        QTemporaryDir root;QVERIFY(QDir(root.path()).mkdir("icons"));
+        const auto previous=qgetenv("PLATINUM_PERSONAL_ASSETS");
+        const auto oldTheme=QIcon::themeName();const auto oldPaths=QIcon::themeSearchPaths();
+        const auto restore=qScopeGuard([&]{
+            if(previous.isNull())qunsetenv("PLATINUM_PERSONAL_ASSETS");
+            else qputenv("PLATINUM_PERSONAL_ASSETS",previous);
+            QIcon::setThemeSearchPaths(oldPaths);QIcon::setThemeName(oldTheme);
+        });
+        qputenv("PLATINUM_PERSONAL_ASSETS",root.path().toUtf8());
+        const auto write=[](const QString &path,int size,QColor color) {
+            QImage image(size,size,QImage::Format_ARGB32);image.fill(Qt::transparent);
+            const int inset=size/4;
+            QPainter p(&image);p.fillRect(inset,inset,size-2*inset,size-2*inset,color);p.end();return image.save(path);
+        };
+        const QColor normal32(200,120,80),normal16(80,160,240),selected32(30,210,70),selected16(240,180,30);
+        QVERIFY(write(root.filePath("icons/folder.png"),32,normal32));
+        QVERIFY(write(root.filePath("icons/folder-16.png"),16,normal16));
+        QVERIFY(write(root.filePath("icons/folder-selected.png"),32,selected32));
+        // A malformed-size small variant must neither replace the 32px state
+        // nor silently apply that state to the list view.
+        QVERIFY(write(root.filePath("icons/folder-16-selected.png"),32,QColor(200,20,240)));
+        const auto imported=[&]{
+            QFileSystemModel files;installPlatinumIcons(&files);
+            return files.iconProvider()->icon(QFileInfo(root.path()));
+        };
+        QStandardItemModel model(1,1);const auto index=model.index(0,0);
+        model.setData(index,"Owned folder");model.setData(index,imported(),Qt::DecorationRole);
+        const auto matches=[&](QAbstractItemView &view,QColor normal,QColor selected) {
+            view.selectionModel()->clearSelection();const auto before=view.viewport()->grab().toImage();
+            view.selectionModel()->select(index,QItemSelectionModel::ClearAndSelect);
+            const auto after=view.viewport()->grab().toImage();if(before.size()!=after.size())return false;
+            int count=0;
+            for(int y=0;y<before.height();++y)for(int x=0;x<before.width();++x)
+                if(before.pixelColor(x,y)==normal) {
+                    ++count;if(after.pixelColor(x,y)!=selected)return false;
+                }
+            return count>=20;
+        };
+        FolderIcons icons;icons.resize(320,220);icons.setModel(&model);icons.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&icons));icons.activateWindow();QTRY_VERIFY(icons.isActiveWindow());
+        QVERIFY(matches(icons,normal32,selected32));icons.hide();
+        FolderList list;list.resize(320,180);list.setModel(&model);list.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&list));list.activateWindow();QTRY_VERIFY(list.isActiveWindow());
+        // Qt normally chooses the 32px source at DPR1.5 for a 16px slot.
+        const auto listNormal=list.devicePixelRatioF()>1 ? normal32 : normal16;
+        const auto listHalf=list.devicePixelRatioF()>1 ? QColor(100,60,40) : QColor(40,80,120);
+        QVERIFY(matches(list,listNormal,listHalf));
+        QVERIFY(write(root.filePath("icons/folder-16-selected.png"),16,selected16));
+        model.setData(index,imported(),Qt::DecorationRole);
+        QVERIFY(matches(list,listNormal,selected16));list.hide();
+        // Theme engines can synthesize a Selected state. Keep the generic RGB
+        // rule for named theme artwork instead of mistaking it for supplied art.
+        QVERIFY(QDir(root.path()).mkpath("themes/owned-selection/32x32/places"));
+        QFile theme(root.filePath("themes/owned-selection/index.theme"));QVERIFY(theme.open(QIODevice::WriteOnly));
+        theme.write("[Icon Theme]\nName=Owned selection\nDirectories=32x32/places\n"
+                    "[32x32/places]\nSize=32\nType=Fixed\nContext=Places\n");theme.close();
+        const QColor themed(160,80,200);
+        QVERIFY(write(root.filePath("themes/owned-selection/32x32/places/owned-folder.png"),32,themed));
+        QIcon::setThemeSearchPaths({root.filePath("themes")});QIcon::setThemeName("owned-selection");
+        const auto themeIcon=QIcon::fromTheme("owned-folder");QVERIFY(!themeIcon.isNull());
+        model.setData(index,themeIcon,Qt::DecorationRole);icons.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&icons));icons.activateWindow();QTRY_VERIFY(icons.isActiveWindow());
+        QVERIFY(matches(icons,themed,QColor(80,40,100)));
+    }
     void selectedListIconsHalveRgbPreserveTransparencyAndRefresh()
     {
         QStandardItemModel model(1,1);
@@ -237,6 +344,61 @@ class GuiTests : public QObject
         QTRY_VERIFY(check(0,false,false));QTRY_VERIFY(check(3,false,true));
         window->activateWindow();QTRY_VERIFY(window->isActiveWindow());
         QTRY_VERIFY(check(0,true,false));QTRY_VERIFY(check(3,true,true));
+    }
+    void closedFolderDisclosureMatchesReferenceAndStillExpandsRealChildren()
+    {
+        QTemporaryDir root,profile;QVERIFY(QDir(root.path()).mkpath("Inside/Child"));
+        QPointer<FinderWindow> window=new FinderWindow(root.path(),profile.path(),root.path());
+        const auto close=qScopeGuard([&]{if(window)window->close();});
+        window->setViewMode(true);window->show();QVERIFY(QTest::qWaitForWindowExposed(window));
+        window->activateWindow();QTRY_VERIFY(window->isActiveWindow());
+        QTRY_VERIFY(window->directoryState().value("loaded").toBool());
+        auto *view=window->findChild<FolderList*>();QVERIFY(view);
+        auto *model=qobject_cast<QFileSystemModel*>(view->model());QVERIFY(model);
+        const auto index=model->index(root.path()+"/Inside");QVERIFY(index.isValid());
+        model->fetchMore(index);QTRY_VERIFY(model->rowCount(index)>0);
+        const auto row=view->visualRect(index);QVERIFY(row.isValid());
+        const QPoint origin(row.left()-view->indentation()/2-2,row.center().y()-6);
+        const auto check=[&]{
+            const auto image=view->viewport()->grab().toImage();const auto ratio=image.devicePixelRatio();
+            const auto at=[&](int x,int y){return image.pixelColor(int((origin.x()+x+.5)*ratio),int((origin.y()+y+.5)*ratio));};
+            return at(0,0)==QColor(Qt::black) && at(1,0)==QColor("#ddd") &&
+                at(1,2)==QColor("#ccccff") && at(2,3)==QColor("#9999ff") &&
+                at(4,5)==QColor("#6666cc") && at(5,6)==QColor("#888") &&
+                at(6,6)==QColor("#bbb") && at(1,11)==QColor("#bbb");
+        };
+        const auto expandedCheck=[&]{
+            const auto image=view->viewport()->grab().toImage();const auto ratio=image.devicePixelRatio();
+            const QPoint openOrigin=origin+QPoint(-4,4);
+            const auto at=[&](int x,int y){return image.pixelColor(int((openOrigin.x()+x+.5)*ratio),int((openOrigin.y()+y+.5)*ratio));};
+            return at(0,0)==QColor(Qt::black) && at(10,0)==QColor(Qt::black) &&
+                at(11,0)==QColor("#ddd") && at(2,1)==QColor("#ccccff") &&
+                at(8,1)==QColor("#9999ff") && at(7,2)==QColor("#6666cc") &&
+                at(10,1)==QColor("#888") && at(11,1)==QColor("#bbb") &&
+                at(6,6)==QColor("#bbb");
+        };
+        QTRY_VERIFY(check());
+        QTest::mouseClick(view->viewport(),Qt::LeftButton,{},origin+QPoint(2,5));
+        QTRY_VERIFY(view->isExpanded(index));
+        QTRY_VERIFY(expandedCheck());
+        const auto child=model->index(root.path()+"/Inside/Child");QVERIFY(child.isValid());
+        QTRY_VERIFY(view->viewport()->rect().intersects(view->visualRect(child)));
+        // The wide open triangle's left edge still reaches Qt's real toggle region.
+        QTest::mouseClick(view->viewport(),Qt::LeftButton,{},origin+QPoint(-3,4));
+        QTRY_VERIFY(!view->isExpanded(index));QTRY_VERIFY(check());
+        view->setCurrentIndex(index);view->setFocus();QTest::keyClick(view,Qt::Key_Right);
+        QTRY_VERIFY(view->isExpanded(index));QTRY_VERIFY(expandedCheck());
+        view->setCurrentIndex(index);view->setFocus();QTest::keyClick(view,Qt::Key_Left);
+        QTRY_VERIFY(!view->isExpanded(index));QTRY_VERIFY(check());
+        QVERIFY(view->selectionModel()->isSelected(index));
+        QWidget other;other.show();QVERIFY(QTest::qWaitForWindowExposed(&other));
+        other.activateWindow();QTRY_VERIFY(!window->isActiveWindow());
+        QTRY_VERIFY(check());QVERIFY(view->selectionModel()->isSelected(index));
+        window->activateWindow();QTRY_VERIFY(window->isActiveWindow());
+        view->setFocus();QTest::keyClick(view,Qt::Key_Right);
+        QTRY_VERIFY(view->isExpanded(index));QTRY_VERIFY(expandedCheck());
+        other.activateWindow();QTRY_VERIFY(!window->isActiveWindow());
+        QTRY_VERIFY(expandedCheck());QVERIFY(view->selectionModel()->isSelected(index));
     }
     void cutCopyAndPasteFilesBetweenWindowsAndFileManagers()
     {
@@ -1036,9 +1198,54 @@ class GuiTests : public QObject
         QVERIFY(menu->isVisible());
         QVERIFY(menu->actions().contains(window->findChild<QAction *>("rename")));
         QVERIFY(window->findChild<QAction *>("duplicate")->isEnabled());
+        const auto pixel=[&](const QImage &image,int x,int y) {
+            const auto ratio=image.devicePixelRatio();
+            return image.pixelColor(int((x+.5)*ratio),int((y+.5)*ratio));
+        };
+        const auto normal=menu->grab().toImage();
+        QCOMPARE(pixel(normal,0,5),QColor(Qt::black));
+        QCOMPARE(pixel(normal,1,5),QColor(Qt::white));
+        QCOMPARE(pixel(normal,2,5),QColor("#ddd"));
+        QCOMPARE(pixel(normal,menu->width()-2,5),QColor("#999"));
+        QCOMPARE(pixel(normal,menu->width()-1,5),QColor(Qt::black));
+        for(auto *action:menu->actions()) {
+            const auto rect=menu->actionGeometry(action);
+            QCOMPARE(rect.height(),action->isSeparator()?6:16);
+            if(action->isSeparator()) {
+                QCOMPARE(pixel(normal,4,rect.top()+2),QColor("#888"));
+                QCOMPARE(pixel(normal,4,rect.top()+3),QColor(Qt::white));
+            }
+        }
+        auto *labels=menu->findChild<QMenu *>("finderContextLabels");QVERIFY(labels);
+        auto *fileLabels=window->findChild<QMenu *>("labelMenu");QVERIFY(fileLabels);
+        QCOMPARE(fileLabels->font().bold(),window->font().bold());
+        QCOMPARE(labels->actions(),fileLabels->actions());
+        menu->setActiveAction(labels->menuAction());
+        QTest::keyClick(menu,Qt::Key_Right);
+        QTRY_VERIFY(labels->isVisible());
+        QVERIFY(window->findChild<QAction *>("label0")->isChecked());
+        auto *red=window->findChild<QAction *>("label2");QVERIFY(red);
+        const auto redRect=labels->actionGeometry(red);QCOMPARE(redRect.height(),16);
+        const auto beforeLabel=labels->grab().toImage();
+        red->trigger();QCOMPARE(FileLabels::label(root.path()+"/One.txt",profile.path()),2);
+        QVERIFY(QMetaObject::invokeMethod(labels,"aboutToShow"));QVERIFY(red->isChecked());
+        const auto afterLabel=labels->grab().toImage();
+        const auto ratio=afterLabel.devicePixelRatio();
+        const QRect checkGutter(int(ratio),int(redRect.top()*ratio),int(16*ratio),int(redRect.height()*ratio));
+        QVERIFY(beforeLabel.copy(checkGutter)!=afterLabel.copy(checkGutter));
+        QTest::keyClick(labels,Qt::Key_Left);
+        QTRY_VERIFY(!labels->isVisible());QVERIFY(menu->isVisible());
+        auto *duplicate = window->findChild<QAction *>("duplicate");
+        menu->setActiveAction(duplicate);
+        const auto selected=menu->grab().toImage();
+        const auto selectedRect=menu->actionGeometry(duplicate);
+        for(int y=selectedRect.top();y<=selectedRect.bottom();++y) {
+            QCOMPARE(pixel(selected,1,y),QColor("#6666cc"));
+            QCOMPARE(pixel(selected,2,y),QColor("#333399"));
+            QCOMPARE(pixel(selected,menu->width()-2,y),QColor("#000088"));
+        }
         QVERIFY(menu->grab().save(QCoreApplication::applicationDirPath() +
                                   "/artifacts/finder-context.png"));
-        auto *duplicate = window->findChild<QAction *>("duplicate");
         QTest::mouseClick(menu, Qt::LeftButton, {}, menu->actionGeometry(duplicate).center());
         QTRY_VERIFY(QFileInfo::exists(root.path() + "/One copy.txt"));
         QTRY_VERIFY(!window->directoryState().value("busy").toBool());

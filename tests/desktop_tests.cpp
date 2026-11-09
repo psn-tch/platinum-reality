@@ -16,6 +16,7 @@
 #include "desktop/software_update.hpp"
 #include "desktop/window_move_outline.hpp"
 #include "desktop/printer_selector.hpp"
+#include "desktop/keychain_service.hpp"
 #include "desktop/sticky_notes.hpp"
 #include "desktop/note_pad.hpp"
 #include "desktop/scrapbook.hpp"
@@ -187,8 +188,25 @@ class DesktopTests : public QObject
         QVERIFY(active->property("down").toBool());
         const auto capture=view.grabWindow();QVERIFY(!capture.isNull());
         QVERIFY(capture.save(QCoreApplication::applicationDirPath()+"/artifacts/application-switcher-icons.png"));
-        const auto at=icon->mapToScene(QPointF(8,8))*capture.devicePixelRatio();
+        // The software grab can contain physical pixels with DPR metadata 1.
+        const qreal captureScale=qreal(capture.width())/view.width();
+        const auto at=icon->mapToScene(QPointF(8,8))*captureScale;
         QCOMPARE(capture.pixelColor(at.toPoint()),QColor(Qt::red));
+        // Independently sampled reference patch x349..363/y179..190, relative
+        // to palette origin (336,177). Excludes artwork, title and controls.
+        const QStringList titlePatch{
+            "...............", "...............", ".W..W..W..W..W.",
+            "..D..D..D..D..D", "...............", ".W..W..W..W..W.",
+            "..D..D..D..D..D", "...............", ".W..W..W..W..W.",
+            "..D..D..D..D..D", "...............", "..............."};
+        for(int y=0;y<titlePatch.size();++y) {
+            for(int x=0;x<titlePatch[y].size();++x) {
+                const auto mark=titlePatch[y][x];
+                const QColor expected=mark=='W'?QColor(Qt::white):mark=='D'?QColor("#777"):QColor("#ccc");
+                const auto pixel=switcher->mapToScene(QPointF(13+x+.5,2+y+.5))*captureScale;
+                QCOMPARE(capture.pixelColor(QPoint(qFloor(pixel.x()),qFloor(pixel.y()))),expected);
+            }
+        }
         QSignalSpy chosen(switcher,SIGNAL(chosen(QVariant)));QVERIFY(chosen.isValid());
         auto *row=visualItem(switcher,"application-switcher-No Icon");QVERIFY(row);
         QTest::mouseClick(&view,Qt::LeftButton,{},row->mapToScene({row->width()/2,row->height()/2}).toPoint());
@@ -2850,6 +2868,44 @@ class DesktopTests : public QObject
         QTRY_VERIFY(!selector->busy() && entries().size() == 1);
         QCOMPARE(entries().at(0).toMap().value("text").toString(), QString("No Desktop Printers"));
         QVERIFY(!entries().at(0).toMap().value("enabled").toBool());
+    }
+    // The Keychain module over a real Secret Service. Run under a private bus with an unlocked
+    // throwaway GNOME Keyring (scripts/test-keychain.sh); skipped where there is none.
+    void keychainModuleLocksKeychainsByName()
+    {
+        KeychainService keychains(QDBusConnection::sessionBus());
+        keychains.refresh();
+        QTest::qWait(1500);
+        if (!keychains.available() || keychains.keychains().isEmpty())
+            QSKIP("No Secret Service with a keychain on this session bus");
+        QTRY_VERIFY(!keychains.keychains().isEmpty());
+        const auto first = keychains.keychains().first().toMap();
+        QVERIFY(!first.value("label").toString().isEmpty());
+        QVERIFY2(!first.value("locked").toBool(), "the test keyring starts unlocked");
+        const auto path = first.value("path").toString();
+        keychains.lock(path);
+        QTRY_VERIFY_WITH_TIMEOUT(keychains.keychains().first().toMap().value("locked").toBool(), 5000);
+        QTemporaryDir root;
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.filePath("ws"), root.filePath("desktop-profile"), {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        auto *service = qobject_cast<KeychainService *>(manager.keychains());
+        QVERIFY(service);
+        service->refresh();
+        const auto entries = [&] {
+            QVariant result;
+            QMetaObject::invokeMethod(view.rootObject(), "stripMenuEntries", Q_RETURN_ARG(QVariant, result),
+                                      Q_ARG(QVariant, QString("keychain")));
+            return result.toList();
+        };
+        const auto label = first.value("label").toString();
+        QTRY_COMPARE(entries().first().toMap().value("text").toString(), QString("Unlock “%1”…").arg(label));
+        QVERIFY(!entries().last().toMap().value("enabled").toBool()); // Nothing left to lock.
+        QCOMPARE(entries().last().toMap().value("text").toString(), QString("Lock All Keychains"));
     }
     void monitorsPanelTurnsDisplaysOnAndOffAndAsksToKeepTheChange()
     {

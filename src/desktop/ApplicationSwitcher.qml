@@ -32,17 +32,28 @@ Item {
     Item {
         id: strip
         x: 0; y: 1; width: parent.width; height: 14
-        Canvas {
+        Item {
+            id: texture
+            objectName: "application-switcher-title-texture"
             anchors.fill: parent
-            onPaint: {
-                const c = getContext("2d")
-                c.clearRect(0, 0, width, height)
-                c.fillStyle = "#999"
-                for (let y = 2; y < height - 2; y += 2)
-                    for (let x = 16 + (y / 2) % 2; x < width - 2; x += 2) c.fillRect(x, y, 1, 1)
+            // Native rectangles keep the raised dots sharp at fractional scale.
+            // Reference: white/#777 pairs on a three-pixel grid.
+            Repeater {
+                model: 3
+                Item {
+                    required property int index
+                    x: 14; y: 3 + index * 3; width: texture.width - 16; height: 2
+                    Repeater {
+                        model: Math.floor(parent.width / 3)
+                        Item {
+                            required property int index
+                            x: index * 3; width: 2; height: 2
+                            Rectangle { width: 1; height: 1; color: "white" }
+                            Rectangle { x: 1; y: 1; width: 1; height: 1; color: "#777" }
+                        }
+                    }
+                }
             }
-            onAvailableChanged: if (available) requestPaint()
-            onWidthChanged: requestPaint()
         }
         Rectangle {
             anchors.centerIn: parent; width: title.implicitWidth + 8; height: parent.height; color: "#ccc"

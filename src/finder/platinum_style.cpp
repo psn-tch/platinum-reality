@@ -11,6 +11,7 @@
 #include <QScrollBar>
 #include <QSet>
 #include <QMessageBox>
+#include <QMenu>
 #include <QPushButton>
 #include <QMimeDatabase>
 #include <QImageReader>
@@ -20,6 +21,10 @@
 namespace
 {
 constexpr int focusRing = 2;
+bool finderContextMenu(const QWidget *widget)
+{
+    return widget && widget->property("platinumFinderContextMenu").toBool();
+}
 const QColor focusRingColor("#666699");
 void classicBevel(QPainter *painter, QRect rect, QColor fill, bool sunken = false)
 {
@@ -50,7 +55,18 @@ class PlatinumIcons final : public QObject, public QFileIconProvider
                     const QFileInfo file(folder + "/icons/" + name + suffix + ".png");
                     QPixmap pixmap;
                     if (file.isFile() && !file.isSymLink() && file.size() <= 256 * 1024 && pixmap.load(file.filePath()))
+                    {
                         icon->addPixmap(pixmap);
+                        // Optional user-supplied state artwork, paired with this
+                        // normal image. Never infer its mapping from PNG colors.
+                        const QFileInfo selected(folder + "/icons/" + name + suffix + "-selected.png");
+                        const QSize expected = *suffix ? QSize(16,16) : QSize(32,32);
+                        QImageReader reader(selected.filePath());
+                        if (selected.isFile() && !selected.isSymLink() && selected.size() <= 256 * 1024 &&
+                            reader.size()==expected)
+                            if (const auto image=reader.read(); !image.isNull())
+                                icon->addPixmap(QPixmap::fromImage(image),QIcon::Selected);
+                    }
                 }
     }
     QIcon icon(const QFileInfo &info) const override
@@ -382,6 +398,10 @@ QSize PlatinumStyle::sizeFromContents(ContentsType type, const QStyleOption *opt
                                       const QWidget *widget) const
 {
     auto result = QProxyStyle::sizeFromContents(type, option, size, widget);
+    if (type == CT_MenuItem && finderContextMenu(widget))
+        if (const auto *item=qstyleoption_cast<const QStyleOptionMenuItem *>(option))
+            result.setHeight(item->menuItemType==QStyleOptionMenuItem::Separator ? 6 :
+                             qMax(16,item->fontMetrics.tightBoundingRect(item->text).height()+3));
     if (type == CT_PushButton && ringedOutsideDialog(option))
     {
         const auto ring = 2 * pixelMetric(PM_ButtonDefaultIndicator, option, widget);
@@ -426,6 +446,20 @@ QIcon PlatinumStyle::standardIcon(StandardPixmap icon, const QStyleOption *optio
 void PlatinumStyle::drawPrimitive(PrimitiveElement element, const QStyleOption *o, QPainter *p,
                                   const QWidget *w) const
 {
+    if (element==PE_FrameMenu && finderContextMenu(w))
+        return; // The measured panel owns its boundary; no Fusion frame overlay.
+    if (element==PE_PanelMenu && finderContextMenu(w))
+    {
+        p->save();
+        const auto r=o->rect;
+        p->fillRect(r,Qt::black);
+        p->fillRect(r.adjusted(1,1,-1,-1),QColor("#dddddd"));
+        p->fillRect(r.left()+1,r.top()+1,r.width()-3,1,Qt::white);
+        p->fillRect(r.left()+1,r.top()+2,1,r.height()-4,Qt::white);
+        p->fillRect(r.right()-1,r.top()+2,1,r.height()-3,QColor("#999999"));
+        p->fillRect(r.left()+2,r.bottom()-1,r.width()-3,1,QColor("#999999"));
+        p->restore();return;
+    }
     if (element == PE_IndicatorCheckBox || element == PE_IndicatorRadioButton)
     {
         p->save();
@@ -518,6 +552,65 @@ void PlatinumStyle::drawPrimitive(PrimitiveElement element, const QStyleOption *
 void paintPlatinumScrollBar(QPainter *painter, const QStyleOptionSlider &option)
 {
     scrollBar(painter, &option);
+}
+void PlatinumStyle::drawControl(ControlElement element, const QStyleOption *option, QPainter *p,
+                                const QWidget *widget) const
+{
+    const auto *item=qstyleoption_cast<const QStyleOptionMenuItem *>(option);
+    if(element!=CE_MenuItem || !item || !finderContextMenu(widget) ||
+       (item->menuItemType!=QStyleOptionMenuItem::Normal &&
+        item->menuItemType!=QStyleOptionMenuItem::DefaultItem &&
+        item->menuItemType!=QStyleOptionMenuItem::Separator &&
+        item->menuItemType!=QStyleOptionMenuItem::SubMenu))
+    {
+        QProxyStyle::drawControl(element,option,p,widget);return;
+    }
+    p->save();
+    const auto r=item->rect;
+    p->setClipRect(r);
+    if(item->menuItemType==QStyleOptionMenuItem::Separator)
+    {
+        p->fillRect(r.left(),r.top()+2,r.width(),1,QColor("#888888"));
+        p->fillRect(r.left(),r.top()+3,r.width(),1,Qt::white);
+        p->restore();return;
+    }
+    const bool enabled=item->state & State_Enabled;
+    const bool selected=enabled && (item->state & State_Selected);
+    if(selected)
+    {
+        p->fillRect(r,QColor("#333399"));
+        p->fillRect(r.left(),r.top(),1,r.height(),QColor("#6666cc"));
+        p->fillRect(r.right(),r.top(),1,r.height(),QColor("#000088"));
+    }
+    p->setPen(!enabled ? QColor("#777777") : selected ? QColor(Qt::white) : QColor(Qt::black));
+    auto font=item->font;
+    if(item->menuItemType==QStyleOptionMenuItem::DefaultItem)font.setBold(true);
+    p->setFont(font);
+    const auto parts=item->text.split('\t');
+    const int iconSpace=item->maxIconWidth>0 ? qMax(16,item->maxIconWidth) : 0;
+    const auto textRect=r.adjusted(20+iconSpace,0,-13,0);
+    p->drawText(textRect,Qt::AlignVCenter|Qt::AlignLeft|Qt::TextShowMnemonic,parts.first());
+    if(parts.size()>1)
+    {
+        auto shortcut=parts.last();shortcut.replace("Meta+",QString::fromUtf8("⌘"));
+        p->drawText(textRect,Qt::AlignVCenter|Qt::AlignRight,shortcut);
+    }
+    if(!item->icon.isNull())
+        item->icon.paint(p,QRect(r.left()+20,r.center().y()-7,16,16),Qt::AlignCenter,
+                         enabled ? QIcon::Normal : QIcon::Disabled,item->checked ? QIcon::On : QIcon::Off);
+    if(item->checked)
+    {
+        p->setPen(QPen(p->pen().color(),2));
+        p->drawPolyline(QPolygon{QPoint(r.left()+5,r.center().y()),QPoint(r.left()+8,r.center().y()+3),
+                                 QPoint(r.left()+13,r.center().y()-4)});
+    }
+    if(item->menuItemType==QStyleOptionMenuItem::SubMenu)
+    {
+        p->setBrush(p->pen().color());p->setPen(Qt::NoPen);
+        p->drawPolygon(QPolygon{QPoint(r.right()-8,r.center().y()-3),QPoint(r.right()-5,r.center().y()),
+                                QPoint(r.right()-8,r.center().y()+3)});
+    }
+    p->restore();
 }
 void PlatinumStyle::drawComplexControl(ComplexControl control, const QStyleOptionComplex *option,
                                        QPainter *painter, const QWidget *widget) const

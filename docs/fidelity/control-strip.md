@@ -88,7 +88,7 @@ All values in screen pixels; x from the screen edge, y from the strip's top.
   `Control Strip Modules` and writes 16 px icons for Sound Volume, SoundSource and Energy
   Settings to `assets/icons/control-strip/`; the strip shows them in place of our drawings.
   On psn_tch's 9.2.2 disk the three imported icons match the strip capture pixel for pixel.
-- Not yet: our own module icons are drawn at 16 px on our 16-unit grid (no Apple art); per-module widths other than 30; a Keychain equivalent (needs a Secret Service password store; psn_tch to choose); the active arrow colours
+- Not yet: our own module icons are drawn at 16 px on our 16-unit grid (no Apple art); per-module widths other than 30; the active arrow colours
   (assumed black outline, white fill; not yet captured); the slider's exact value scale (the
   thumb travels 46 px; 9.2.2's 8 volume steps not yet mapped).
 
@@ -118,3 +118,13 @@ desktop printers with the default checked (not captured: the reference has no pr
 CUPS destinations from `lpstat -e`, the default from `lpstat -d`, choosing one runs
 `lpoptions -d NAME` (this user's default, no administrator); none gives a disabled
 "No Desktop Printers". The list refreshes each time the menu opens. Glyph is our own drawing.
+
+## Keychain (added 2026-11-08)
+
+9.2.2's Keychain Strip menu (captured): Open Keychain Access · Show Available Keychains · — ·
+Unlock Keychain…; its strings also hold Lock/Unlock "name" and Lock All Keychains. Ours, over the
+freedesktop Secret Service (GNOME Keyring on potato, optional dependency): one row per keychain,
+"Lock “name”" or "Unlock “name”…" (unlocking asks in the password store's own window, so the
+desktop never sees the password), a line, Lock All Keychains. Open Keychain Access is left out:
+there is no keychain application to open unless one is installed. Tested against a throwaway
+unlocked GNOME Keyring on a private bus: `scripts/test-keychain.sh build`.
