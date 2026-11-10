@@ -437,6 +437,7 @@ def main(argv=None):
     parser.add_argument('iso', type=Path)
     parser.add_argument('--gpu', choices=GPUS, default='virtio-vga')
     parser.add_argument('--outputs', type=int, choices=(1, 2), default=1)
+    parser.add_argument('--iso-media', choices=('cdrom', 'usb'), default='cdrom', help='Attach the live ISO as a CD drive or as a USB stick')
     parser.add_argument('--gui-version', choices=('legacy','37'), default='legacy', help='Explicit installer layout; 37 requires the source-pinned new native installer')
     parser.add_argument('--gui', action='store_true', help='Drive the actual image installer GUI (requires --image-engine --boot-proof)')
     parser.add_argument('--erase-return-only', action='store_true', help='Occupied GUI cancellation control only; stop after Return cancels with unchanged full-disk hash, never install or boot target')
@@ -460,6 +461,8 @@ def main(argv=None):
     parser.add_argument('--unlock-ui', choices=('plain', 'plymouth'), default='plain',
                         help='Explicit expected encrypted-unlock UI; never guess before entering the synthetic credential')
     args = parser.parse_args(argv)
+    # The live ISO as the guest sees it: the only usb-storage disk, or the first CD drive.
+    boot_medium = '/dev/sda' if args.iso_media == 'usb' else '/dev/sr0'
     if args.gui_version != 'legacy' and not args.gui:
         parser.error('--gui-version requires --gui')
     if args.interrupt_retry and (not args.image_engine or not args.boot_proof or args.unencrypted or args.gui or args.refusal_scenario or args.observe_displays or args.gpu!='virtio-vga' or args.outputs!=1):
@@ -549,7 +552,7 @@ def main(argv=None):
             readback = Path(__file__).with_name('read-installed.py')
             shutil.copyfile(readback, seed/'read-installed.py')
             receipt['readback_helper_sha256'] = sha256(readback)
-            for name, content in [('config.json', config), ('boot-config.json', config | {'disk': '/dev/sr0'})]:
+            for name, content in [('config.json', config), ('boot-config.json', config | {'disk': boot_medium})]:
                 (seed/name).write_text(json.dumps(content)+'\n')
             (seed/'key.pub').write_bytes((path/'key.pub').read_bytes())
             source = ROOT/'distro/installer-engine/engine.py'
@@ -592,7 +595,7 @@ RemainAfterExit=yes
             # https://www.freedesktop.org/software/systemd/man/latest/systemd-debug-generator.html
             units = {'systemd.extra-unit.pr-install-test.service': unit,
                      'systemd.unit-dropin.multi-user.target': '[Unit]\nWants=pr-install-test.service\n'}
-            guest.start(iso=args.iso, uefi=args.refusal_scenario != 'bios', target=path/'target.qcow2', fixture=path/'fixture.iso',
+            guest.start(iso=args.iso, iso_media=args.iso_media, uefi=args.refusal_scenario != 'bios', target=path/'target.qcow2', fixture=path/'fixture.iso',
                         restricted=True, test_units=units, gpu=args.gpu, outputs=args.outputs)
             receipt['display_profile'] = guest.display_profile
             receipt['qemu_version'] = guest.qmp('query-version')
@@ -658,7 +661,7 @@ RemainAfterExit=yes
                 receipt['engine_execution'] = 'R2 read-only fixture source on the original live image'
                 executable = 'sudo -n python3 -I /run/pr-test/engine.py '
             disks = json.loads(remote(executable+'disks --json', 'disks'))
-            assert next(d for d in disks if d['path'] == '/dev/sr0')['is_boot_medium'] is True
+            assert next(d for d in disks if d['path'] == boot_medium)['is_boot_medium'] is True
             if args.refusal_scenario:
                 refusal_checks(args.refusal_scenario, executable, remote, receipt)
                 return  # finally still stops our VM and writes the scoped result.
@@ -712,7 +715,7 @@ RemainAfterExit=yes
             wrong = remote(executable+'install --config /run/pr-test/config.json --confirm-erase /dev/vdb --progress-fd 1', 'wrong-confirm', expected=2)
             assert 'exactly match' in json.loads(wrong)['message']
             assert disk_hash('hash-after-wrong-confirm') == before
-            boot = remote(executable+'install --config /run/pr-test/boot-config.json --confirm-erase /dev/sr0 --progress-fd 1', 'boot-refusal', expected=2)
+            boot = remote(executable+'install --config /run/pr-test/boot-config.json --confirm-erase '+boot_medium+' --progress-fd 1', 'boot-refusal', expected=2)
             assert 'boot medium' in json.loads(boot)['message']
             assert disk_hash('hash-after-boot-refusal') == before
             receipt['read_only_guards'] = 'PASS: full 16-GiB target hashes unchanged after each refusal/plan'
@@ -725,7 +728,7 @@ RemainAfterExit=yes
                 receipt['fresh_blank_target_sha256']=before
                 identity=recovery.interrupt(guest,executable,(json.dumps(values)+'\n').encode(),remote,receipt,sha256)
                 # Deliberate same-target destructive reinstall, never a new blank disk or repair claim.
-                guest.start(iso=args.iso,uefi=True,target=path/'target.qcow2',fixture=path/'fixture.iso',
+                guest.start(iso=args.iso, iso_media=args.iso_media,uefi=True,target=path/'target.qcow2',fixture=path/'fixture.iso',
                             restricted=True,test_units=units,gpu=args.gpu,outputs=args.outputs)
                 if recovery.target_identity(guest)!=identity:raise RuntimeError('Retry did not retain the same owned target file')
                 wait_live(guest,time.monotonic()+240)

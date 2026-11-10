@@ -438,20 +438,20 @@ class ContractChecks(unittest.TestCase):
                 patch.object(engine,'BOOT_MOUNT',mount), patch.object(engine.Path,'is_file',return_value=True):
             self.assertEqual(engine.require_live_vm(),'physical')
 
-    def test_on_a_real_computer_only_usb_disks_are_installable(self):
-        # Lily Hewitt, 2026-11-07: potato has 6-7 internal disks; the portable install goes on a USB SSD.
+    def test_on_a_real_computer_internal_and_usb_disks_are_installable(self):
+        # Lily Hewitt, 2026-11-10: the public ISO installs onto internal disks (her potato's NVMe); only the
+        # live media itself stays refused.
         disks=engine.inventory_from({'blockdevices':[node('/dev/sr0','11:0','rom',rm=True,ro=True),
             node('/dev/nvme0n1','259:0',tran='nvme'),node('/dev/sda','8:0',tran='sata'),
             node('/dev/sdb','8:16',tran='usb',rm=False,model='USB SSD')]},media())
         marked={d['path']:d for d in engine.installable_disks(disks,'physical')}
-        self.assertEqual({p for p,d in marked.items() if d['installable']},{'/dev/sdb'})
+        self.assertEqual({p for p,d in marked.items() if d['installable']},{'/dev/nvme0n1','/dev/sda','/dev/sdb'})
         self.assertEqual(marked['/dev/sr0']['unavailable'],'the installation disk')
-        self.assertIn('internal disk',marked['/dev/nvme0n1']['unavailable'])
         self.assertTrue({'installable','unavailable'} <= set(engine.public_disks(disks)[0]))
-        for path in ('/dev/nvme0n1','/dev/sda'):
-            with self.assertRaisesRegex(engine.Refused,'internal disk.*nothing changed'):
-                engine.select_disk(config()|{'disk':path},disks,'physical')
-        self.assertEqual(engine.select_disk(config()|{'disk':'/dev/sdb'},disks,'physical')['path'],'/dev/sdb')
+        for path in ('/dev/nvme0n1','/dev/sda','/dev/sdb'):
+            self.assertEqual(engine.select_disk(config()|{'disk':path},disks,'physical')['path'],path)
+        with self.assertRaisesRegex(engine.Refused,'live boot medium'):
+            engine.select_disk(config()|{'disk':'/dev/sr0'},disks,'physical')
         # In an owned VM every whole disk except the live media stays installable.
         vm={d['path']:d for d in engine.installable_disks(engine.inventory_from({'blockdevices':[
             node('/dev/sr0','11:0','rom',rm=True,ro=True),node('/dev/vda','254:0')]},media()),'vm')}

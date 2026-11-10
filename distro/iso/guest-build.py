@@ -45,10 +45,13 @@ def main():
         (native/'pin.json').write_text(json.dumps(pin, indent=2)+'\n')
     elif json.loads((native/'pin.json').read_text())['git_archive_sha256'] != pin['git_archive_sha256']:
         raise RuntimeError('Cached native snapshot has a different source hash')
-    package = native/'package/platinum-reality-0.1.0-1-x86_64.pkg.tar.zst'
+    # The release version comes from the source's VERSION file (update 44 is 0.44).
+    version = (native/'VERSION').read_text().strip()
+    package = native/f'package/platinum-reality-{version}-1-x86_64.pkg.tar.zst'
     build_receipt = native/'native-build.json'
-    if not package.exists():
-        run(['makepkg', '--syncdeps', '--noconfirm', '--config', 'makepkg.conf'],
+    # A package without a successful makepkg receipt (an interrupted build) is rebuilt over.
+    if not package.exists() or not build_receipt.is_file():
+        run(['makepkg', '--syncdeps', '--noconfirm', '--force', '--config', 'makepkg.conf'],
             cwd=native/'package', env=environment)
         build_receipt.write_text(json.dumps({'commit': pin['commit'], 'package_sha256': digest(package),
             'makepkg_check': 'passed', 'source_archive_sha256': pin['git_archive_sha256']}, indent=2)+'\n')

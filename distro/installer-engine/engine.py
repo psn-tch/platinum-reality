@@ -17,6 +17,7 @@ import re
 import stat
 import subprocess
 import time
+import traceback
 import sys
 import tempfile
 import secrets
@@ -144,8 +145,8 @@ def validate_config(config, *, zoneinfo=Path('/usr/share/zoneinfo')):
 def require_live_vm():
     """'vm' in an owned QEMU/KVM guest, or 'physical' on a real computer booted from the live media.
 
-    On a real computer only USB-attached disks can be installed on (Lily Hewitt, 2026-11-07: a portable
-    install onto her USB SSD from potato); internal disks stay refused (installable_disks).
+    On a real computer internal disks can be installed on too (Lily Hewitt, 2026-11-10: the public ISO,
+    and her own install onto potato's NVMe); USB-only was the rule for her first portable install (11-07).
     """
     if os.geteuid() != 0:
         raise Refused('Run the engine as root from the live media')
@@ -159,17 +160,12 @@ def require_live_vm():
     return 'vm' if virtual.returncode == 0 else 'physical'
 
 
-INTERNAL_REASON = 'internal disk: on a real computer this version installs only onto a USB drive'
-
-
 def installable_disks(disks, host):
     """Mark each disk installable or not, with the reason shown in the Installer."""
     for disk in disks:
         reason = ''
         if disk['is_boot_medium']:
             reason = 'the installation disk'
-        elif host == 'physical' and disk.get('transport') != 'usb':
-            reason = INTERNAL_REASON
         disk['installable'] = not reason
         disk['unavailable'] = reason
     return disks
@@ -252,8 +248,6 @@ def select_disk(config, disks, host='vm'):
     disk = found[0]
     if disk['is_boot_medium']:
         raise Refused('The live boot medium cannot be an installation destination')
-    if host == 'physical' and disk.get('transport') != 'usb':
-        raise Refused('That is an '+INTERNAL_REASON+'; nothing changed')
     if disk['_type'] != 'disk' or disk['_readonly'] or disk['_busy']:
         raise Refused('Destination must be a writable, unmounted whole disk with no active swap')
     if disk['size_bytes'] < MIN_DISK_BYTES:
@@ -1098,7 +1092,8 @@ def main(argv=None):
             signal.signal(signal.SIGINT, interrupted)
             progress = Progress(args.progress_fd)
         if args.action == 'disks':
-            print(json.dumps(public_disks(installable_disks(inventory(), require_live_vm()))))
+            host = require_live_vm()  # Before inventory(): its findmnt fails outright without the boot mount.
+            print(json.dumps(public_disks(installable_disks(inventory(), host))))
         elif args.action == 'choices':
             require_live_vm()
             print(json.dumps(choices()))
@@ -1112,6 +1107,8 @@ def main(argv=None):
         return 0
     except Exception as error:
         message = str(error) if isinstance(error, Refused) else 'Cannot complete '+args.action+'; check live-media inputs and diagnostic stderr'
+        if not isinstance(error, Refused):
+            traceback.print_exc()  # The diagnostic the message above points to.
         if progress:
             try:
                 progress.send({'result': 'error', 'message': message, 'step': progress.step})

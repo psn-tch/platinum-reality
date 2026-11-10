@@ -98,7 +98,9 @@ layouts. Only whole writable unmounted disks of at least 16 GiB are accepted;
 mounted children/swap, symlink aliases and ambiguous identities are refused.
 The exact confirmation string must match before any disk tools or credential
 read. The destination dev_t and size are revalidated immediately before writing.
-Physical hotplug safety is not qualified; the VM-only guard remains.
+On a real computer (Lily Hewitt, 2026-11-10) internal and USB disks are both
+installable; the live media is still refused and the erase question lists each
+existing partition with its label. Only USB targets get the portable initramfs.
 
 `plan` is read-only. Install verifies every offline package SHA256 and required
 package availability before erasure. It uses explicit argv-only sgdisk/mkfs,

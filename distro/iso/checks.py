@@ -41,6 +41,17 @@ class SourceChecks(unittest.TestCase):
                 with self.assertRaises(SystemExit) as result:builder.main()
                 self.assertEqual(result.exception.code,2);guest.assert_not_called();space.assert_not_called()
 
+    def test_live_entries_keep_the_boot_medium_mounted(self):
+        # archiso's copytoram=auto copies off any non-optical medium (a USB stick) and
+        # unmounts /run/archiso/bootmnt, which the Installer reads (Lily's potato, 2026-11-10).
+        profile = HERE/'profile'
+        for name in ('efiboot/loader/entries/01-archiso-linux.conf', 'efiboot/loader/entries/02-archiso-speech-linux.conf',
+                     'grub/grub.cfg', 'grub/loopback.cfg', 'syslinux/archiso_sys-linux.cfg'):
+            lines = [line for line in (profile/name).read_text().splitlines() if 'archisobasedir=' in line]
+            self.assertTrue(lines, name)
+            for line in lines:
+                self.assertIn(' copytoram=n ', line, name)
+
     def test_vendored_package_configuration_examples_are_comments_not_repositories(self):
         root_builder = load('guest-root')
         real = (HERE/'profile/pacman.conf').read_text()

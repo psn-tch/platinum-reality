@@ -110,7 +110,9 @@ class Guest:
             'base_source': str(Path(base).resolve()), 'base_copy_sha256': sha256(copied),
             'scope': 'Copied cloud disk; unique SSH key; no host shares; guest-only sudo.'}, indent=2)+'\n')
 
-    def start(self, *, iso=None, uefi=False, network=True, target=None, fixture=None, installed=False, restricted=False, test_units=None, serial=True, gpu='virtio-vga', outputs=1):
+    def start(self, *, iso=None, uefi=False, network=True, target=None, fixture=None, installed=False, restricted=False, test_units=None, serial=True, gpu='virtio-vga', outputs=1, iso_media='cdrom'):
+        if iso_media not in ('cdrom', 'usb'):
+            raise ValueError('Live media must be attached as cdrom or usb')
         if type(serial) is not bool:
             raise ValueError('Serial console selection must be explicit boolean')
         self.display_profile = display_profile(gpu, outputs, self.path)
@@ -136,8 +138,14 @@ class Guest:
             iso = Path(iso).resolve(strict=True)
             if not iso.is_file() or iso.suffix != '.iso':
                 raise ValueError('Boot media must be a regular .iso file, never a device')
-            drives = ['-drive', f'file={Path(iso).resolve(strict=True)},media=cdrom,readonly=on',
-                      '-boot', 'd']
+            if iso_media == 'usb':
+                # A real stick: archiso treats non-optical media differently (copytoram=auto).
+                drives = ['-device', 'qemu-xhci,id=xhci',
+                          '-drive', f'if=none,id=stick,file={iso},format=raw,readonly=on',
+                          '-device', 'usb-storage,bus=xhci.0,drive=stick,bootindex=0']
+            else:
+                drives = ['-drive', f'file={Path(iso).resolve(strict=True)},media=cdrom,readonly=on',
+                          '-boot', 'd']
         elif not installed:
             # Explicit guest-only fstrim can release deleted build work from
             # this disposable overlay; the copied base and seed stay intact.

@@ -10,7 +10,9 @@ import time
 
 spec=importlib.util.spec_from_file_location('legacy_gui',Path(__file__).with_name('gui-drive.py'))
 gui=importlib.util.module_from_spec(spec);spec.loader.exec_module(gui)
-NATIVE='6f37afdede5cf161d1015452efdf26492e0b6531'
+# Update 44 4bc3ffd: since 6f37afd src/installer changed only a comment and the ReadMe's credit line
+# (psn_tch -> Lily Hewitt); the pages, buttons and their geometry are the same code.
+NATIVE='4bc3ffddb923921295fed5ea307e645139b3d73d'
 FULL=(70,60,1050,650)
 # Measured on the actual update37 image (install-20261107T045614Z, gui-01-welcome): the default
 # button's label spans x 569-620, y 462-471 inside a ring at x 553-637, y 455-480. Read the
@@ -110,7 +112,7 @@ def occupied_path_pixels(guest,receipt):
     # a632c6e changes only Desktop.qml and a test after 3053688; src/installer is byte-identical.
     # 6f37afd adds USB-only/refusal wording on the Destination page; the Erase Disk question is the same
     # code, and the hash below still requires the identical pixels.
-    if (receipt.get('native_source_commit') not in ('3053688000063625d2ad6b5ac489e0e7ad74e0a4','a632c6ed330e8c6b0bfed3cd14c3ef71c872079a','6f37afdede5cf161d1015452efdf26492e0b6531') or
+    if (receipt.get('native_source_commit') not in ('3053688000063625d2ad6b5ac489e0e7ad74e0a4','a632c6ed330e8c6b0bfed3cd14c3ef71c872079a','6f37afdede5cf161d1015452efdf26492e0b6531','4bc3ffddb923921295fed5ea307e645139b3d73d') or
             # ac041cb8…: engine 1066b21 (USB installs on real computers); same question, same pixels
             # (install-20261107T104309Z viewed, crop sha identical).
             receipt.get('engine_sha256') not in ('68bf00cf1ce3a83736ad06f4963a831419dc533a78970222f2d23ca255fbb8fd',
@@ -124,7 +126,10 @@ def occupied_path_pixels(guest,receipt):
 
 
 def recognize_erase(guest,receipt):
-    words,_=gui.wait(guest,'gui-11-erase-confirmation','Everything on this disk',region=FULL)  # matches() spans at most 6 words; the whole sentence is checked below
+    # "this disk will be lost" is the question's alone: the summary page behind it says "Everything on this
+    # disk will be erased", which matched at once, before the plan had answered (update 44 ISO, 11-10).
+    # matches() spans at most 6 words; the whole sentence is checked below.
+    words,_=gui.wait(guest,'gui-11-erase-confirmation','this disk will be lost',region=FULL)
     text=gui.normalized(' '.join(w['text'] for w in words))
     if not gui.matches(words,'Erase Disk') or not gui.matches(words,'/dev/vda') or 'everythingonthisdiskwillbelost' not in text:
         raise RuntimeError('Actual update37 whole-disk warning unrecognized; no erase click sent')
