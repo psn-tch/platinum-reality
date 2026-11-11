@@ -1,0 +1,82 @@
+#!/usr/bin/python3 -I
+"""The App Store's helper (docs/app-store.md), run as the user. JSON lines out.
+Usage: platinum-packages catalog                 (one JSON document: packages, apps, yay)
+       platinum-packages refresh-aur
+       platinum-packages install <package>…     (official packages, through pkexec)
+       platinum-packages remove <package>…
+       platinum-packages update-all
+       platinum-packages install-yay
+       platinum-packages install-aur <package>…  (with yay; it asks for the password itself)"""
+import json
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import platinum_packages  # noqa: E402
+
+ADMIN = os.environ.get('PLATINUM_PACKAGES_ADMIN', '/usr/lib/platinum-reality/platinum-packages-admin')
+# Tests run the administrator helper directly; people always go through pkexec's password box.
+ELEVATE = os.environ.get('PLATINUM_PACKAGES_ELEVATE', 'pkexec').split()
+
+
+def report(message):
+    print(json.dumps(message), flush=True)
+
+
+def admin(arguments):
+    """Run the administrator helper, passing its lines on. pkexec asks for the password."""
+    process = subprocess.Popen([*ELEVATE, ADMIN, *arguments], stdout=subprocess.PIPE, text=True)
+    error = ''
+    for line in process.stdout:
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(message, dict) or message.get('done'):
+            continue
+        if 'error' in message:
+            error = str(message['error'])
+        else:
+            report(message)
+    code = process.wait()
+    if code in (126, 127) and not error and ELEVATE[:1] == ['pkexec']:
+        # 126: the password box was dismissed (nothing to say); 127: no way to ask for a password.
+        raise platinum_packages.PackageError('' if code == 126 else
+                                             'An administrator’s password could not be asked for.')
+    if code != 0:
+        raise platinum_packages.PackageError(error or 'The change could not be made.')
+
+
+def main(arguments):
+    command, rest = (arguments[0], arguments[1:]) if arguments else ('', [])
+    try:
+        if command == 'catalog' and not rest:
+            print(json.dumps(platinum_packages.catalog(), separators=(',', ':')), flush=True)
+            return 0
+        if command == 'refresh-aur' and not rest:
+            report({'progress': 'Downloading the AUR list…'})
+            report({'changed': platinum_packages.refresh_aur()})
+        elif command in ('install', 'remove') and rest:
+            admin([command, *platinum_packages.check_names(rest)])
+        elif command == 'update-all' and not rest:
+            admin(['update-all'])
+        elif command == 'install-yay' and not rest:
+            platinum_packages.install_yay(report, admin)
+        elif command == 'install-aur' and rest:
+            platinum_packages.install_aur(rest, report)
+        else:
+            report({'error': __doc__.split('\n', 1)[1]})
+            return 2
+    except platinum_packages.PackageError as problem:
+        report({'error': str(problem)} if str(problem) else {'cancelled': True})
+        return 1
+    except OSError as problem:
+        report({'error': str(problem)})
+        return 1
+    report({'done': True})
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

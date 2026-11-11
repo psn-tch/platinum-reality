@@ -108,6 +108,7 @@ target_sources(frankenstein-desktop PRIVATE src/desktop/host_pointer.cpp src/des
                src/desktop/power_control.cpp src/desktop/power_control.hpp
                src/desktop/removable_media.cpp src/desktop/removable_media.hpp
                src/desktop/handheld.cpp src/desktop/handheld.hpp
+               src/desktop/fingerprints.cpp src/desktop/fingerprints.hpp
                src/desktop/scroll_bar_art.cpp src/desktop/scroll_bar_art.hpp
                src/desktop/icon_store.cpp src/desktop/icon_store.hpp
                src/desktop/notifications.cpp src/desktop/notifications.hpp
@@ -173,6 +174,8 @@ configure_file(scripts/session_support.py session_support.py COPYONLY)
 # Platinum Software Update's client and checker, and the release key, beside the program.
 configure_file(scripts/platinum-software-update platinum-software-update COPYONLY)
 configure_file(scripts/platinum_update.py platinum_update.py COPYONLY)
+configure_file(scripts/platinum-fingerprint-login platinum-fingerprint-login COPYONLY)
+configure_file(scripts/platinum_fingerprint.py platinum_fingerprint.py COPYONLY)
 configure_file(packaging/release-keys.gpg release-keys.gpg COPYONLY)
 target_sources(frankenstein-desktop PRIVATE src/desktop/audio_service.cpp src/desktop/audio_service.hpp)
 target_include_directories(frankenstein-desktop PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
@@ -185,7 +188,7 @@ qt_add_resources(frankenstein-desktop computer-assets PREFIX "/desktop" FILES sr
 qt_add_resources(frankenstein-desktop picture-assets PREFIX "/desktop" FILES src/desktop/DesktopPictureDialog.qml)
 qt_add_resources(frankenstein-desktop screenshot-assets PREFIX "/desktop" FILES src/desktop/ScreenshotDialog.qml)
 qt_add_resources(frankenstein-desktop controls-assets PREFIX "/desktop" FILES src/desktop/QuickControls.qml)
-qt_add_resources(frankenstein-desktop bluetooth-assets PREFIX "/desktop" FILES src/desktop/BluetoothPanel.qml src/desktop/HandheldPanel.qml src/desktop/BluetoothAlert.qml src/desktop/WifiAlert.qml)
+qt_add_resources(frankenstein-desktop bluetooth-assets PREFIX "/desktop" FILES src/desktop/BluetoothPanel.qml src/desktop/HandheldPanel.qml src/desktop/FingerprintsPanel.qml src/desktop/BluetoothAlert.qml src/desktop/WifiAlert.qml)
 qt_add_resources(frankenstein-desktop sound-assets PREFIX "/desktop" FILES src/desktop/SoundPanel.qml)
 qt_add_resources(frankenstein-desktop desktop-window-assets PREFIX "/desktop" FILES src/desktop/DesktopWindow.qml)
 qt_add_resources(frankenstein-desktop calculator-assets PREFIX "/desktop" FILES src/desktop/CalculatorWindow.qml src/desktop/ClassicControlPanelWindow.qml src/desktop/NotePadWindow.qml src/desktop/ScrapbookWindow.qml src/desktop/KeyCapsWindow.qml src/desktop/AssetImporterWindow.qml src/desktop/SoftwareUpdateWindow.qml)
@@ -203,7 +206,8 @@ target_include_directories(frankenstein-files PUBLIC src)
 target_compile_definitions(frankenstein-files PRIVATE QT_NO_KEYWORDS)
 target_link_libraries(frankenstein-files PUBLIC Qt6::Core PRIVATE PkgConfig::GIO)
 target_link_libraries(frankenstein-desktop PRIVATE frankenstein-files frankenstein-appearance Qt6::Concurrent)
-add_library(frankenstein-appearance STATIC src/finder/platinum_style.cpp src/finder/platinum_style.hpp)
+add_library(frankenstein-appearance STATIC src/finder/platinum_style.cpp src/finder/platinum_style.hpp
+            src/finder/list_view_parts.cpp src/finder/list_view_parts.hpp)
 set_target_properties(frankenstein-appearance PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(frankenstein-appearance PUBLIC src)
 target_link_libraries(frankenstein-appearance PUBLIC Qt6::Widgets)
@@ -235,7 +239,18 @@ target_link_libraries(platinum-installer-ui PUBLIC frankenstein-appearance Qt6::
 target_compile_options(platinum-installer-ui PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(platinum-reality-installer src/installer/main.cpp)
 target_link_libraries(platinum-reality-installer PRIVATE platinum-installer-ui)
-add_dependencies(frankenstein frankenstein-finder frankenstein-editor frankenstein-style frankenstein-drop-receiver)
+# The App Store (docs/app-store.md): software from Arch's repositories and, with yay, the AUR.
+# Its helpers (scripts/platinum-packages, platinum-packages-admin) do the package work.
+add_library(platinum-app-store-ui src/appstore/catalog.cpp src/appstore/catalog.hpp
+            src/appstore/package_client.cpp src/appstore/package_client.hpp
+            src/appstore/app_store_window.cpp src/appstore/app_store_window.hpp)
+target_include_directories(platinum-app-store-ui PUBLIC src)
+target_link_libraries(platinum-app-store-ui PUBLIC frankenstein-appearance Qt6::Widgets)
+target_compile_options(platinum-app-store-ui PRIVATE -Wall -Wextra -Wpedantic)
+add_executable(platinum-app-store src/appstore/main.cpp)
+target_link_libraries(platinum-app-store PRIVATE platinum-app-store-ui)
+add_dependencies(frankenstein frankenstein-finder frankenstein-editor frankenstein-style frankenstein-drop-receiver
+                 platinum-app-store)
 
 # The Platinum screen lock (Mac OS 9.2.2 Log In style) for the session supervisor. PAM decides
 # passwords; the lock role itself is Qt private API, confined to src/lock/session_lock.cpp.
@@ -265,7 +280,7 @@ file(RELATIVE_PATH PLATINUM_LIB_FROM_BIN "${CMAKE_INSTALL_FULL_BINDIR}"
 configure_file(packaging/platinum-reality.in platinum-reality @ONLY)
 configure_file(packaging/platinum-reality-session.in platinum-reality-session @ONLY)
 install(TARGETS frankenstein frankenstein-finder frankenstein-editor frankenstein-drop-receiver frankenstein-puzzle
-                platinum-lock
+                platinum-lock platinum-app-store
         RUNTIME DESTINATION "${PLATINUM_LIBDIR}")
 install(TARGETS frankenstein-style LIBRARY DESTINATION "${PLATINUM_LIBDIR}/plugins/styles")
 install(PROGRAMS "${CMAKE_CURRENT_BINARY_DIR}/platinum-reality"
@@ -285,6 +300,14 @@ install(FILES scripts/platinum_update.py scripts/platinum-software-update DESTIN
 install(PROGRAMS scripts/platinum-update-install DESTINATION "${PLATINUM_LIBDIR}")
 install(FILES packaging/org.platinumreality.update.policy DESTINATION "${CMAKE_INSTALL_DATADIR}/polkit-1/actions")
 install(FILES packaging/release-keys.gpg DESTINATION "${CMAKE_INSTALL_DATADIR}/platinum-reality")
+# Fingerprints control panel (docs/fingerprints.md): the root helper that turns fingerprint login
+# on or off through pkexec, and its polkit action.
+install(FILES scripts/platinum_fingerprint.py DESTINATION "${PLATINUM_LIBDIR}")
+install(PROGRAMS scripts/platinum-fingerprint-login DESTINATION "${PLATINUM_LIBDIR}")
+install(FILES packaging/org.platinumreality.fingerprint.policy DESTINATION "${CMAKE_INSTALL_DATADIR}/polkit-1/actions")
+install(FILES scripts/platinum_packages.py DESTINATION "${PLATINUM_LIBDIR}")
+install(PROGRAMS scripts/platinum-packages scripts/platinum-packages-admin DESTINATION "${PLATINUM_LIBDIR}")
+install(FILES packaging/org.platinumreality.packages.policy DESTINATION "${CMAKE_INSTALL_DATADIR}/polkit-1/actions")
 if(PLATINUM_XWAYLAND_SATELLITE)
     install(PROGRAMS "${CMAKE_CURRENT_BINARY_DIR}/xwayland-satellite" DESTINATION "${PLATINUM_LIBDIR}")
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/xwayland-satellite-provenance.json" DESTINATION "${PLATINUM_LIBDIR}")
@@ -297,7 +320,8 @@ if(PLATINUM_XWAYLAND_SATELLITE)
                   packaging/xwayland-satellite-qt-shell-v1.patch scripts/build-x11-bridge.py
             DESTINATION "${CMAKE_INSTALL_DOCDIR}/xwayland-satellite")
 endif()
-install(FILES packaging/platinum-reality.desktop DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+install(FILES packaging/platinum-reality.desktop packaging/org.platinumreality.AppStore.desktop
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
 install(FILES packaging/platinum-reality.svg DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
 install(FILES docs/install.md docs/first-session.md docs/x11-integration.md DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 install(FILES LICENSE packaging/NOTICE
@@ -340,6 +364,11 @@ if(BUILD_TESTING)
     add_executable(installer-tests tests/installer_tests.cpp)
     target_link_libraries(installer-tests PRIVATE platinum-installer-ui Qt6::Test)
     add_test(NAME installer COMMAND installer-tests)
+    add_executable(app-store-tests tests/app_store_tests.cpp)
+    target_link_libraries(app-store-tests PRIVATE platinum-app-store-ui Qt6::Test)
+    target_compile_definitions(app-store-tests PRIVATE APP_STORE_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/app-store")
+    add_test(NAME app-store COMMAND app-store-tests)
+    set_tests_properties(app-store PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=generic")
     set_tests_properties(installer PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=generic")
     add_test(NAME installer-kde-defaults COMMAND dbus-run-session -- $<TARGET_FILE:installer-tests>
         realQuestionUsesItsExplicitDefault)
@@ -367,6 +396,7 @@ if(BUILD_TESTING)
     add_test(NAME session-safety COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/session_support_tests.py)
     add_test(NAME fresh-arch-setup COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/fresh_arch_setup_tests.py)
     add_test(NAME wallet-support COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/wallet_support_tests.py)
+    add_test(NAME app-store-helpers COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/platinum_packages_tests.py)
     set_tests_properties(wallet-support PROPERTIES ENVIRONMENT "FRANKENSTEIN_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}")
     add_executable(wallet-activation-tests tests/wallet_activation_tests.cpp src/desktop/wallet_activation.cpp)
     target_include_directories(wallet-activation-tests PRIVATE src)
@@ -395,6 +425,7 @@ if(BUILD_TESTING)
     add_test(NAME system-controls COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/system_controls_tests.py)
     add_test(NAME audio-controls COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/audio_controls_tests.py)
     add_test(NAME software-update COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/platinum_update_tests.py)
+    add_test(NAME fingerprint-login COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/platinum_fingerprint_tests.py)
     add_executable(audio-service-tests tests/audio_service_tests.cpp)
     target_link_libraries(audio-service-tests PRIVATE frankenstein-desktop Qt6::Test)
     target_compile_definitions(audio-service-tests PRIVATE
@@ -459,6 +490,10 @@ if(BUILD_TESTING)
     add_executable(handheld-tests tests/handheld_tests.cpp)
     target_link_libraries(handheld-tests PRIVATE frankenstein-desktop Qt6::Test)
     add_test(NAME handheld COMMAND handheld-tests)
+    add_executable(fingerprints-tests tests/fingerprints_tests.cpp)
+    target_link_libraries(fingerprints-tests PRIVATE frankenstein-desktop Qt6::Test)
+    add_test(NAME fingerprints COMMAND fingerprints-tests)
+    set_tests_properties(fingerprints PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
     add_executable(removable-media-tests tests/removable_media_tests.cpp)
     target_link_libraries(removable-media-tests PRIVATE frankenstein-desktop Qt6::Test)
     add_test(NAME removable-media COMMAND removable-media-tests)

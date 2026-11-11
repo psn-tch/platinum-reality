@@ -29,14 +29,18 @@ makedepends=('cmake' 'ninja' 'pkgconf' 'gcc' 'vulkan-headers' 'vulkan-icd-loader
 # Explicit-default regressions also run with the real KDE platform helper used
 # by launched apps. Missing plugin/fallback is a failure, not a passing test.
 checkdepends=('gtk3' 'gtk4' 'python-gobject' 'imagemagick' 'plasma-integration')
-optdepends=('pipewire-audio: interface and alert sounds, the startup chime'
+optdepends=('archlinux-appstream-data: application names, pictures and categories in the App Store (it offers to install it)'
+            'pipewire-audio: interface and alert sounds, the startup chime'
             'wireplumber: the startup chime waits for your speakers'
             'libpulse: the Sound control panel'
             'iwd: Wi-Fi networks in the Control Strip'
             'bluez: the Bluetooth control panel and pairing'
             'brightnessctl: built-in display brightness'
             'ddcutil: external monitor brightness'
-            'fprintd: unlock with a fingerprint'
+            'fprintd: fingerprints (the Fingerprints control panel)'
+            'kimageformats: application icons in the App Store (with libjxl)'
+            'libjxl: application icons in the App Store (with kimageformats)'
+            'yay: AUR packages in the App Store (it can install yay itself)'
             'gnome-keyring: the Keychain module in the Control Strip'
             'cups: the Printer Selector module in the Control Strip'
             'plymouth: the gray startup screen (scripts/boot-splash.py)'

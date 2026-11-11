@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- The Fingerprints control panel turns fingerprint login on or off, and installs fprintd,
+     through this one helper only (docs/fingerprints.md). An administrator's password is asked. -->
+<policyconfig>
+  <vendor>Platinum Reality</vendor>
+  <vendor_url>https://github.com/psn-tch/platinum-reality</vendor_url>
+  <action id="org.platinumreality.fingerprint.login">
+    <description>Change fingerprint login</description>
+    <message>Fingerprints needs an administrator's password to change how you log in.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/platinum-reality/platinum-fingerprint-login</annotate>
+  </action>
+</policyconfig>

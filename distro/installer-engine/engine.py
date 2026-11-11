@@ -42,7 +42,7 @@ TARGET_PACKAGES = ['base', 'linux', 'linux-firmware', 'amd-ucode', 'intel-ucode'
     'platinum-reality', 'sudo', 'mkinitcpio', 'systemd-ukify', 'cryptsetup', 'plymouth', 'sddm', 'xorg-server',
     'pipewire-audio', 'pipewire-pulse', 'wireplumber', 'alsa-utils', 'ttf-dejavu', 'noto-fonts',
     'konsole', 'firefox', 'plasma-integration', 'iwd', 'bluez', 'bluez-utils', 'brightnessctl',
-    'xdg-user-dirs', 'noto-fonts-emoji', 'rtkit', 'udisks2', 'polkit']
+    'xdg-user-dirs', 'noto-fonts-emoji', 'rtkit', 'udisks2', 'polkit', 'fprintd']
 TOOL_ENV = {'PATH': '/usr/bin:/bin', 'HOME': '/root', 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8'}
 LOCALE_PATTERN = r'[A-Za-z][A-Za-z0-9_@.-]{0,63}'
 KEYMAP_PATTERN = r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}'

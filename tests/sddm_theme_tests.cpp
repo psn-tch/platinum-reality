@@ -27,6 +27,7 @@ class FakeSddm final : public QObject
   signals:
     void loginFailed();
     void loginSucceeded();
+    void informationMessage(const QString &message);
 };
 
 // SDDM's UserModel and SessionModel roles, and their lastIndex property.
@@ -172,6 +173,40 @@ class SddmThemeTests final : public QObject
         QTest::keyClick(&view, Qt::Key_Return);
         QCOMPARE(greeter.sddm.requests, QStringList({"login pat pw 0"}));
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/sddm-theme-users.png"));
+    }
+    void anEmptyPasswordAsksForAFingerOnlyWhenFingerprintLoginIsOn()
+    {
+        Greeter greeter({{"pat", "Pat Example", "/home/pat", "", "true"}}, 0);
+        auto &view = greeter.view;
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        // Off (the default): Return with nothing typed does nothing, so it cannot count as a failure.
+        QTest::keyClick(&view, Qt::Key_Return);
+        QVERIFY(greeter.sddm.requests.isEmpty());
+        QCOMPARE(item(view, "login-message")->property("text").toString(), QString());
+        // On: a hint, then Return with nothing typed hands PAM an empty password; PAM's words show.
+        greeter.config.insert("fingerprint", "true");
+        QTRY_COMPARE(item(view, "login-message")->property("text").toString(),
+                     QString("Or press Return, then touch the fingerprint reader."));
+        QVERIFY(item(view, "login-button")->property("usable").toBool());
+        QTest::keyClick(&view, Qt::Key_Return);
+        QCOMPARE(greeter.sddm.requests, QStringList({"login pat  0"}));
+        QCOMPARE(item(view, "login-message")->property("text").toString(), QString("Touch the fingerprint reader."));
+        emit greeter.sddm.informationMessage("Place your finger on the fingerprint reader");
+        QCOMPARE(item(view, "login-message")->property("text").toString(),
+                 QString("Place your finger on the fingerprint reader"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/sddm-theme-fingerprint.png"));
+        emit greeter.sddm.loginFailed();
+        QCOMPARE(item(view, "login-message")->property("text").toString(),
+                 QString("Sorry, that fingerprint was not recognized. Please try again."));
+        // A typed password still works as always.
+        type(view, "secret");
+        QTest::keyClick(&view, Qt::Key_Return);
+        QCOMPARE(greeter.sddm.requests.last(), QString("login pat secret 0"));
+        QCOMPARE(item(view, "login-message")->property("text").toString(), QString("Logging in…"));
+        emit greeter.sddm.loginFailed();
+        QCOMPARE(item(view, "login-message")->property("text").toString(),
+                 QString("Sorry, that password is incorrect. Please try again."));
     }
     void restartShutDownAndCapsLock()
     {

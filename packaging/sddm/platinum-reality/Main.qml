@@ -15,6 +15,10 @@ Rectangle {
     property string message: ""
     property bool messageIsError: false
     property bool busy: false
+    // Fingerprint login is on (the Fingerprints control panel writes fingerprint=true into
+    // theme.conf.user): Return with no password asks PAM for a finger instead.
+    readonly property bool fingerprint: String(config.fingerprint) === "true"
+    property bool usingFinger: false
     // users.count changes as the rows are created; objectAt() alone would not update this.
     readonly property var user: users.count > 0 ? users.objectAt(Math.min(userIndex, users.count - 1)) : null
 
@@ -246,7 +250,8 @@ Rectangle {
                 objectName: "login-message"
                 width: parent.width; height: 32
                 wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
-                text: screen.message || (keyboard && keyboard.capsLock && keyboard.capsLock.enabled ? qsTr("Caps Lock is on.") : "")
+                text: screen.message || (keyboard && keyboard.capsLock && keyboard.capsLock.enabled ? qsTr("Caps Lock is on.")
+                      : screen.fingerprint ? qsTr("Or press Return, then touch the fingerprint reader.") : "")
                 textFormat: Text.PlainText
                 font.family: "Charcoal"; font.pixelSize: 11
                 color: screen.messageIsError ? "#990000" : "#333"
@@ -294,7 +299,7 @@ Rectangle {
             objectName: "login-button"
             label: qsTr("Log In")
             isDefault: true
-            usable: !screen.busy && password.text.length > 0 && !!screen.user
+            usable: !screen.busy && (password.text.length > 0 || screen.fingerprint) && !!screen.user
             anchors.right: parent.right; anchors.rightMargin: 24
             anchors.bottom: parent.bottom; anchors.bottomMargin: 18
             onActivated: screen.login()
@@ -302,11 +307,12 @@ Rectangle {
     }
 
     function login() {
-        if (busy || !user || password.text.length === 0)
+        if (busy || !user || (password.text.length === 0 && !fingerprint))
             return
         busy = true
+        usingFinger = password.text.length === 0
         messageIsError = false
-        message = qsTr("Logging in…")
+        message = usingFinger ? qsTr("Touch the fingerprint reader.") : qsTr("Logging in…")
         sddm.login(user.name, password.text, sessionIndex)
     }
     Connections {
@@ -314,11 +320,16 @@ Rectangle {
         function onLoginFailed() {
             screen.busy = false
             screen.messageIsError = true
-            screen.message = qsTr("Sorry, that password is incorrect. Please try again.")
+            screen.message = screen.usingFinger ? qsTr("Sorry, that fingerprint was not recognized. Please try again.")
+                                                : qsTr("Sorry, that password is incorrect. Please try again.")
             password.text = ""
             password.forceActiveFocus()
         }
         function onLoginSucceeded() { screen.message = "" }
+        // PAM's own words while it waits, such as fprintd's "Place your finger on …".
+        function onInformationMessage(text) {
+            if (screen.busy && text) { screen.messageIsError = false; screen.message = text }
+        }
     }
     Component.onCompleted: password.forceActiveFocus()
 }

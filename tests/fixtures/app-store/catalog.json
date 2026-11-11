@@ -1,0 +1,18 @@
+{
+ "yay": false, "aurUpdated": "",
+ "packages": [
+  {"name": "chess", "version": "1.0-1", "description": "A chess game", "repo": "extra", "size": 2048000, "installed": ""},
+  {"name": "libfoo", "version": "2-1", "description": "A library", "repo": "extra", "size": 1000, "installed": ""},
+  {"name": "linux", "version": "6.1-1", "description": "The Linux kernel", "repo": "core", "size": 140000000,
+   "installed": "6.0-1", "explicit": true, "update": "6.1-1"},
+  {"name": "paint", "version": "2.0-1", "description": "A paint program", "repo": "extra", "size": 5000000,
+   "installed": "", "url": "https://paint.example"}
+ ],
+ "apps": [
+  {"id": "org.example.Paint", "title": "Paint", "package": "paint", "summary": "Draw pictures",
+   "about": "Paint draws pictures.\n\n• Brushes", "category": "Graphics", "icon": "", "launch": "paint.desktop",
+   "homepage": "https://paint.example"},
+  {"id": "org.example.Chess", "title": "Chess", "package": "chess", "summary": "Play chess",
+   "about": "", "category": "Games", "icon": "", "launch": ""}
+ ]
+}

@@ -57,40 +57,13 @@ an emulator: no Apple software runs, and none is included.
 - **X11 applications and games** through a bundled, patched xwayland-satellite.
 - **An optional startup screen**: a gray 1-bit screen with a smiling computer instead of boot text.
 
-## Install
+## Install (Arch Linux)
 
-### From the ISO (recommended)
-
-Platinum Reality is its own Arch-based system. Download **`platinum-reality-x86_64.iso`** from the
-[newest release](https://github.com/psn-tch/platinum-reality/releases/latest) (or
-**[platinumreality.uk/download](https://platinumreality.uk/download)**), check it, and write it to a
-USB stick of at least 2 GB:
-
-```bash
-sha256sum -c platinum-reality-x86_64.iso.sha256
-sudo dd if=platinum-reality-x86_64.iso of=/dev/sdX bs=4M status=progress oflag=sync   # sdX = the stick
-```
-
-(On Windows or macOS, a tool such as balenaEtcher or Rufus in DD mode does the same.) Start the
-computer from the stick. Platinum Reality runs live from it, and the **Installer** walks you through
-it in the Mac OS 9 style: choose the disk, read the information and licence, make your account, and
-install. Then restart without the stick.
-
-- **The disk you choose is erased completely.** The Installer lists what is on each disk and asks
-  before erasing, with Cancel as the default. Unplug any disk you care about if you're unsure.
-- It needs a **UEFI** computer (no legacy BIOS boot), a 64-bit x86 processor, and a disk of at
-  least 16 GB. The system can be encrypted with a password you type at startup.
-- After installing, **Software Update** (Apple menu ▸ Control Panels) brings new releases.
-
-The ISO can also be verified with the release key in `packaging/release-key.asc`:
-`gpg --verify platinum-reality-x86_64.iso.sig platinum-reality-x86_64.iso`.
-
-### On an existing Arch Linux system
-
-> **Use a fresh Arch Linux installation.** That is what Platinum Reality is built and tested on.
-> On a system that has been used for a while, other desktops, themes, display settings and leftover
-> configuration can interfere in ways nobody has tested, and the glitches may only show up later.
-> The ISO above is the simplest way to get a clean system.
+> **Install it on a fresh Arch Linux installation.** That is what Platinum Reality is built and
+> tested on. On a system that has been used for a while, other desktops, themes, display settings
+> and leftover configuration can interfere in ways nobody has tested, and the glitches may only show
+> up later. A ready-made Arch-based system with Platinum Reality set up from the start is planned,
+> so that installing it is one step on a clean machine.
 
 As a normal user with `sudo` and a working network (never as root), first update the system and
 add the build tools:

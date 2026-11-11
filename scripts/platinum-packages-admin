@@ -1,0 +1,48 @@
+#!/usr/bin/python3 -I
+"""The App Store's administrator helper (docs/app-store.md), run through pkexec. JSON lines out.
+Usage: platinum-packages-admin install <package>…
+       platinum-packages-admin remove <package>…
+       platinum-packages-admin update-all
+       platinum-packages-admin install-file <package file>"""
+import json
+import os
+import sys
+
+# Its own folder (/usr/lib/platinum-reality when installed), never a path from the environment.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import platinum_packages  # noqa: E402
+
+
+def report(message):
+    print(json.dumps(message), flush=True)
+
+
+def main(arguments):
+    os.umask(0o022)
+    command, rest = (arguments[0], arguments[1:]) if arguments else ('', [])
+    valid = (command in ('install', 'remove') and rest) or (command == 'update-all' and not rest) or \
+        (command == 'install-file' and len(rest) == 1)
+    if not valid:
+        report({'error': __doc__.split('\n', 1)[1]})
+        return 2
+    if os.geteuid() != 0:
+        report({'error': 'Installing software needs an administrator.'})
+        return 1
+    try:
+        if command == 'install':
+            platinum_packages.install(rest, report)
+        elif command == 'remove':
+            platinum_packages.remove(rest, report)
+        elif command == 'update-all':
+            platinum_packages.update_all(report)
+        else:
+            platinum_packages.install_file(rest[0], report)
+    except (platinum_packages.PackageError, OSError) as problem:
+        report({'error': str(problem)})
+        return 1
+    report({'done': True})
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

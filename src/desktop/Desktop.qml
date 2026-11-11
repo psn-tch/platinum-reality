@@ -230,6 +230,7 @@ Rectangle {
         else if(action==="open")manager.launchFinder()
         else if(action==="terminal")manager.launchTerminal()
         else if(action==="puzzle")manager.launchPuzzle()
+        else if(action==="app-store")manager.launchAppStore()
         else if(action==="screenshot")takeScreenshot()
         else if(action==="applications")applicationBrowser.browse("")
         else if(action==="appearance")appearanceDialog.edit()
@@ -245,6 +246,7 @@ Rectangle {
         else if(action==="keyboard")keyboardPanel.edit()
         else if(action==="energy")energyPanel.edit()
         else if(action==="mouse")mousePanel.edit()
+        else if(action==="fingerprints")fingerprintsPanel.edit()
         else if(action==="control-panels-window")controlPanels.show("")
         else if(action==="calculator")calculator.open()
         else if(action==="asset-importer")assetImporter.open()
@@ -456,6 +458,7 @@ Rectangle {
             return [
                 {text:"About This Computer",action:"about"},
                 {separator:true,action:"separator"},
+                {text:"App Store",action:"app-store",glyph:"application",icon:icon("app-store")},
                 {text:"Applications…",action:"applications",glyph:"folder",icon:icon("folder")},
                 {text:"Asset Importer",action:"asset-importer",glyph:"application",icon:icon("asset-importer")},
                 {text:"Calculator",action:"calculator",glyph:"application",icon:icon("calculator")},
@@ -469,6 +472,7 @@ Rectangle {
                     panel("Date & Time…","date-time"),
                     panel("Desktop Picture…","desktop-picture"),
                     panel("Energy Saver…","energy"),
+                    panel("Fingerprints…","fingerprints"),
                     panel("Keyboard…","keyboard"),
                     panel("Monitors…","monitors"),
                     panel("Mouse & Trackpad…","mouse"),
@@ -1956,6 +1960,7 @@ Rectangle {
         DateTimePanel {id:dateTimePanel;settings:desktop.appearance}
         DesktopPictureDialog {id:desktopPictureDialog;settings:desktop.appearance}
         EnergySaverPanel {id:energyPanel;settings:manager.energy;sessionManager:manager}
+        FingerprintsPanel {id:fingerprintsPanel;service:manager ? manager.fingerprints : null}
         GeneralControlsPanel {id:generalPanel;settings:desktop.appearance}
         // Listed only on a computer whose Handheld Daemon can hide its built-in controller.
         HandheldPanel {id:handheldPanel;service:manager ? manager.handheld : null}

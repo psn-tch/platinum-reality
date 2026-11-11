@@ -1,0 +1,46 @@
+#!/usr/bin/python3 -I
+"""Fingerprint login for the Fingerprints control panel (docs/fingerprints.md). JSON lines out.
+Usage: platinum-fingerprint-login status
+       platinum-fingerprint-login set <login on|off> <sudo on|off>     (through pkexec)
+       platinum-fingerprint-login install-support                       (through pkexec)"""
+import json
+import os
+import sys
+
+sys.path.insert(0, '/usr/lib/platinum-reality')
+import platinum_fingerprint  # noqa: E402
+
+
+def report(message):
+    print(json.dumps(message), flush=True)
+
+
+def main(arguments):
+    os.umask(0o022)
+    if arguments == ['status']:
+        report(platinum_fingerprint.status())
+        return 0
+    switch = {'on': True, 'off': False}
+    if not (arguments == ['install-support']
+            or (len(arguments) == 3 and arguments[0] == 'set' and arguments[1] in switch and arguments[2] in switch)):
+        report({'error': __doc__.split('\n', 1)[1]})
+        return 2
+    if os.geteuid() != 0:
+        report({'error': 'Changing fingerprint login needs an administrator.'})
+        return 1
+    try:
+        if arguments[0] == 'install-support':
+            platinum_fingerprint.install_support(report)
+        else:
+            backup = platinum_fingerprint.apply(login=switch[arguments[1]], sudo=switch[arguments[2]])
+            if backup:
+                report({'backup': str(backup)})
+    except (platinum_fingerprint.FingerprintError, OSError) as problem:
+        report({'error': str(problem)})
+        return 1
+    report({'done': True, **platinum_fingerprint.status()})
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

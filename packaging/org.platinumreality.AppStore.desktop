@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=App Store
+Comment=Find, install and remove software from Arch Linux and the AUR
+Exec=/usr/lib/platinum-reality/platinum-app-store
+Icon=system-software-install
+Categories=System;PackageManager;
+Keywords=software;install;packages;pacman;aur;yay;
+StartupWMClass=platinum-app-store

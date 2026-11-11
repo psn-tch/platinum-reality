@@ -130,6 +130,12 @@ Canvas {
             c.fillStyle="#ddd";c.fillRect(1.5,5.5,13,6);c.strokeRect(1.5,5.5,13,6)
             c.fillStyle="#222";c.fillRect(2,11,3,2.5);c.fillRect(11,11,3,2.5)
             c.fillRect(3,8,3,1);c.fillRect(4,7,1,3);c.fillRect(11,7,1,1);c.fillRect(12,9,1,1)
+        } else if(kind==="fingerprint") {
+            // An original whorl: nested open loops, as a fingertip's ridges.
+            c.lineWidth=1.1
+            for(const r of [1.5,3.5,5.5]){c.beginPath();c.arc(8,8.5,r,Math.PI*0.85,Math.PI*2.35);c.stroke()}
+            c.beginPath();c.arc(8,8.5,7.2,Math.PI*1.05,Math.PI*1.95);c.stroke()
+            line(8,8.5,8,12)
         } else if(kind==="phone") {
             c.fillStyle="#ddd";c.fillRect(4.5,1.5,7,13);c.strokeRect(4.5,1.5,7,13)
             c.fillStyle="#999";c.fillRect(5,3,6,8);c.fillStyle="#222";c.fillRect(7,12,2,1)

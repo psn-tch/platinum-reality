@@ -19,7 +19,8 @@ import tempfile
 
 EXTRAS = ["sddm", "xorg-server", "pipewire-audio", "pipewire-pulse", "wireplumber", "alsa-utils",
           "ttf-dejavu", "noto-fonts", "konsole", "firefox", "plasma-integration", "iwd", "bluez",
-          "bluez-utils", "brightnessctl", "xdg-user-dirs", "noto-fonts-emoji", "rtkit"]
+          "bluez-utils", "brightnessctl", "xdg-user-dirs", "noto-fonts-emoji", "rtkit",
+          "archlinux-appstream-data"]
 IWD = "[General]\nEnableNetworkConfiguration=true\n\n[Network]\nNameResolvingService=systemd\n"
 SDDM_SESSION = "/usr/share/wayland-sessions/platinum-reality.desktop"
 WIRED = "[Match]\nName=en* eth*\n\n[Network]\nDHCP=yes\n"

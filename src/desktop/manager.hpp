@@ -10,6 +10,7 @@
 #include "display_topology_feed.hpp"
 #include "power_control.hpp"
 #include "removable_media.hpp"
+#include "fingerprints.hpp"
 #include "handheld.hpp"
 #include <QAbstractListModel>
 #include <QPointer>
@@ -247,6 +248,8 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(QObject *wifi READ wifi CONSTANT)
     Q_PROPERTY(QObject *removableMedia READ removableMedia CONSTANT)
     Q_PROPERTY(QObject *handheld READ handheld CONSTANT)
+    // fprintd and fingerprint login (docs/fingerprints.md); host fprintd only in a real session.
+    Q_PROPERTY(QObject *fingerprints READ fingerprints CONSTANT)
     // Special ▸ Sleep, Restart and Shut Down: only in the whole session (power_control.hpp).
     Q_PROPERTY(bool powerAvailable READ powerAvailable CONSTANT)
     // Alert sounds (docs/alert-sounds.md); silent outside a real session.
@@ -341,6 +344,7 @@ class NativeManager final : public QAbstractListModel
     QObject *wifi() const { return m_wifi; }
     QObject *removableMedia() const { return m_removableMedia; }
     QObject *handheld() const { return m_handheld; }
+    QObject *fingerprints() const { return m_fingerprints; }
     QObject *alertSounds() const { return m_alertSounds; }
     QObject *interfaceSounds() const { return m_interfaceSounds; }
     QObject *startupSound() const { return m_startupSound; }
@@ -412,6 +416,7 @@ class NativeManager final : public QAbstractListModel
     Q_INVOKABLE void showFinder();
     Q_INVOKABLE void launchTerminal();
     Q_INVOKABLE void launchPuzzle();
+    Q_INVOKABLE void launchAppStore();
     Q_INVOKABLE void launchTrash();
     // A trusted .desktop launcher on the desktop (the user's own and executable).
     void launchDesktopFile(const QString &path);
@@ -546,6 +551,7 @@ class NativeManager final : public QAbstractListModel
     PowerControl *m_power = nullptr;
     RemovableMedia *m_removableMedia = nullptr;
     HandheldDaemon *m_handheld = nullptr;
+    FingerprintService *m_fingerprints = nullptr;
     std::optional<PowerControl::Action> m_pendingPower;
     void endSession();
     bool m_normalApplicationSettings = false;

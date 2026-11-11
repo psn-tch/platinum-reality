@@ -139,6 +139,14 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     m_handheld = new HandheldDaemon(handheldEndpoint.base, handheldEndpoint.tokenFile, this);
     connect(m_handheld, &HandheldDaemon::failed, this, &NativeManager::errorOccurred);
     m_handheld->refresh();
+    // Fingers and fingerprint login: the host's fprintd and pkexec only in a real session; native
+    // tests may name a stand-in helper, which then runs without pkexec.
+    const bool nativeTest = qEnvironmentVariable("FRANKENSTEIN_NATIVE_TEST") == "1";
+    m_fingerprints = new FingerprintService(
+        hostBluetooth ? QDBusConnection::systemBus() : QDBusConnection(QString()),
+        nativeTest ? qEnvironmentVariable("FRANKENSTEIN_FINGERPRINT_HELPER")
+                   : QCoreApplication::applicationDirPath() + "/platinum-fingerprint-login",
+        nativeTest ? QStringList() : QStringList{"pkexec"}, this);
     m_power = new PowerControl(hostBluetooth ? QDBusConnection::systemBus() : QDBusConnection(QString()), this);
     connect(m_power, &PowerControl::finished, this, [this](bool ok, const QString &error)
             {
@@ -1148,6 +1156,7 @@ QUrl NativeManager::applicationIcon(QString identity, int size) const
         // control panel take an imported icon of that name when there is one, else the theme's.
         {"shell:folder", {"folder", "folder"}},
         {"shell:asset-importer", {"asset-importer", "document-import"}},
+        {"shell:app-store", {"app-store", "system-software-install"}},
         {"shell:puzzle", {"puzzle", "applications-games"}},
         {"shell:sticky-notes", {"stickies", "knotes"}},
         {"shell:terminal", {"terminal", "utilities-terminal"}},
@@ -1156,6 +1165,7 @@ QUrl NativeManager::applicationIcon(QString identity, int size) const
         {"shell:date-time", {"date-time", "preferences-system-time"}},
         {"shell:desktop-picture", {"desktop-picture", "preferences-desktop-wallpaper"}},
         {"shell:energy", {"energy-saver", "preferences-system-power-management"}},
+        {"shell:fingerprints", {"fingerprints", "preferences-desktop-user-password"}},
         {"shell:keyboard", {"keyboard", "input-keyboard"}},
         {"shell:monitors", {"monitors", "preferences-desktop-display"}},
         {"shell:mouse", {"mouse", "input-mouse"}},
@@ -2565,7 +2575,8 @@ bool NativeManager::launch(QString program, QStringList arguments, QString direc
     }
     // Platinum Reality' own applications (Finder, Editor, Puzzle) keep their state in the session
     // profile; everything else may use the user's own settings folders.
-    static const QStringList ownedApplications{"frankenstein-finder", "frankenstein-editor", "frankenstein-puzzle"};
+    static const QStringList ownedApplications{"frankenstein-finder", "frankenstein-editor", "frankenstein-puzzle",
+                                               "platinum-app-store"};
     const QFileInfo executable(program);
     const bool owned = ownedApplications.contains(executable.fileName()) &&
                        executable.canonicalPath() == QFileInfo(QCoreApplication::applicationDirPath()).canonicalFilePath();
@@ -2682,6 +2693,10 @@ void NativeManager::launchTerminal()
 void NativeManager::launchPuzzle()
 {
     launch(QCoreApplication::applicationDirPath() + "/frankenstein-puzzle", {});
+}
+void NativeManager::launchAppStore()
+{
+    launch(QCoreApplication::applicationDirPath() + "/platinum-app-store", {});
 }
 void NativeManager::launchTrash()
 {

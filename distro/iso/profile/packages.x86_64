@@ -2,6 +2,7 @@ alsa-utils
 amd-ucode
 arch-install-scripts
 archinstall
+archlinux-appstream-data
 b43-fwcutter
 base
 bcachefs-tools
@@ -33,6 +34,7 @@ f2fs-tools
 fatresize
 firefox
 foot-terminfo
+fprintd
 fsarchiver
 ghostty-terminfo
 gpart
