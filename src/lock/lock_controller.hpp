@@ -19,8 +19,10 @@ class LockController final : public QObject
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(bool fingerprintAvailable READ fingerprintAvailable NOTIFY changed)
     Q_PROPERTY(int failures READ failures NOTIFY changed)
-    // Whether any lock window has the keyboard; the dialog then shows on that screen only.
-    Q_PROPERTY(bool keyboardOnLock READ keyboardOnLock NOTIFY changed)
+    // What is typed in the password field. One field for every screen: the compositor keeps the
+    // keyboard on one lock window (Sway: the first to appear, never moved by a click), which need
+    // not be the screen the user is looking at, so every screen's dialog shows the same typing.
+    Q_PROPERTY(QString entry READ entry WRITE setEntry NOTIFY entryChanged)
     // Log In at the start of a session (not a lock): the user also chooses the session to start,
     // "platinum" (Platinum Reality) or "kde" (KDE Plasma).
     Q_PROPERTY(bool loginMode READ loginMode CONSTANT)
@@ -37,13 +39,15 @@ class LockController final : public QObject
     bool busy() const;
     bool fingerprintAvailable() const { return m_fingerprint; }
     int failures() const { return m_failures; }
-    bool keyboardOnLock() const { return m_keyboard; }
+    QString entry() const { return m_entry; }
+    void setEntry(const QString &entry);
     bool loginMode() const { return m_loginMode; }
     QString session() const { return m_session; }
     void setSession(const QString &session);
     // Before any window is shown. Unknown sessions start Platinum Reality.
     void setLoginMode(const QString &defaultSession);
-    void setKeyboardOnLock(bool keyboard);
+    // Logged only (lock.txt): the screen whose lock window has the keyboard, or "" for none.
+    void setKeyboardScreen(const QString &screen);
     // Ignored until the screen is locked, while checking, or for an empty password.
     Q_INVOKABLE bool submit(const QString &password);
     void setReady(bool ready);
@@ -52,17 +56,19 @@ class LockController final : public QObject
 
   signals:
     void changed();
+    void entryChanged();
     void authenticated();
     // The password field should be cleared and selected for another try.
     void rejected();
 
   private:
     Authenticator *m_authenticator;
-    QString m_fullName, m_message;
+    QString m_fullName, m_message, m_entry;
     QUrl m_picture, m_desktopPicture;
     bool m_messageIsError = false, m_ready = false, m_fingerprint = false, m_pamMessage = false,
-         m_keyboard = false, m_loginMode = false;
+         m_loginMode = false;
     QString m_session = "platinum";
+    QString m_keyboardScreen;
     int m_failures = 0;
 };
 

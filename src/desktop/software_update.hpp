@@ -55,6 +55,9 @@ class SoftwareUpdate final : public QObject
     Q_INVOKABLE void useLocal(const QString &folder);
     Q_INVOKABLE void install();
     Q_INVOKABLE void restorePrevious();
+    // A newly installed computer: check now, and keep trying (across logins) until a check gets an
+    // answer, since the network may not be up yet. Like an automatic check, it only reports.
+    Q_INVOKABLE void checkAfterInstall();
   signals:
     void changed();
     // An automatic check found a newer release: the desktop may say so; nothing installs.
@@ -68,9 +71,9 @@ class SoftwareUpdate final : public QObject
     QVariantMap m_available, m_readyRelease;
     QVariantList m_bundles;
     double m_progress = 0;
-    bool m_previousKept = false, m_checked = false, m_automatic = false, m_silent = false;
+    bool m_previousKept = false, m_checked = false, m_automatic = false, m_silent = false, m_pending = false;
     QDateTime m_lastChecked;
     QByteArray m_buffer;
     QProcess m_process;
-    QTimer m_schedule;
+    QTimer m_schedule, m_retry;
 };

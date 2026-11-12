@@ -99,9 +99,9 @@ any height on either side of the screen, as in Mac OS 9.2.2.
 
 **Special ▸ Sleep**, **Restart** and **Shut Down** do what they say; Restart and Shut Down first ask
 each application to close, so you can save your work. **Special ▸ Log Out** returns to your login
-screen. The screen locks after a while without
-activity and when the computer sleeps. Unlock it with your password, or with your fingerprint where
-your system is set up for that.
+screen. **Special ▸ Lock Screen** (or Control-Option-L) locks the screen at once, for leaving
+the computer somewhere; it also locks when the computer sleeps. Unlock it with your password, or
+with your fingerprint where your system is set up for that.
 
 ## If something goes wrong
 

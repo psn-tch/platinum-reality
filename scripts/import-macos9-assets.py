@@ -50,7 +50,8 @@ MAX_PICTURE_BYTES = 16 * 1024 * 1024
 ICONS = {-4000: 'document', -3999: 'folder', -3997: 'folder-open', -3996: 'application',
          -3995: 'hard-disk', -3993: 'trash', -3984: 'trash-full', -3983: 'system-folder',
          -3987: 'cdrom', -3998: 'floppy', -3971: 'preferences', -3970: 'suitcase',
-         -3972: 'file-server', -3981: 'drop-folder', -3982: 'apple-menu-folder', -16415: 'extension'}
+         -3972: 'file-server', -3981: 'drop-folder', -3982: 'apple-menu-folder', -16415: 'extension',
+         -16386: 'apple-menu'}  # The rainbow Apple at the left of the menu bar.
 MAX_BYTES = 4 * 1024 * 1024  # The desktop skips larger personal sounds.
 
 

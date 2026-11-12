@@ -167,6 +167,8 @@ class ManagedWindow final : public QObject
     bool viaX11Bridge = false;
     bool visible = true, shaded = false, selected = false, shadeAllowed = false;
     bool classicBrowserFrame = false;
+    // A password box: a window of the session's polkit agent (startAuthenticationAgent).
+    bool authentication = false;
     int z = 0;
     QSize userSize;
     bool zoomed = false;
@@ -220,6 +222,10 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(QVariantList displayMirrors READ displayMirrors NOTIFY displayLayoutChanged)
     Q_PROPERTY(QObject *desktopItems READ desktopItems CONSTANT)
     Q_PROPERTY(bool desktopActive READ desktopActive NOTIFY contextChanged)
+    // A password box that is up (polkit asked for a password): the layer of its frontmost window
+    // and its application's id, or 0. A desktop-owned window that asked waits beneath it.
+    Q_PROPERTY(int authenticationLayer READ authenticationLayer NOTIFY contextChanged)
+    Q_PROPERTY(qulonglong authenticationApplication READ authenticationApplication NOTIFY contextChanged)
     Q_PROPERTY(bool shellModal READ shellModal NOTIFY contextChanged)
     Q_PROPERTY(QObject *applicationCatalog READ applicationCatalog CONSTANT)
     Q_PROPERTY(QObject *appearance READ appearance CONSTANT)
@@ -423,6 +429,7 @@ class NativeManager final : public QAbstractListModel
     Q_INVOKABLE void quitSession();
     // Restart and Shut Down end the session as Log Out does, then ask logind.
     Q_INVOKABLE void sleepComputer();
+    Q_INVOKABLE void lockScreen();
     Q_INVOKABLE void restartComputer();
     Q_INVOKABLE void shutDownComputer();
     bool powerAvailable() const;
@@ -446,8 +453,13 @@ class NativeManager final : public QAbstractListModel
     void attachShell(QWaylandXdgShell *shell);
     void setX11Bridge(X11Bridge *bridge);
     void initializeWallet();
-    // pkexec (Software Update) asks for a password through the session's polkit agent.
+    // pkexec (Software Update) and fprintd (Fingerprints) ask for a password through the
+    // session's polkit agent.
     void startAuthenticationAgent();
+    int authenticationLayer() const { return m_authenticationLayer; }
+    qulonglong authenticationApplication() const { return m_authenticationApplication; }
+    // The agents to try, first installed wins. Tests substitute a probe client.
+    void setAuthenticationAgents(QStringList agents) { m_authenticationAgents = std::move(agents); }
     // Only a validated host topology may be applied. This changes shell policy,
     // never physical outputs; the session controller owns hardware transactions.
     void setDisplayLayout(const DisplayLayout &layout);
@@ -629,6 +641,14 @@ class NativeManager final : public QAbstractListModel
     QSet<qulonglong> m_shellModals;
     bool m_shellMenuKeyboardMode = false;
     qulonglong m_nextShellModal = 0;
+    QStringList m_authenticationAgents{"/usr/lib/polkit-kde-authentication-agent-1",
+                                       "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1",
+                                       "/usr/bin/lxqt-policykit-agent",
+                                       "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1"};
+    int m_authenticationLayer = 0;
+    QSet<quint64> m_authenticationApplications;
+    qulonglong m_authenticationApplication = 0;
+    bool authenticationAgentClient(qint64 pid) const;
     QProcess *m_dropProcess = nullptr;
     X11Bridge *m_x11 = nullptr; // Owner outlives manager and renderer retirement.
     WalletActivation *m_wallet = nullptr;

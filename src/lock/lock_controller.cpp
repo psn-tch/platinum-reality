@@ -57,13 +57,23 @@ void LockController::setReady(bool ready)
     emit changed();
 }
 
-void LockController::setKeyboardOnLock(bool keyboard)
+void LockController::setKeyboardScreen(const QString &screen)
 {
-    if (m_keyboard == keyboard)
+    if (m_keyboardScreen == screen)
         return;
-    m_keyboard = keyboard;
-    qInfo("Lock screen: keyboard %s", keyboard ? "on the lock" : "away");
-    emit changed();
+    m_keyboardScreen = screen;
+    if (screen.isEmpty())
+        qInfo("Lock screen: keyboard away");
+    else
+        qInfo("Lock screen: keyboard on %s", qPrintable(screen));
+}
+
+void LockController::setEntry(const QString &entry)
+{
+    if (m_entry == entry)
+        return;
+    m_entry = entry;
+    emit entryChanged();
 }
 
 void LockController::setFingerprintAvailable(bool available)

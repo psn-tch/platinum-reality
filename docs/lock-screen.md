@@ -19,8 +19,10 @@ triggered `pam_faillock` through `~/.bash_profile` (see HANDOFF).
     password…". PAM's own messages, such as a faillock lockout, are shown as written.
   - The background is the Appearance panel's desktop picture (the profile's `appearance.json`),
     or the classic blue-violet `#666699`.
-  - The dialog appears on the screen that has the keyboard, so typing never goes to a field on
-    another screen. Every screen shows it until the compositor chooses.
+  - Every screen shows the dialog, and their fields share what is typed (`LockController::entry`).
+    The compositor keeps the keyboard on one lock window, and Sway never moves it, not even on a
+    click. That window need not be on the screen in use, so typing shows on every screen, and any
+    screen's **Log In** button submits it. The lock logs which screen has the keyboard.
 - **Password:** PAM service `swaylock` (the same stack as before:
   `swaylock → login → system-local-login → system-login → system-auth`).
   - Runs in a worker thread, one attempt at a time.
@@ -44,6 +46,13 @@ triggered `pam_faillock` through `~/.bash_profile` (see HANDOFF).
   - Exit 4: the compositor ended the lock.
   - Exit 3: no session-lock protocol.
 
+## Locking on purpose
+
+**Special ▸ Lock Screen** (shown as ⌃⌥L, in whole sessions only) asks logind to lock this session
+(`org.freedesktop.login1.Session.Lock` on `session/auto`, as `loginctl lock-session`). The session's
+swayidle hears logind's `lock` and starts this lock, the same path as Control-Option-L and sleep. Lily
+Hewitt asked for it on 2026-11-11, to leave a laptop somewhere safely. 9.2.2 had no such item.
+
 ## Supervisor
 
 `standalone-session.py --locker platinum|swaylock` (default `platinum`).
@@ -56,6 +65,18 @@ triggered `pam_faillock` through `~/.bash_profile` (see HANDOFF).
 
 ## Qualification
 
+### Docked wake: the dialog on every screen (2026-11-11)
+
+Lily Hewitt: after sleep at a USB-C dock, "i just see the desktop. sometimes i can blindly type in
+the password". The replacement locker covered the laptop panel first, because the dock's monitor
+comes back later. Sway gives the keyboard to the first lock surface to map, and moves it only when
+that surface is destroyed (`sway/lock.c`, 1.12). The dialog showed only on the keyboard's screen,
+so the monitor in use showed just the desktop picture. `test_dock_wake_shows_the_dialog_on_the_monitor_without_the_keyboard`
+reproduces it: the monitor is unplugged at sleep, the locker is replaced, and the monitor comes
+back as a new connector. That test failed before the fix. With the fix, the dialog is on every
+screen and the typing is shared.
+
+
 - `tests/lock_tests.cpp` (`ctest -R '^lock$'`, offscreen):
   - The PAM stack check (Lily Hewitt's three-deep chain; commented-out, non-auth, `-auth`, cycles,
     names that escape the directory).
@@ -67,9 +88,10 @@ triggered `pam_faillock` through `~/.bash_profile` (see HANDOFF).
     service), including the forged-match case.
 - `tests/lock_session_tests.py` (`ctest -R lock-session`): an owned headless Sway with two outputs
   that the test starts itself (private runtime, pixman, no input devices). Typing is done by
-  `virtual-keyboard-driver` on that seat. Screen captures (`grim`) prove:
+  `virtual-keyboard-driver` on that seat. Screen captures (`output-capture`, an in-tree
+  ext-image-copy-capture client, so the suite needs no `grim`) prove:
   - both outputs are covered;
-  - exactly one shows the dialog;
+  - both show the dialog;
   - a second locker is refused (exit 5);
   - a wrong password keeps the lock;
   - a killed locker leaves the outputs locked, and a new one takes over;

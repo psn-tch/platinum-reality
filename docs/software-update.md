@@ -98,6 +98,13 @@ Update ▸ **Install from Local Package…** takes the folder; it is checked exa
 **Check Now** asks GitHub for the newest release, downloads `release.json` and its signature
 only, verifies them, and shows the version, date and notes. Automatic checks (off by default,
 weekly when on) do the same and only *tell* the user; nothing installs without their click.
+When an automatic check finds a newer release, the Software Update window opens with it, without
+taking the keyboard from what the user is typing in.
+
+**After installing** (Lily Hewitt, 2026-11-11): a newly installed account's first login checks too,
+whatever the automatic setting. The installer's `welcome-pending` marker starts it (the same one that opens
+Help Center). Until a check gets an answer, `software-update.json` keeps `checkPending`, and the desktop tries again
+every five minutes and 30 seconds after each login, since a fresh computer's network may not be up yet.
 
 ## Layout (measured 2026-11-08)
 

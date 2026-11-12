@@ -158,7 +158,8 @@ int main(int argc, char **argv)
         cover(screen);
     // Every window here is a lock window: the keyboard is on the lock when any has focus.
     QObject::connect(&app, &QGuiApplication::focusWindowChanged, &controller,
-                     [&controller](QWindow *window) { controller.setKeyboardOnLock(window != nullptr); });
+                     [&controller](QWindow *window)
+                     { controller.setKeyboardScreen(window && window->screen() ? window->screen()->name() : QString()); });
     QObject::connect(&app, &QGuiApplication::screenAdded, &app, cover);
     QObject::connect(&app, &QGuiApplication::screenRemoved, &app,
                      [&views](QScreen *screen)

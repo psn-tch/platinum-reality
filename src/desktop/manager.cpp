@@ -148,6 +148,7 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
                    : QCoreApplication::applicationDirPath() + "/platinum-fingerprint-login",
         nativeTest ? QStringList() : QStringList{"pkexec"}, this);
     m_power = new PowerControl(hostBluetooth ? QDBusConnection::systemBus() : QDBusConnection(QString()), this);
+    connect(m_power, &PowerControl::lockFailed, this, &NativeManager::errorOccurred);
     connect(m_power, &PowerControl::finished, this, [this](bool ok, const QString &error)
             {
                 const bool ending = m_pendingPower && *m_pendingPower != PowerControl::Action::Sleep;
@@ -1125,7 +1126,8 @@ QVariantList NativeManager::applications() const
                                      {"icon", applicationIcon(m_applicationIds.key(id))},
                                      {"hidden", m_state.applications.at(id).hidden},
                                      {"active", m_state.active.application == id},
-                                     {"attention", m_wantsAttention.contains(id.value)}});
+                                     {"attention", m_wantsAttention.contains(id.value)},
+                                     {"agent", m_authenticationApplications.contains(id.value)}});
     return result;
 }
 void NativeManager::refreshApplicationIcons()
@@ -1340,6 +1342,14 @@ void NativeManager::createWindow(QWaylandXdgToplevel *top, QWaylandXdgSurface *x
             // 2026-10-20) their own profile otherwise drew its own title bar: no Platinum title
             // bar or resize box, and its shadow moved the window when focus changed.
             record->classicBrowserFrame = firefoxClient(liveSurfaceClientPid(xdg->surface()));
+            record->authentication = authenticationAgentClient(liveSurfaceClientPid(xdg->surface()));
+            // The password box's agent keeps running between boxes; it is left out of the
+            // application menu and Command-Tab (still an ordinary process, as in btop).
+            if (record->authentication && !parent && !m_authenticationApplications.contains(application.value))
+            {
+                m_authenticationApplications.insert(application.value);
+                emit contextChanged();
+            }
             QSize size = xdg->windowGeometry().size();
             if (size.isEmpty())
                 size = xdg->surface()->destinationSize();
@@ -1597,6 +1607,8 @@ void NativeManager::synchronize()
     // nested notifications would re-enter the same collapsed-property binding.
     QScopedValueRollback<bool> reconciling(m_synchronizationDeferred, true);
     const auto order = visible_order(m_state);
+    m_authenticationLayer = 0;
+    m_authenticationApplication = 0;
     for (auto *record : m_windows)
     {
         auto it = m_state.windows.find(record->identity);
@@ -1623,6 +1635,11 @@ void NativeManager::synchronize()
         }
         auto layer = std::find(order.begin(), order.end(), record->identity);
         record->z = layer == order.end() ? 0 : int(layer - order.begin()) + 1;
+        if (record->authentication && record->visible && record->z > m_authenticationLayer)
+        {
+            m_authenticationLayer = record->z;
+            m_authenticationApplication = it->second.application.value;
+        }
         emit record->changed();
     }
     // An application that comes forward no longer asks for attention; nor does one that quit.
@@ -2644,17 +2661,22 @@ bool NativeManager::launch(QString program, QStringList arguments, QString direc
 // is a Platinum window; polkit registers one agent per session and a second one exits.
 void NativeManager::startAuthenticationAgent()
 {
-    static const QStringList agents{"/usr/lib/polkit-kde-authentication-agent-1",
-                                    "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1",
-                                    "/usr/bin/lxqt-policykit-agent",
-                                    "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1"};
-    for (const auto &agent : agents)
+    for (const auto &agent : m_authenticationAgents)
         if (QFileInfo(agent).isExecutable())
         {
             launch(agent, {}, {}, true);
             return;
         }
     qWarning("No polkit authentication agent is installed; Software Update cannot ask for a password.");
+}
+bool NativeManager::authenticationAgentClient(qint64 pid) const
+{
+    if (pid <= 0)
+        return false;
+    const auto running = QFileInfo(QString("/proc/%1/exe").arg(pid)).symLinkTarget();
+    return !running.isEmpty() &&
+           std::any_of(m_authenticationAgents.cbegin(), m_authenticationAgents.cend(),
+                       [&running](const QString &agent) { return QFileInfo(agent).canonicalFilePath() == running; });
 }
 void NativeManager::launchFinder(QString path)
 {
@@ -2937,6 +2959,11 @@ void NativeManager::sleepComputer()
     m_pendingPower = PowerControl::Action::Sleep;
     m_power->request(PowerControl::Action::Sleep);
 }
+void NativeManager::lockScreen()
+{
+    if (powerAvailable() && !m_quitting)
+        m_power->lockSession();
+}
 void NativeManager::restartComputer()
 {
     if (!powerAvailable() || m_quitting || m_power->busy())
@@ -3084,6 +3111,8 @@ QVariantMap NativeManager::snapshot() const
                         {"fullScreen", w->fullScreen},
                         {"classicBrowserFrame", w->classicBrowserFrame},
                         {"viaX11Bridge", w->viaX11Bridge},
+                        {"authentication", w->authentication},
+                        {"layer", w->z},
                         {"collapsed", w->collapsed()},
                         {"shadeAnimating", w->shadeInMotion},
                         {"visible", w->shown()},

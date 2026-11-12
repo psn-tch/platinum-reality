@@ -40,7 +40,9 @@ the system bus as the user:
 - **Deleting:** `Claim`, `DeleteEnrolledFinger`, `Release`.
 
 Claim, enroll and delete calls allow interactive authorization, so polkit's password box can
-appear. The service never keeps the reader:
+appear. The Control Panels window waits directly beneath that box, above other applications, and
+comes forward again when it closes (`NativeManager::authenticationLayer`; it had dropped behind
+every application, 2026-11-11). The service never keeps the reader:
 
 - Cancel, leaving the panel, and quitting all stop the enrollment and give the reader back.
 - Only fprintd itself (the bus name's owner) can report enrollment progress.

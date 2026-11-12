@@ -40,3 +40,19 @@ bool PowerControl::request(Action action)
     });
     return true;
 }
+bool PowerControl::lockSession()
+{
+    if (!available())
+        return false;
+    auto message = QDBusMessage::createMethodCall("org.freedesktop.login1", "/org/freedesktop/login1/session/auto",
+                                                  "org.freedesktop.login1.Session", "Lock");
+    auto *watcher = new QDBusPendingCallWatcher(m_bus.asyncCall(message, 30000), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher]
+    {
+        const QDBusPendingReply<> reply = *watcher;
+        watcher->deleteLater();
+        if (reply.isError())
+            emit lockFailed("The screen could not be locked. " + reply.error().message());
+    });
+    return true;
+}

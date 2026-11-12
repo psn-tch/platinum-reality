@@ -278,6 +278,7 @@ Rectangle {
         else if(action==="handheld-builtin")manager.handheld.setControllerOn(applicationId===1)
         else if(action==="handheld")handheldPanel.edit()
         else if(action==="sleep")manager.sleepComputer()
+        else if(action==="lock-screen")manager.lockScreen()
         else if(action==="restart")manager.restartComputer()
         else if(action==="shut-down")manager.shutDownComputer()
         else if(action==="about")aboutComputer.open()
@@ -315,7 +316,9 @@ Rectangle {
         helpWindow.show(topic)
         helpWindow.forceActiveFocus()
     }
-    Timer {interval:1500;running:true;onTriggered:if(manager.takeWelcome())desktop.showHelp("welcome")}
+    // A newly installed account's first login also checks for a newer Platinum Reality than the one
+    // the installer carried (it keeps trying until the network answers).
+    Timer {interval:1500;running:true;onTriggered:if(manager.takeWelcome()){desktop.showHelp("welcome");manager.softwareUpdate.checkAfterInstall()}}
     function showClipboard() {
         if(!manager.clipboard)return
         if(!clipboardWindow) {
@@ -402,7 +405,8 @@ Rectangle {
     function applicationsByName() {
         const shell=openShellApplications()
         // Finder is active only while no built-in window is in front.
-        const apps=manager.applications.map(function(a){
+        // The password box's agent is listed only while its box is in front (manager.applications' agent).
+        const apps=manager.applications.filter(function(a){return !a.agent || a.active}).map(function(a){
             return a.name==="Finder" && shell.some(function(w){return w.active}) ? Object.assign({},a,{active:false}) : a})
         return apps.concat(shell).sort(function(a,b){
             return String(a.name).localeCompare(String(b.name),undefined,{sensitivity:"base"}) || String(a.id).localeCompare(String(b.id))})
@@ -555,6 +559,8 @@ Rectangle {
             {separator:true,action:"separator"},
             {text:"Eject",key:"⌘E",action:"eject",enabled:desktopFiles.selectedDrive!=="" && manager.removableMedia.canEject(desktopFiles.selectedDrive)},
             {separator:true,action:"separator"}].concat(manager.powerAvailable ? [
+            // Not in 9.2.2 (Lily Hewitt, 2026-11-11): lock before walking away; Control-Option-L too.
+            {text:"Lock Screen",key:"⌃⌥L",action:"lock-screen",name:"lock-screen"},
             {text:"Sleep",action:"sleep"},
             {text:"Restart",action:"restart"},
             {text:"Shut Down",action:"shut-down"},
@@ -1424,7 +1430,7 @@ Rectangle {
                     Rectangle {visible:desktop.openMenu===index;x:0;y:parent.height-1;width:parent.width;height:1;color:desktop.menuHighlightDark}
                     objectName: "bar-entry-"+index
                     Text {id:label;x:6;y:Math.floor((menuBar.height-height)/2);visible:modelData.kind!=="apple" || emblem.status!==Image.Ready;text:modelData.label;textFormat:Text.PlainText;color:modelData.enabled===false?"#777":desktop.openMenu===index?"white":"black";font.family:desktop.appearance.fontFamily;font.bold:desktop.menuFontBold;font.pixelSize:12}
-                    Image {id:emblem;x:Math.floor((parent.width-width)/2);y:2;width:16;height:16;visible:modelData.kind==="apple";source:modelData.kind==="apple"?desktop.appearance.menuEmblem:"";smooth:false;fillMode:Image.PreserveAspectFit}
+                    Image {id:emblem;objectName:modelData.kind==="apple"?"menu-emblem":"";x:Math.floor((parent.width-width)/2);y:2;width:16;height:16;visible:modelData.kind==="apple";source:modelData.kind==="apple"?desktop.appearance.menuEmblem:"";smooth:false;fillMode:Image.PreserveAspectFit}
                     MouseArea{anchors.fill:parent;enabled:modelData.enabled!==false;hoverEnabled:true;onClicked:desktop.showMenu(index);onEntered:if(!desktop.menuKeyboardMode && desktop.openMenu>=0 && desktop.openMenu!==index)desktop.showMenu(index)}
                 }
             }
@@ -1755,6 +1761,45 @@ Rectangle {
     property var controlPanelsReturnTo:0
     // A desktop-owned window waiting for an alert or the Applications browser to finish.
     property var shellWindowPending:null
+    // A password box (the polkit agent's window: manager.authenticationLayer) asked for by the
+    // desktop-owned window in front, as when Fingerprints adds a finger or Software Update installs.
+    // That window waits directly beneath the box, above other applications, and comes forward again
+    // when the box closes, unless another application was brought forward meanwhile. It used to
+    // drop behind every application (Lily Hewitt, 2026-11-11: "the fingerprint window hides behind
+    // everything else").
+    property var passwordBoxReturnWindow:null
+    property var shellWindowBeforePasswordBox:null
+    // Control Panels' own return (controlPanelsReturnTo), kept across the box.
+    property var passwordBoxControlPanelsReturnTo:0
+    function belowPasswordBox(window,z) {
+        return window===passwordBoxReturnWindow && manager.authenticationLayer>0 ? manager.authenticationLayer-0.5 : z
+    }
+    Connections {target:manager;function onContextChanged(){
+        if(manager.authenticationLayer>0){
+            // The box's window registers before it takes the keyboard: the window that asked is
+            // still the one in front here.
+            if(!desktop.passwordBoxReturnWindow){
+                let w=desktop.currentShellWindow()||desktop.shellWindowBeforePasswordBox
+                if(w && w.visible){
+                    desktop.passwordBoxControlPanelsReturnTo=w===controlPanels?desktop.controlPanelsReturnTo:0
+                    desktop.passwordBoxReturnWindow=w
+                }
+            } else if(!manager.desktopActive && !manager.applications.some(function(a){
+                    return a.active && a.id===manager.authenticationApplication}))
+                desktop.passwordBoxReturnWindow=null
+            return
+        }
+        let w=desktop.passwordBoxReturnWindow
+        if(w){
+            desktop.passwordBoxReturnWindow=null
+            let returnTo=desktop.passwordBoxControlPanelsReturnTo
+            if(w.visible)Qt.callLater(function(){
+                desktop.bringShellWindowForward(w)
+                if(w===controlPanels)desktop.controlPanelsReturnTo=returnTo
+            })
+        }
+        desktop.shellWindowBeforePasswordBox=desktop.currentShellWindow()
+    }}
     function bringShellWindowForward(window) {
         // An alert or the Applications browser still has the input: come forward after it.
         if(manager.shellModal){shellWindowPending=window;return}
@@ -1772,7 +1817,7 @@ Rectangle {
     AboutComputerWindow {
         id:aboutComputer
         sessionManager:manager
-        z:front?3991:0.76
+        z:front?3991:desktop.belowPasswordBox(aboutComputer,0.76)
         x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
         y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
         onRaised:{
@@ -1795,7 +1840,7 @@ Rectangle {
     property var calculatorReturnWindow:null
     CalculatorWindow {
         id:calculator
-        z:front?3992:0.77
+        z:front?3992:desktop.belowPasswordBox(calculator,0.77)
         x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
         y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
         onRaised:{
@@ -1819,7 +1864,7 @@ Rectangle {
     AssetImporterWindow {
         id:assetImporter
         service:manager.assetImporter
-        z:front?3991.5:0.765
+        z:front?3991.5:desktop.belowPasswordBox(assetImporter,0.765)
         x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
         y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
         onRaised:desktop.bringShellWindowForward(assetImporter)
@@ -1832,7 +1877,10 @@ Rectangle {
     SoftwareUpdateWindow {
         id:softwareUpdate
         service:manager.softwareUpdate
-        z:front?3991.4:0.764
+        // An automatic check (weekly, or the one after installing) found a newer release: show it,
+        // without taking the keyboard from whatever the user is typing in. Nothing installs by itself.
+        Connections {target:softwareUpdate.service;function onUpdateFound(){if(!softwareUpdate.visible)softwareUpdate.visible=true}}
+        z:front?3991.4:desktop.belowPasswordBox(softwareUpdate,0.764)
         x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
         y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
         onRaised:desktop.bringShellWindowForward(softwareUpdate)
@@ -1847,7 +1895,7 @@ Rectangle {
     ClassicControlPanelWindow {
         id:classicControlPanel
         appearance:desktop.appearance;input:manager.input;controls:manager.systemControls
-        z:front?3995:0.795
+        z:front?3995:desktop.belowPasswordBox(classicControlPanel,0.795)
         x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
         y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
         onOpenPanel:function(action){desktop.dispatchShellCommand(action,0)}
@@ -1872,7 +1920,7 @@ Rectangle {
     NotePadWindow {
         id:notePadWindow
         store:manager.notePad
-        z:front?3993:0.78
+        z:front?3993:desktop.belowPasswordBox(notePadWindow,0.78)
         x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
         y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
         onRaised:{
@@ -1896,7 +1944,7 @@ Rectangle {
     KeyCapsWindow {
         id:keyCapsWindow
         caps:manager.keyCaps
-        z:front?3993.5:0.785
+        z:front?3993.5:desktop.belowPasswordBox(keyCapsWindow,0.785)
         x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
         y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
         onRaised:{
@@ -1921,7 +1969,7 @@ Rectangle {
         id:scrapbookWindow
         store:manager.scrapbook
         clipboard:manager.clipboard
-        z:front?3994:0.79
+        z:front?3994:desktop.belowPasswordBox(scrapbookWindow,0.79)
         x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
         y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/4))
         onRaised:{
@@ -1941,7 +1989,7 @@ Rectangle {
         }
     }
     ControlPanelsWindow {
-        id:controlPanels;z:front?3990:0.75
+        id:controlPanels;z:front?3990:desktop.belowPasswordBox(controlPanels,0.75)
         onRaised:desktop.bringShellWindowForward(controlPanels)
         onFrontChanged:if(!front && visible)desktop.controlPanelsReturnTo=0
         onClosed:{

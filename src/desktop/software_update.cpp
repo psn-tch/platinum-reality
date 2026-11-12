@@ -15,6 +15,7 @@ SoftwareUpdate::SoftwareUpdate(QString client, QString keyring, QString settings
         const auto object = QJsonDocument::fromJson(file.read(65536)).object();
         m_automatic = object.value("automatic").toBool();
         m_lastChecked = QDateTime::fromString(object.value("lastChecked").toString(), Qt::ISODate);
+        m_pending = object.value("checkPending").toBool();
     }
     connect(&m_process, &QProcess::readyReadStandardOutput, this, [this] {
         m_buffer += m_process.readAllStandardOutput();
@@ -36,7 +37,9 @@ SoftwareUpdate::SoftwareUpdate(QString client, QString keyring, QString settings
         if ((status != QProcess::NormalExit || code != 0) && m_error.isEmpty())
             m_error = "Software Update stopped unexpectedly.";
         if (finished == "checking" && m_error.isEmpty()) {
-            m_checked = true; m_lastChecked = QDateTime::currentDateTimeUtc(); save();
+            m_checked = true; m_lastChecked = QDateTime::currentDateTimeUtc();
+            if (m_pending) { m_pending = false; m_retry.stop(); }
+            save();
             if (m_silent && !m_available.isEmpty())
                 emit updateFound(m_available.value("version").toString());
         }
@@ -56,6 +59,17 @@ SoftwareUpdate::SoftwareUpdate(QString client, QString keyring, QString settings
         check();
     });
     m_schedule.start();
+    // The check after installing: every five minutes until one gets an answer.
+    m_retry.setInterval(5 * 60 * 1000);
+    connect(&m_retry, &QTimer::timeout, this, [this] {
+        if (!m_pending || busy()) return;
+        m_silent = true;
+        check();
+    });
+    if (m_pending) {
+        m_retry.start();
+        QTimer::singleShot(30 * 1000, this, [this] { if (m_pending && !busy()) { m_silent = true; check(); } });
+    }
 }
 
 SoftwareUpdate::~SoftwareUpdate()
@@ -113,6 +127,7 @@ void SoftwareUpdate::save() const
     if (!file.open(QIODevice::WriteOnly)) return;
     QJsonObject object{{"automatic", m_automatic}};
     if (m_lastChecked.isValid()) object.insert("lastChecked", m_lastChecked.toString(Qt::ISODate));
+    if (m_pending) object.insert("checkPending", true);
     file.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
     file.commit();
 }
@@ -121,6 +136,13 @@ void SoftwareUpdate::setAutomatic(bool on)
 {
     if (on == m_automatic) return;
     m_automatic = on; save(); emit changed();
+}
+
+void SoftwareUpdate::checkAfterInstall()
+{
+    m_pending = true; save();
+    m_retry.start();
+    if (!busy()) { m_silent = true; check(); }
 }
 
 void SoftwareUpdate::refresh() { run("status", {"status"}); }

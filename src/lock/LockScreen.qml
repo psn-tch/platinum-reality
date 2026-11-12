@@ -1,8 +1,12 @@
 import QtQuick
 
 // Mac OS 9.2.2-style Log In dialog (Multiple Users), drawn as an original Platinum adaptation.
-// One window per screen. The dialog shows where the keyboard is (the compositor chooses), so
-// typing never goes to a field on another screen; until a screen has it, every screen shows it.
+// One window per screen, each with the dialog. The compositor gives the keyboard to one of them
+// and keeps it there (Sway: the first lock window to appear, often the laptop panel on waking
+// at a dock, and a click never moves it), so the fields share lock.entry: whichever window
+// takes the keys, every screen shows the typing and any screen's Log In button submits it.
+// (Until 2026-11-11 only the keyboard's screen had a dialog: at a dock the monitor in use
+// showed just the desktop picture while the password went blind into the laptop panel.)
 Rectangle {
     id: screen
     objectName: "lock-screen"
@@ -21,11 +25,6 @@ Rectangle {
     Rectangle {
         id: dialog
         objectName: "login-dialog"
-        visible: screen.Window.active || !lock.keyboardOnLock
-        // Hiding takes the field's keyboard focus away, and showing it again does not give it
-        // back: as the keyboard arrives, keyboardOnLock can flip before this window is active,
-        // hiding the dialog for a moment. Typing then went nowhere (seen 2026-10-29).
-        onVisibleChanged: if (visible) password.forceActiveFocus()
         width: 440; height: lock.loginMode ? 270 : 236
         anchors.centerIn: parent
         color: "#dddddd"
@@ -120,8 +119,12 @@ Rectangle {
                     readOnly: !lock.ready || lock.busy
                     focus: true
                     clip: true
+                    // Typing changes text without breaking this binding; lock.entry then
+                    // carries it to the other screens' fields.
+                    text: lock.entry
+                    onTextEdited: lock.entry = text
                     onAccepted: login()
-                    Keys.onEscapePressed: clear()
+                    Keys.onEscapePressed: lock.entry = ""
                 }
             }
             Text {
@@ -243,8 +246,8 @@ Rectangle {
     }
 
     function login() {
-        if (lock.submit(password.text))
-            password.text = ""
+        if (lock.submit(lock.entry))
+            lock.entry = ""
     }
     Connections {
         target: lock

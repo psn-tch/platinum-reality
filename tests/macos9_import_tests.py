@@ -196,6 +196,10 @@ class ImporterTests(unittest.TestCase):
                          [(1, 'SimpleBeep', b'abc'), (515, 'mnuo', b'xy')])
         self.assertEqual(list(importer.resources(blob, b'icns')), [])
 
+    def test_the_rainbow_apple_is_one_of_the_icons(self):
+        # The System file's 'icns' -16386 is the Apple menu's title; the menu bar reads apple-menu-16.png.
+        self.assertEqual(importer.ICONS[-16386], 'apple-menu')
+
     def test_palette_is_the_mac_system_palette(self):
         palette = importer.mac_palette()
         self.assertEqual((len(palette), palette[0], palette[214], palette[215], palette[245], palette[255]),

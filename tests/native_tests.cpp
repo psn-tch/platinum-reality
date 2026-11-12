@@ -18,6 +18,8 @@
 #include "desktop/surface_client.hpp"
 #include "desktop/screenshot_service.hpp"
 #include "desktop/system_controls.hpp"
+#include "fake_bluez.hpp"
+#include "fake_iwd.hpp"
 #include "desktop/view_lifecycle.hpp"
 #include "desktop/graphics_integration.hpp"
 #include "desktop/host_pointer.hpp"
@@ -41,6 +43,7 @@
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
 #include <QDBusReply>
+#include <QDirIterator>
 #include <QJSValue>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -6356,6 +6359,88 @@ class NativeTests : public QObject
         QVERIFY2(!ids.contains("handheld"), qPrintable(ids.join(' ')));
         QCOMPARE(ids.indexOf("keyboard"), ids.indexOf("general") + 1);
     }
+    void aPasswordBoxKeepsTheControlPanelThatAskedBeneathIt()
+    {
+        // Lily Hewitt, 2026-11-11: adding a fingerprint put up the password box, and the Fingerprints
+        // window hid behind everything else. The window that asked now waits just beneath the box,
+        // above other applications, and comes forward again when the box closes, unless another
+        // application was brought forward meanwhile. The polkit agent is a copy of the probe.
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager = *scene.manager;
+        QTemporaryDir agentDirectory;
+        const auto agent = agentDirectory.filePath("fake-polkit-agent");
+        QVERIFY(QFile::copy(QCoreApplication::applicationDirPath() + "/native-probe", agent));
+        QVERIFY(QFile::setPermissions(agent, QFile::ReadOwner | QFile::ExeOwner));
+        manager.setAuthenticationAgents({agent});
+        QList<QProcess *> processes;
+        const auto stop = qScopeGuard([&] {
+            for (auto *process : processes)
+                if (process->state() != QProcess::NotRunning) { process->kill(); process->waitForFinished(3000); }
+        });
+        const auto run = [&](const QString &program, const QString &label)
+        {
+            auto *process = new QProcess(&scene.view);
+            processes << process;
+            process->setProcessEnvironment(scene.childEnvironment());
+            process->start(program, {label});
+            return process;
+        };
+        run(QCoreApplication::applicationDirPath() + "/native-probe", "Behind");
+        QTRY_VERIFY(first(manager, "Native Probe Behind").value("active").toBool());
+        QVERIFY(!first(manager, "Native Probe Behind").value("authentication").toBool());
+        QVERIFY(QMetaObject::invokeMethod(scene.view.rootObject(), "dispatchShellCommand",
+            Q_ARG(QVariant, QVariant("fingerprints")), Q_ARG(QVariant, QVariant(0))));
+        auto *panels = visualItem(scene.view.contentItem(), "control-panels-window");
+        QVERIFY(panels);
+        QTRY_VERIFY(panels->isVisible() && panels->hasActiveFocus() && manager.desktopActive());
+        const auto passwordBox = [&](const QString &label, bool switchAway)
+        {
+            auto *box = run(agent, label);
+            const auto title = "Native Probe " + label;
+            QTRY_VERIFY(first(manager, title).value("active").toBool());
+            QVERIFY(first(manager, title).value("authentication").toBool());
+            QTRY_COMPARE(manager.authenticationLayer(), first(manager, title).value("layer").toInt());
+            // Beneath the box, above the other application.
+            QTRY_COMPARE(panels->z(), manager.authenticationLayer() - 0.5);
+            QVERIFY(panels->z() > first(manager, "Native Probe Behind").value("layer").toInt());
+            QVERIFY(panels->isVisible());
+            // The agent is an application of the session, but the application menu and Command-Tab
+            // list it only while its box is in front (Lily Hewitt, 2026-11-11).
+            const auto listedAgents = [&] {
+                QVariant listed;
+                QMetaObject::invokeMethod(scene.view.rootObject(), "applicationsByName", Q_RETURN_ARG(QVariant, listed));
+                int agents = 0;
+                for (const auto &application : listed.toList()) agents += application.toMap().value("agent").toBool();
+                return agents;
+            };
+            QVERIFY(std::any_of(manager.applications().cbegin(), manager.applications().cend(),
+                                [](const QVariant &a) { return a.toMap().value("agent").toBool(); }));
+            QCOMPARE(listedAgents(), 1);
+            if (switchAway)
+            {
+                manager.activate(first(manager, "Native Probe Behind").value("id").toULongLong());
+                QTRY_VERIFY(first(manager, "Native Probe Behind").value("active").toBool());
+                QTRY_COMPARE(panels->z(), 0.75); // Behind, as for any other application coming forward.
+                QCOMPARE(listedAgents(), 0);
+            }
+            QDBusInterface("org.frankenstein.NativeProbe" + label, "/Probe", "org.frankenstein.NativeProbe").call("Finish");
+            QTRY_COMPARE(box->state(), QProcess::NotRunning);
+            QTRY_VERIFY(first(manager, title).isEmpty());
+            QTRY_COMPARE(manager.authenticationLayer(), 0);
+        };
+        passwordBox("Password", false);
+        // The box closed: the panel is in front with the keyboard again.
+        QTRY_VERIFY(panels->hasActiveFocus() && manager.desktopActive());
+        QTRY_VERIFY(panels->z() >= 3990);
+        QVERIFY(capture(scene.view, "password-box-closed-panel-in-front.png"));
+        // Brought forward meanwhile, the other application keeps the front.
+        passwordBox("PasswordAgain", true);
+        QTest::qWait(500);
+        QVERIFY(first(manager, "Native Probe Behind").value("active").toBool());
+        QVERIFY(!manager.desktopActive());
+        QCOMPARE(panels->z(), 0.75);
+    }
     void fixedSizeWindowsTooBigForTheScreenAreShownFullScreen()
     {
         // Lily Hewitt, 2026-10-22 (Daggerfall Unity's launcher): a window whose client fixed its size too
@@ -10175,6 +10260,306 @@ class NativeTests : public QObject
         QTRY_COMPARE(manager.rowCount(), 0);
         QVERIFY(manager.desktopActive());
         QCOMPARE(manager.applications().size(), 1);
+    }
+    void showcase()
+    {
+        // Pictures for the README (Lily Hewitt, 2026-11-11): a fresh account with Mac OS 9.2.2's
+        // icons, cursors and sounds imported, and nothing personal. Runs only when asked:
+        //   PLATINUM_SHOWCASE_DIR=<folder> PLATINUM_SHOWCASE_ASSETS=<imported assets folder>
+        const auto out = qEnvironmentVariable("PLATINUM_SHOWCASE_DIR");
+        const auto assets = qEnvironmentVariable("PLATINUM_SHOWCASE_ASSETS");
+        if (out.isEmpty() || !QFileInfo(assets).isDir())
+            QSKIP("Set PLATINUM_SHOWCASE_DIR and PLATINUM_SHOWCASE_ASSETS to take the README pictures");
+        QVERIFY(QDir().mkpath(out));
+        // Without imported files (an empty folder), the same pictures show the original artwork.
+        const auto collection = QString("platinum-reality/assets/desktop-pictures/Ensemble Pictures");
+        const bool imported = QDir(assets).exists("desktop-pictures/Ensemble Pictures");
+        // The desktop and its applications read the imported assets from <data>/platinum-reality/assets.
+        // PLATINUM_SHOWCASE_DISK names a home folder for the paths the pictures show (an empty
+        // /home/you in a private mount); the imported assets go in its ~/.local/share.
+        QTemporaryDir temporary;
+        const auto home = qEnvironmentVariable("PLATINUM_SHOWCASE_DISK");
+        const QDir data(home.isEmpty() ? temporary.path() : home + "/.local/share");
+        QDirIterator files(assets, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+        while (files.hasNext())
+        {
+            const auto from = files.next();
+            const auto to = data.filePath("platinum-reality/assets/" + QDir(assets).relativeFilePath(from));
+            QVERIFY(QDir().mkpath(QFileInfo(to).path()) && QFile::copy(from, to));
+        }
+        const auto previousData = qgetenv("XDG_DATA_HOME");
+        qputenv("XDG_DATA_HOME", data.path().toUtf8());
+        const auto restoreData = qScopeGuard([&] { qputenv("XDG_DATA_HOME", previousData); });
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager = *scene.manager;
+        auto *root = scene.view.rootObject();
+        auto environment = scene.childEnvironment();
+        environment.insert("XDG_DATA_HOME", data.path());
+        environment.insert("PLATINUM_PERSONAL_ASSETS", data.filePath("platinum-reality/assets"));
+        QList<QProcess *> processes;
+        const auto stop = qScopeGuard([&] {
+            for (auto *process : processes)
+                if (process->state() != QProcess::NotRunning) { process->kill(); process->waitForFinished(3000); }
+        });
+        const auto start = [&](const QString &program, const QStringList &arguments)
+        {
+            auto *process = new QProcess(&scene.view);
+            processes << process;
+            process->setProcessEnvironment(environment);
+            process->start(QCoreApplication::applicationDirPath() + "/" + program, arguments);
+            return process;
+        };
+        const auto shot = [&](const QString &name)
+        {
+            QTest::qWait(700); // Animations, icons and client frames settle.
+            // The rainbow Apple reloads when the menu bar is rebuilt (a new active application).
+            QTRY_VERIFY(!imported || [&] {
+                auto *emblem = visualItem(scene.view.contentItem(), "menu-emblem");
+                return emblem && emblem->isVisible() && emblem->property("status").toInt() == 1;
+            }());
+            QVERIFY2(scene.view.grabWindow().save(out + "/" + name + ".png"), qPrintable(name));
+        };
+        const auto pointAt = [&](const QString &name)
+        {
+            auto *item = visualItem(scene.view.contentItem(), name);
+            return item ? item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint() : QPoint();
+        };
+        // A plain disk: the folders a new account has, and a few documents.
+        const auto disk = home.isEmpty() ? scene.files.path() + "/Macintosh HD" : home;
+        for (const auto *folder : {"Applications", "Documents", "Music", "Pictures", "System Folder"})
+            QVERIFY(QDir().mkpath(disk + "/" + folder));
+        for (const auto *file : {"Documents/Read Me.txt", "Documents/Shopping List.txt", "Documents/Letter.txt"})
+        {
+            QFile document(disk + "/" + file);
+            QVERIFY(document.open(QIODevice::WriteOnly));
+            document.write("Platinum Reality\n");
+        }
+        start("frankenstein-finder", {"--root", disk, "--profile", scene.files.path() + "/finder-profile"});
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager, "Hard Disk").isEmpty(), 10000);
+        shot("01-desktop");
+
+        // The Apple menu with Control Panels open.
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, pointAt("bar-entry-0"));
+        QTRY_COMPARE(root->property("openMenu").toInt(), 0);
+        QTest::mouseMove(&scene.view, pointAt("desktop-command-control-panels"));
+        QTRY_VERIFY(root->property("openSubmenu").toInt() >= 0);
+        shot("02-apple-menu");
+        QTest::keyClick(&scene.view, Qt::Key_Escape);
+        QTRY_COMPARE(root->property("openMenu").toInt(), -1);
+
+        const auto command = [&](const QString &action)
+        {
+            QVERIFY(QMetaObject::invokeMethod(root, "dispatchShellCommand", Q_ARG(QVariant, QVariant(action)),
+                                              Q_ARG(QVariant, QVariant(0))));
+        };
+        const auto closeShellWindow = [&](const QString &name)
+        {
+            auto *window = visualItem(scene.view.contentItem(), name);
+            QVERIFY2(window, qPrintable(name));
+            QVERIFY(QMetaObject::invokeMethod(window, "close"));
+            QTRY_VERIFY(!window->isVisible());
+        };
+        // A laptop's radios and screen, as stand-ins on the private session bus (this computer has none):
+        // Wi-Fi networks, Bluetooth devices, brightness and volume.
+        auto iwdBus = QDBusConnection::connectToBus(QDBusConnection::SessionBus, "showcase-iwd");
+        auto bluezBus = QDBusConnection::connectToBus(QDBusConnection::SessionBus, "showcase-bluez");
+        auto client = QDBusConnection::connectToBus(QDBusConnection::SessionBus, "showcase-client");
+        const auto disconnect = qScopeGuard([] {
+            for (const auto *name : {"showcase-iwd", "showcase-bluez", "showcase-client"})
+                QDBusConnection::disconnectFromBus(name);
+        });
+        FakeIwd iwd(iwdBus);
+        iwd.addNetwork("Home", "psk", -4500, true, true);
+        iwd.addNetwork("Platinum Café", "open", -6200);
+        iwd.addNetwork("Library", "8021x", -7000);
+        iwd.addNetwork("Upstairs", "psk", -7800);
+        FakeBluez bluez(bluezBus);
+        bluez.addDevice("AA:00:00:00:00:01", "Wireless Headphones", "audio-headset", true, true, true, 80);
+        bluez.addDevice("AA:00:00:00:00:02", "Bluetooth Mouse", "input-mouse", true, true, true, 60);
+        bluez.addDevice("AA:00:00:00:00:03", "Game Controller", "input-gaming", true, true, false);
+        bluez.change(FakeBluez::adapter, "org.bluez.Adapter1", "Alias", "Platinum Reality");
+        QVERIFY(iwdBus.registerVirtualObject("/", &iwd, QDBusConnection::SubPath) && iwdBus.registerService("net.connman.iwd"));
+        QVERIFY(bluezBus.registerVirtualObject("/", &bluez, QDBusConnection::SubPath) && bluezBus.registerService("org.bluez"));
+        WifiService wifi(client);
+        BluetoothService bluetooth(client);
+        QFile controlsScript(scene.files.path() + "/showcase-controls.py");
+        QVERIFY(controlsScript.open(QIODevice::WriteOnly));
+        controlsScript.write("import json\nprint(json.dumps({'error':'','state':{'volume':{'available':True,'value':70,"
+                             "'muted':False},'brightness':{'available':True,'value':80},"
+                             "'wifi':{'available':True,'enabled':True,'backend':'iwd'},"
+                             "'bluetooth':{'available':True,'enabled':True}}}))\n");
+        controlsScript.close();
+        SystemControls controls(controlsScript.fileName());
+        const auto substitute = [&](const char *name, QObject *service)
+        {
+            auto *item = root->findChild<QObject *>(name);
+            QVERIFY2(item && item->setProperty("service", QVariant::fromValue(service)), name);
+        };
+        substitute("wifi-alert", &wifi);
+        substitute("bluetooth-panel", &bluetooth);
+        substitute("quick-controls", &controls);
+        // Back to the session's own before these stack-owned stand-ins go.
+        const auto unbind = qScopeGuard([&] {
+            root->findChild<QObject *>("wifi-alert")->setProperty("service", QVariant::fromValue(manager.wifi()));
+            root->findChild<QObject *>("bluetooth-panel")->setProperty("service", QVariant::fromValue(manager.bluetooth()));
+            root->findChild<QObject *>("quick-controls")->setProperty("service", QVariant::fromValue(manager.systemControls()));
+        });
+
+        // Control Panels: one window, each panel restyled after its 9.2.2 original.
+        auto *panels = visualItem(scene.view.contentItem(), "control-panels-window");
+        QVERIFY(panels);
+        // Not Network: it lists this computer's own addresses.
+        for (const auto *panel : {"appearance", "sound", "monitors", "general", "date-time", "energy",
+                                  "desktop-picture", "fingerprints", "keyboard", "mouse", "bluetooth"})
+        {
+            QVERIFY(QMetaObject::invokeMethod(panels, "show", Q_ARG(QVariant, QVariant(panel))));
+            QTRY_VERIFY(panels->isVisible() && panels->property("current").toString() == panel);
+            if (QString(panel) == "sound") // The imported alert sounds, not this computer's devices.
+                QTest::mouseClick(&scene.view, Qt::LeftButton, {}, pointAt("sound-tab-alerts"));
+            if (QString(panel) == "desktop-picture" && imported)
+            {
+                // The imported 9.2.2 collection, with one of its pictures previewed (not set).
+                auto *pictures = visualItem(scene.view.contentItem(), "desktop-picture-dialog");
+                QVERIFY(pictures);
+                QVERIFY(QMetaObject::invokeMethod(pictures, "showFolder",
+                                                  Q_ARG(QVariant, QVariant(data.filePath(collection)))));
+                QTRY_VERIFY(pictures->property("pictureRows").toList().size() > 6);
+                QVERIFY(QMetaObject::invokeMethod(pictures, "selectPicture", Q_ARG(QVariant, QVariant(6))));
+                QTest::qWait(1500);
+            }
+            shot(QString("03-control-panels-") + panel);
+        }
+        closeShellWindow("control-panels-window");
+
+        // Control Strip modules open as menus, as in 9.2.2.
+        for (const auto *module : {"appearance", "energy", "monitors", "wifi", "applications", "bluetooth"})
+        {
+            const auto at = pointAt(QString("control-strip-") + module);
+            if (at.isNull())
+                continue;
+            QTest::mouseClick(&scene.view, Qt::LeftButton, {}, at);
+            QTRY_VERIFY(!root->property("stripModule").toString().isEmpty());
+            shot(QString("04-control-strip-") + module);
+            QTest::keyClick(&scene.view, Qt::Key_Escape);
+            QTRY_VERIFY(root->property("stripModule").toString().isEmpty());
+        }
+        QTest::mouseMove(&scene.view, QPoint(900, 400)); // No module's name tag in the next pictures.
+
+        command("about");
+        QTRY_VERIFY(visualItem(scene.view.contentItem(), "about-computer-window")->isVisible());
+        shot("05-about-this-computer");
+        closeShellWindow("about-computer-window");
+
+        // The desk accessories together, with a sticky note, laid out side by side.
+        manager.closeWindow(first(manager, "Hard Disk").value("id").toULongLong());
+        QTRY_VERIFY(first(manager, "Hard Disk").isEmpty());
+        for (const auto &[accessory, window, x, y] :
+             {std::tuple{"note-pad", "note-pad-window", 40, 420}, std::tuple{"scrapbook", "scrapbook-window", 330, 390},
+              std::tuple{"key-caps", "key-caps-window", 300, 60}, std::tuple{"calculator", "calculator-window", 40, 60}})
+        {
+            command(accessory);
+            auto *item = visualItem(scene.view.contentItem(), window);
+            QVERIFY2(item, window);
+            QTRY_VERIFY(item->isVisible());
+            item->setPosition(QPointF(x, y));
+        }
+        // A picture from the imported collection in the Scrapbook.
+        auto *scrapbook = manager.property("scrapbook").value<QObject *>();
+        QVERIFY(scrapbook);
+        if (imported)
+        {
+            bool kept = false;
+            QVERIFY(QMetaObject::invokeMethod(scrapbook, "addPicture", Q_RETURN_ARG(bool, kept), Q_ARG(QUrl,
+                QUrl::fromLocalFile(data.filePath(collection + "/Blueberry Oxygen.jpg"))), Q_ARG(int, 0)));
+            QVERIFY(kept);
+        }
+        for (const auto *key : {"1", "9", "9", "9"})
+            QTest::mouseClick(&scene.view, Qt::LeftButton, {}, pointAt(QString("calculator-key-") + key));
+        auto *notePad = visualItem(scene.view.contentItem(), "note-pad-text");
+        QVERIFY(notePad);
+        notePad->setProperty("text", "Things to do\n\n- Pick a desktop picture\n- Try Key Caps with Option held\n"
+                                     "- Roll up a window with a double-click\n- Find something in the App Store");
+        auto *stickies = manager.property("stickies").value<QObject *>();
+        QVERIFY(stickies);
+        QList<int> notes;
+        for (const auto &[x, y, color, text] :
+             {std::tuple{790, 410, "yellow", "Welcome to Platinum Reality!"},
+              std::tuple{830, 495, "pink", "Stickies stay where you leave them."}})
+        {
+            int note = 0;
+            QVERIFY(QMetaObject::invokeMethod(stickies, "create", Q_RETURN_ARG(int, note), Q_ARG(int, x), Q_ARG(int, y),
+                                              Q_ARG(QString, color)));
+            QVERIFY(note > 0);
+            notes << note;
+            // A note reads its text once, as it appears; then it is typed into, as here.
+            QTRY_VERIFY(visualItem(scene.view.contentItem(), "sticky-text-" + QString::number(note)));
+            visualItem(scene.view.contentItem(), "sticky-text-" + QString::number(note))->setProperty("text", text);
+        }
+        shot("06-desk-accessories");
+        for (const auto *window : {"calculator-window", "key-caps-window", "note-pad-window", "scrapbook-window"})
+            closeShellWindow(window);
+
+        // The App Store, on this computer's own package catalog (PLATINUM_PACKAGES_HELPER: a helper
+        // that is not installed yet).
+        start("platinum-app-store", {});
+        QVERIFY(QMetaObject::invokeMethod(stickies, "setHidden", Q_ARG(bool, true)));
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager, "App Store").isEmpty(), 15000);
+        QTest::qWait(6000); // The catalog loads in the background.
+        shot("07-app-store");
+        // Find a program and show what it is: the Find field has the keyboard.
+        for (const auto character : QString("firefox"))
+            QTest::keyClick(&scene.view, character.toLatin1());
+        QTest::qWait(1500);
+        const auto store = first(manager, "App Store");
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {},
+                          QPoint(store.value("x").toInt() + 120, store.value("y").toInt() + 118));
+        shot("07-app-store-firefox");
+        manager.closeWindow(first(manager, "App Store").value("id").toULongLong());
+        QTRY_VERIFY(first(manager, "App Store").isEmpty());
+
+        // The Installer, with the test engine's disks (PLATINUM_SHOWCASE_SOURCE: this source tree).
+        const auto source = qEnvironmentVariable("PLATINUM_SHOWCASE_SOURCE");
+        if (!source.isEmpty())
+        {
+            const auto share = scene.files.path() + "/installer-share";
+            QVERIFY(QDir().mkpath(share));
+            QVERIFY(QFile::copy(source + "/packaging/installer/ReadMe.txt", share + "/ReadMe.txt"));
+            QVERIFY(QFile::copy(source + "/LICENSE", share + "/LICENSE"));
+            start("platinum-reality-installer", {"--engine", source + "/tests/fake_install_engine.py", "--share", share});
+            QTRY_VERIFY_WITH_TIMEOUT(manager.rowCount() >= 1 && manager.activeWindowId() != 0, 15000);
+            shot("08-installer-1");
+            for (int page = 2; page <= 4; ++page)
+            {
+                QTest::keyClick(&scene.view, Qt::Key_Return);
+                QTest::qWait(1500);
+                shot(QString("08-installer-%1").arg(page));
+            }
+            manager.closeWindow(manager.activeWindowId());
+            QTest::qWait(500);
+        }
+
+        // Everything together: Finder windows, About This Computer, the notes and the Apple menu.
+        QVERIFY(QMetaObject::invokeMethod(stickies, "setHidden", Q_ARG(bool, false)));
+        // One note, clear of the windows.
+        QVERIFY(QMetaObject::invokeMethod(stickies, "move", Q_ARG(int, notes[0]), Q_ARG(int, 790), Q_ARG(int, 60)));
+        QVERIFY(QMetaObject::invokeMethod(stickies, "remove", Q_ARG(int, notes[1])));
+        start("frankenstein-finder", {"--root", disk, "--profile", scene.files.path() + "/finder-profile"});
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager, "Hard Disk").isEmpty(), 10000);
+        start("frankenstein-finder", {"--root", disk, "--profile", scene.files.path() + "/finder-profile",
+                                      "--open", disk + "/Documents"});
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager, "Documents").isEmpty(), 10000);
+        command("about");
+        auto *about = visualItem(scene.view.contentItem(), "about-computer-window");
+        QTRY_VERIFY(about->isVisible());
+        about->setPosition(QPointF(470, 300));
+        shot("09-hero");
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, pointAt("bar-entry-0"));
+        QTRY_COMPARE(root->property("openMenu").toInt(), 0);
+        QTest::mouseMove(&scene.view, pointAt("desktop-command-control-panels"));
+        QTRY_VERIFY(root->property("openSubmenu").toInt() >= 0);
+        shot("09-hero-apple-menu");
+        QTest::keyClick(&scene.view, Qt::Key_Escape);
     }
 };
 int main(int argc, char **argv)

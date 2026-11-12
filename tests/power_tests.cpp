@@ -30,6 +30,24 @@ class FakeLogind final : public QObject, protected QDBusContext
     }
 };
 
+// logind's own session ("auto": the caller's), whose Lock Special ▸ Lock Screen asks for.
+class FakeSession final : public QObject, protected QDBusContext
+{
+    Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.freedesktop.login1.Session")
+  public:
+    int locks = 0;
+    QString refusal;
+
+  public slots:
+    void Lock()
+    {
+        ++locks;
+        if (!refusal.isEmpty())
+            sendErrorReply("org.freedesktop.DBus.Error.AccessDenied", refusal);
+    }
+};
+
 class PowerTests : public QObject
 {
     Q_OBJECT
@@ -81,10 +99,33 @@ class PowerTests : public QObject
         QDBusConnection::disconnectFromBus("logind");
         QDBusConnection::disconnectFromBus("desktop");
     }
+    void lockScreenAsksLogindToLockThisSession()
+    {
+        auto service = QDBusConnection::connectToBus(address, "logind");
+        FakeSession session;
+        QVERIFY(service.registerObject("/org/freedesktop/login1/session/auto", &session, QDBusConnection::ExportAllSlots));
+        QVERIFY(service.registerService("org.freedesktop.login1"));
+        PowerControl power(QDBusConnection::connectToBus(address, "desktop"));
+        QSignalSpy finished(&power, &PowerControl::finished);
+        QSignalSpy failed(&power, &PowerControl::lockFailed);
+        QVERIFY(power.lockSession());
+        QTRY_COMPARE(session.locks, 1);
+        // Locking is not a power request: nothing waits on it.
+        QVERIFY(!power.busy());
+        session.refusal = "Not allowed.";
+        QVERIFY(power.lockSession());
+        QTRY_COMPARE(failed.count(), 1);
+        QCOMPARE(failed.first().first().toString(), QString("The screen could not be locked. Not allowed."));
+        QCOMPARE(finished.count(), 0);
+        service.unregisterService("org.freedesktop.login1");
+        QDBusConnection::disconnectFromBus("logind");
+        QDBusConnection::disconnectFromBus("desktop");
+    }
     void withoutABusNothingIsRequested()
     {
         PowerControl power{QDBusConnection(QString())};
         QVERIFY(!power.available());
+        QVERIFY(!power.lockSession());
         QVERIFY(!power.request(PowerControl::Action::ShutDown));
         QVERIFY(!power.busy());
     }

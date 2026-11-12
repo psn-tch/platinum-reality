@@ -63,6 +63,12 @@ platinum_wayland_protocol(ext-session-lock ${WAYLAND_PROTOCOLS_DIR}/staging/ext-
 platinum_wayland_protocol(wlr-virtual-pointer ${CMAKE_CURRENT_SOURCE_DIR}/tests/protocols/wlr-virtual-pointer-unstable-v1.xml)
 # Test driver only; see the header of the file (checked against libwlroots-0.20).
 platinum_wayland_protocol(virtual-keyboard ${CMAKE_CURRENT_SOURCE_DIR}/tests/protocols/virtual-keyboard-unstable-v1.xml)
+# Test tool only (output-capture): screen captures without grim.
+platinum_wayland_protocol(ext-image-capture-source ${WAYLAND_PROTOCOLS_DIR}/staging/ext-image-capture-source/ext-image-capture-source-v1.xml)
+platinum_wayland_protocol(ext-image-copy-capture ${WAYLAND_PROTOCOLS_DIR}/staging/ext-image-copy-capture/ext-image-copy-capture-v1.xml)
+platinum_wayland_protocol(xdg-output ${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-output/xdg-output-unstable-v1.xml)
+# ext-image-capture-source refers to its toplevel handles.
+platinum_wayland_protocol(ext-foreign-toplevel-list ${WAYLAND_PROTOCOLS_DIR}/staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml)
 add_library(frankenstein-desktop src/desktop/manager.cpp src/desktop/manager.hpp src/desktop/desktop_items.cpp src/desktop/desktop_items.hpp src/desktop/client_surface_item.cpp src/desktop/client_surface_item.hpp src/desktop/menu_bridge.cpp src/desktop/menu_bridge.hpp src/desktop/menu_broker.cpp src/desktop/menu_broker.hpp ${CMAKE_CURRENT_BINARY_DIR}/appmenu-server.h ${CMAKE_CURRENT_BINARY_DIR}/appmenu-protocol.c)
 target_sources(frankenstein-desktop PRIVATE src/desktop/document_service.cpp src/desktop/document_service.hpp)
 target_sources(frankenstein-desktop PRIVATE src/desktop/asset_importer.cpp src/desktop/asset_importer.hpp)
@@ -450,6 +456,15 @@ if(BUILD_TESTING)
     target_include_directories(virtual-keyboard-driver PRIVATE ${PLATINUM_PROTOCOLS})
     target_link_libraries(virtual-keyboard-driver PRIVATE PkgConfig::WAYLAND_CLIENT PkgConfig::XKBCOMMON)
     target_compile_options(virtual-keyboard-driver PRIVATE -Wall -Wextra -Wpedantic)
+    add_executable(output-capture tests/output_capture.c
+                   ${PLATINUM_PROTOCOLS}/ext-image-capture-source-client.h ${PLATINUM_PROTOCOLS}/ext-image-capture-source-protocol.c
+                   ${PLATINUM_PROTOCOLS}/ext-image-copy-capture-client.h ${PLATINUM_PROTOCOLS}/ext-image-copy-capture-protocol.c
+                   ${PLATINUM_PROTOCOLS}/xdg-output-client.h ${PLATINUM_PROTOCOLS}/xdg-output-protocol.c
+                   ${PLATINUM_PROTOCOLS}/ext-foreign-toplevel-list-protocol.c)
+    set_target_properties(output-capture PROPERTIES AUTOMOC OFF)
+    target_include_directories(output-capture PRIVATE ${PLATINUM_PROTOCOLS})
+    target_link_libraries(output-capture PRIVATE PkgConfig::WAYLAND_CLIENT m)
+    target_compile_options(output-capture PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME lock-session COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/lock_session_tests.py)
     set_tests_properties(lock-session PROPERTIES ENVIRONMENT "FRANKENSTEIN_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}"
                          TIMEOUT 120)

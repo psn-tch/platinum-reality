@@ -19,9 +19,13 @@ class PowerControl final : public QObject
     }
     // False when unavailable or a request is already waiting for its answer.
     bool request(Action action);
+    // Special ▸ Lock Screen: asks logind to lock this session (as `loginctl lock-session`); the
+    // session's idle helper starts the Platinum lock, the same as Control-Option-L.
+    bool lockSession();
 
   signals:
     void finished(bool ok, QString error);
+    void lockFailed(QString error);
 
   private:
     QDBusConnection m_bus;

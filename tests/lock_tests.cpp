@@ -256,6 +256,58 @@ class LockTests final : public QObject
         QCOMPARE(message->property("text").toString(), QString("Logging in…"));
     }
 
+    void everyScreenShowsTheTypingAndCanLogIn()
+    {
+        // The compositor keeps the keyboard on one screen's lock window, which may not be the one
+        // in use (a laptop panel on waking at a dock, 2026-11-11): each screen's dialog shows it.
+        TestPam pam;
+        QVERIFY(pam.ready());
+        Authenticator authenticator("platinum-lock-test", "tester", pam.confdir());
+        LockController controller(&authenticator, "Lily Hewitt", {}, {});
+        controller.setReady(true);
+        QSignalSpy authenticated(&controller, &LockController::authenticated);
+        QSignalSpy rejected(&controller, &LockController::rejected);
+        QQuickView panel, monitor;
+        for (auto *view : {&panel, &monitor})
+        {
+            view->rootContext()->setContextProperty("lock", &controller);
+            view->setResizeMode(QQuickView::SizeRootObjectToView);
+            view->resize(1024, 700);
+            view->setSource(QUrl("qrc:/lock/src/lock/LockScreen.qml"));
+            QCOMPARE(view->status(), QQuickView::Ready);
+            view->show();
+            QVERIFY(QTest::qWaitForWindowExposed(view));
+        }
+        const auto item = [](QQuickView &view, const char *name)
+        { return view.rootObject()->findChild<QQuickItem *>(name); };
+        QVERIFY(item(panel, "login-dialog")->isVisible());
+        QVERIFY(item(monitor, "login-dialog")->isVisible());
+
+        // Keys reach only the panel (the compositor's choice); the monitor's field shows the same typing.
+        panel.requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(&panel));
+        QTRY_VERIFY(item(panel, "login-password")->hasActiveFocus());
+        type(&panel, "wrong horse");
+        QCOMPARE(item(monitor, "login-password")->property("text").toString(), QString("wrong horse"));
+        // The monitor's Log In button submits what was typed on the panel, and both clear.
+        QTest::mouseClick(&monitor, Qt::LeftButton, {},
+                          item(monitor, "login-button")->mapToScene(QPointF(10, 10)).toPoint());
+        QCOMPARE(item(panel, "login-password")->property("text").toString(), QString());
+        QCOMPARE(item(monitor, "login-password")->property("text").toString(), QString());
+        QTRY_COMPARE(rejected.size(), 1);
+        QVERIFY(authenticated.isEmpty());
+
+        // Escape clears every screen's field.
+        type(&panel, "oops");
+        QCOMPARE(item(monitor, "login-password")->property("text").toString(), QString("oops"));
+        QTest::keyClick(&panel, Qt::Key_Escape);
+        QCOMPARE(item(monitor, "login-password")->property("text").toString(), QString());
+
+        type(&panel, "correct horse");
+        QTest::keyClick(&panel, Qt::Key_Return);
+        QTRY_COMPARE(authenticated.size(), 1);
+    }
+
     void fingerprintUnlocksOnlyOnTheReadersOwnMatch()
     {
         if (!busReady())

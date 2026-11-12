@@ -37,6 +37,7 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QSignalSpy>
+#include <memory>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -1220,6 +1221,60 @@ class DesktopTests : public QObject
                              root.path() + "/software-update.json");
         QVERIFY(again.automatic());
     }
+    void softwareUpdateChecksAfterInstallingUntilTheNetworkAnswers()
+    {
+        // A stand-in for platinum-software-update: offline first, then GitHub has 99.0-1.
+        QTemporaryDir root;
+        const auto client = root.path() + "/client.py", online = root.path() + "/online";
+        {
+            QFile script(client);
+            QVERIFY(script.open(QIODevice::WriteOnly));
+            script.write("import json, os, sys\n"
+                         "if sys.argv[1] == 'status': print(json.dumps({'installed': '0.46-1'})); sys.exit(0)\n"
+                         "if not os.path.exists(" + QByteArray("'") + online.toUtf8() + "'):\n"
+                         "    print(json.dumps({'error': 'GitHub could not be reached (offline).'})); sys.exit(1)\n"
+                         "print(json.dumps({'installed': '0.46-1', 'available': {'version': '99.0-1', 'tag': 'v99.0',"
+                         " 'date': '2026-11-12T00:00:00Z', 'notes': 'Newer.', 'size': 1}}))\n");
+        }
+        const auto settings = root.path() + "/software-update.json";
+        const auto pending = [&] {
+            QFile file(settings);
+            return file.open(QIODevice::ReadOnly) && QJsonDocument::fromJson(file.readAll()).object().value("checkPending").toBool();
+        };
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.path() + "/profile", {});
+        auto service = std::make_unique<SoftwareUpdate>(client, root.path() + "/keys.gpg", settings);
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY2(view.status() != QQuickView::Error,
+                 qPrintable(view.errors().isEmpty() ? QString() : view.errors().first().toString()));
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        auto *window = view.rootObject()->findChild<QObject *>("software-update-window");
+        QVERIFY(window && window->setProperty("service", QVariant::fromValue(static_cast<QObject *>(service.get()))));
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        // Offline: the check fails quietly, stays pending, and nothing opens.
+        service->checkAfterInstall();
+        QTRY_VERIFY_WITH_TIMEOUT(!service->busy(), 20000);
+        QVERIFY(service->error().isEmpty());
+        QVERIFY(pending());
+        QVERIFY(!visualItem(view.contentItem(), "software-update-window")->isVisible());
+        // Still pending after logging out and in again.
+        service = std::make_unique<SoftwareUpdate>(client, root.path() + "/keys.gpg", settings);
+        QVERIFY(window->setProperty("service", QVariant::fromValue(static_cast<QObject *>(service.get()))));
+        QVERIFY(pending());
+        // Online: the check answers, the window shows the newer release, and the check is done.
+        QFile(online).open(QIODevice::WriteOnly);
+        QSignalSpy found(service.get(), &SoftwareUpdate::updateFound);
+        service->checkAfterInstall();
+        QTRY_COMPARE_WITH_TIMEOUT(found.count(), 1, 20000);
+        QCOMPARE(found.first().first().toString(), QString("99.0-1"));
+        QTRY_VERIFY_WITH_TIMEOUT(!service->busy(), 20000);
+        QVERIFY(!pending());
+        QTRY_VERIFY(visualItem(view.contentItem(), "software-update-window")->isVisible());
+        QTRY_VERIFY(visualItem(view.contentItem(), "software-update-download")->isVisible());
+    }
     void keyCapsShowWhatTheLayoutTypesWithShiftAndOption()
     {
         KeyCaps caps;
@@ -1433,6 +1488,30 @@ class DesktopTests : public QObject
                                        "/artifacts/general-controls.png"));
         QVERIFY(click("general-show-desktop"));
         QTRY_VERIFY(settings->general().value("showDesktop").toBool());
+    }
+    void theAppleMenuShowsTheImportedRainbowApple()
+    {
+        // Asset Importer writes <data>/platinum-reality/assets/icons/apple-menu-16.png from the user's
+        // Mac OS 9 System file; nothing put it where the menu bar looked (found 2026-11-11).
+        QTemporaryDir data, profile;
+        const auto previous = qgetenv("XDG_DATA_HOME");
+        qputenv("XDG_DATA_HOME", data.path().toUtf8());
+        const auto restore = qScopeGuard([&] { qputenv("XDG_DATA_HOME", previous); });
+        const auto picture = [](const QString &path, QColor color)
+        {
+            QDir().mkpath(QFileInfo(path).path());
+            QImage image(16, 16, QImage::Format_ARGB32);
+            image.fill(color);
+            return image.save(path);
+        };
+        QVERIFY(!AppearanceSettings(profile.path()).menuEmblem().toLocalFile().startsWith(data.path()));
+        const auto imported = data.filePath("platinum-reality/assets/icons/apple-menu-16.png");
+        QVERIFY(picture(imported, Qt::red));
+        QCOMPARE(AppearanceSettings(profile.path()).menuEmblem(), QUrl::fromLocalFile(imported));
+        // A picture the user put in the profile still comes first.
+        const auto own = profile.filePath("assets/apple-menu.png");
+        QVERIFY(picture(own, Qt::blue));
+        QCOMPARE(AppearanceSettings(profile.path()).menuEmblem(), QUrl::fromLocalFile(own));
     }
     void appearanceChoicesPersistAndInvalidValuesPreserveTheLastSettings()
     {

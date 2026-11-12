@@ -44,8 +44,14 @@ bool valid(int duration, int x, int y)
 }
 QUrl localEmblem(const QString &profile)
 {
+    // The user's own: a picture in the profile, else the rainbow Apple that Asset Importer takes from
+    // their Mac OS 9 System file (<data>/platinum-reality/assets, as the desktop reads its sounds).
+    auto data = qEnvironmentVariable("XDG_DATA_HOME");
+    if (!QDir::isAbsolutePath(data))
+        data = QDir::homePath() + "/.local/share";
+    const auto imported = data + "/platinum-reality/assets/icons/apple-menu";
     const QStringList candidates{
-        profile + "/assets/apple-menu.png",
+        profile + "/assets/apple-menu.png", imported + "-16.png", imported + ".png",
         QStandardPaths::locate(QStandardPaths::GenericDataLocation,
                                "icons/NineIcons/places/16/distributor-logo.png")};
     for (const auto &path : candidates)
