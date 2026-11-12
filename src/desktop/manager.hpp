@@ -199,6 +199,10 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(qulonglong activeWindowId READ activeWindowId NOTIFY contextChanged)
     Q_PROPERTY(bool shellMenuKeyboardMode MEMBER m_shellMenuKeyboardMode)
     Q_PROPERTY(QVariantList applications READ applications NOTIFY contextChanged)
+    // Workspaces, as in Sway/i3 (Lily Hewitt, 2026-11-12): the one showing on the current screen.
+    Q_PROPERTY(int shownWorkspace READ shownWorkspace NOTIFY contextChanged)
+    // Each screen's connector name and the workspace it shows, for the desktop's own windows.
+    Q_PROPERTY(QVariantMap screenWorkspaces READ screenWorkspaces NOTIFY contextChanged)
     Q_PROPERTY(QString workspace READ workspace CONSTANT)
     Q_PROPERTY(bool menuOpen READ menuOpen NOTIFY contextChanged)
     Q_PROPERTY(QObject *menuBroker READ menuBroker CONSTANT)
@@ -412,6 +416,20 @@ class NativeManager final : public QAbstractListModel
     bool canCloseActiveWindow() const;
     qulonglong activeWindowId() const { return m_state.active.window ? m_state.active.window->value : 0; }
     int menuBarHeight() const { return platinumMenuBarHeight; }
+    // The current screen is the front window's, else the one under the pointer (Sway's focused
+    // output). Command-1…9 show a workspace there; Command-Control-1…9 move the front window
+    // (with its dialogs) to one; Alt-Tab / Alt-Shift-Tab go to the next / previous one with windows.
+    int shownWorkspace() const;
+    Q_INVOKABLE void showWorkspace(int workspace);
+    Q_INVOKABLE void moveWindowToWorkspace(int workspace);
+    // `shellWindows`: the desktop's own open windows, {screen, workspace, name} (WorkspaceMember.qml).
+    Q_INVOKABLE void cycleWorkspace(int step, const QVariantList &shellWindows = {});
+    QVariantMap screenWorkspaces() const;
+    Q_INVOKABLE QString screenAt(const QRectF &rect) const;
+    // Shows a workspace on a named screen: a desktop window waiting there was chosen.
+    Q_INVOKABLE void showWorkspaceOn(const QString &screen, int workspace);
+    // The Control Strip's Workspaces menu: {number, shown, applications: [names]} for 1-9.
+    Q_INVOKABLE QVariantList workspaceMenu(const QVariantList &shellWindows = {}) const;
     Q_INVOKABLE void hideApplication();
     Q_INVOKABLE void hideOtherApplications();
     Q_INVOKABLE void showAllApplications();
@@ -555,6 +573,8 @@ class NativeManager final : public QAbstractListModel
     ManagedWindow *desktopDropWindowAt(QPointF point, QPointF *local = nullptr) const;
     QWaylandQuickCompositor *m_compositor;
     QQuickView *m_view;
+    std::size_t currentScreen() const;
+    void updateScreens(const DisplayLayout &layout);
     std::optional<DisplayLayout> m_displayLayout;
     DisplayDetails m_displayDetails;
     QString m_displayRequestFailure;

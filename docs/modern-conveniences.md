@@ -20,6 +20,24 @@ per window, not an atomic application-wide transaction. Alt+D takes precedence
 over applications' own Alt+D bindings, including Firefox's address shortcut;
 **Ctrl+L** remains available in Firefox.
 
+**Workspaces**, as in Sway and i3 (Lily Hewitt, 2026-11-12), have no Mac OS 9
+counterpart. Each screen, named by its connector, shows one of its own workspaces
+1-9. **Command-1…9** show one on the current screen: the front window's, else the
+one under the pointer. **Command-Control-1…9** send the front window there with
+its dialogs; Command-Shift-3 and 4 stay Mac OS 9's screenshots. **Alt-Tab /
+Alt-Shift-Tab** go to the next / previous workspace that has windows, skipping
+empty ones; Command-Tab stays 9.2.2's application switcher, and choosing an
+application or window on a hidden workspace shows that workspace. A new window
+opens on the workspace showing where it appears. Dragging a window to another
+screen moves it to the workspace showing there. When a screen goes away, the
+windows it was showing join the workspace showing where they land; ones on its
+hidden workspaces keep their numbers. The Control Strip's **Workspaces** module
+shows the current number, and its menu lists all nine with their applications.
+The rules are `src/policy` (`ShowWorkspace`, `MoveToWorkspace`, `SetScreens`).
+The desktop's own windows (control panels, desk accessories, Info windows) are on
+workspaces too (`WorkspaceMember.qml`); choosing one that waits elsewhere shows its
+workspace. Sticky notes stay on every workspace, on the desktop itself.
+
 The [Desktop Picture chooser](desktop-picture.md) is another deliberate native
 convenience: preview and save local pictures with fill, fit, center or tile
 placement, without changing other appearance settings.

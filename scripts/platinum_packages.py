@@ -367,7 +367,7 @@ def run_pacman(arguments, report, pacman='/usr/bin/pacman', removing=False):
         step = STEP.match(line)
         if step:
             report({'step': int(step.group(1)), 'steps': int(step.group(2)), 'doing': step.group(3),
-                    'package': step.group(4)})
+                    'package': step.group(4), 'line': line})
         else:
             report({'progress': line})
     if process.wait() != 0:

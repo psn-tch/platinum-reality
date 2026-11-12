@@ -4,7 +4,9 @@
 #include <compare>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <variant>
+#include <vector>
 
 namespace frankenstein::policy
 {
@@ -45,6 +47,24 @@ struct ContentGeometry
     Point position;
     Size observed_size;
     auto operator<=>(const ContentGeometry &) const = default;
+};
+
+struct Area
+{
+    Point position;
+    Size size;
+    auto operator<=>(const Area &) const = default;
+};
+
+// Workspaces, as in Sway/i3 (Lily Hewitt, 2026-11-12): every screen shows one of its own
+// workspaces 1-9 at a time. A screen is named by its connector so it keeps its workspace
+// when the layout changes.
+inline constexpr std::uint32_t workspace_count = 9;
+struct Screen
+{
+    std::string name;
+    Area area;
+    auto operator<=>(const Screen &) const = default;
 };
 
 enum class Expansion
@@ -140,6 +160,9 @@ struct SetPosition
 {
     WindowId window;
     Point position;
+    // The user put it there (a drag): on another screen it joins that screen's workspace.
+    // Rescues after a display change keep the window's workspace.
+    bool by_user{false};
 };
 // A move previews geometry without changing the observed/presented window.
 struct WindowMove
@@ -168,6 +191,22 @@ struct SetShadeEligibility
     WindowId window;
     bool eligible;
 };
+// The first screen is the primary one. The list is never empty.
+struct SetScreens
+{
+    std::vector<Screen> screens;
+};
+struct ShowWorkspace
+{
+    std::uint32_t screen; // index into the screens
+    std::uint32_t workspace;
+};
+// The window goes with its whole family (its top-level ancestor and every dialog of it).
+struct MoveToWorkspace
+{
+    WindowId window;
+    std::uint32_t workspace;
+};
 struct BeginMenuTracking
 {
     MenuTrackingId tracking;
@@ -181,7 +220,8 @@ using Event = std::variant<RegisterApplication, RemoveApplication, RegisterWindo
                            ActivateApplication, ActivateDesktop, ActivateWindow, HideApplication,
                            SetCollapsed, SetPosition, ObserveContentSize, SetWindowRelationship,
                            SetShadeEligibility, BeginMenuTracking, EndMenuTracking,
-                           ShowApplication, BeginWindowMove, UpdateWindowMove, EndWindowMove>;
+                           ShowApplication, BeginWindowMove, UpdateWindowMove, EndWindowMove,
+                           SetScreens, ShowWorkspace, MoveToWorkspace>;
 
 struct EventEnvelope
 {

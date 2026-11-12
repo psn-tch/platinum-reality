@@ -45,6 +45,10 @@ FocusScope {
     function open() { visible = true; raised(); forceActiveFocus() }
     function close() { visible = false; closed() }
     ShellWindowFocus { id: tracker; window: frame }
+    // On workspaces like an application's window (WorkspaceMember.qml); hidden while away.
+    readonly property WorkspaceMember workspaceMember: WorkspaceMember {window: frame}
+    opacity: workspaceMember.away ? 0 : 1
+    enabled: !workspaceMember.away
     Keys.onEscapePressed: if (closeOnEscape) frame.close()
     Keys.onPressed: function(event) {
         const modifiers=event.modifiers & ~Qt.KeypadModifier

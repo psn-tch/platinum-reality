@@ -106,7 +106,16 @@ FocusScope {
             "is at the left of the title bar, and the zoom and WindowShade boxes are at the right.</p>" +
             "<p>Double-click a title bar to roll the window up into it, and again to roll it down. Set the " +
             "speed in <b>Appearance</b>.</p>" +
-            "<p>The <b>Window</b> menu lists the open windows of the application in front.</p>"},
+            "<p>The <b>Window</b> menu lists the open windows of the application in front.</p>" +
+            "<h3>Workspaces</h3>" +
+            "<p>Each screen has nine workspaces, and shows one at a time. Command-1 to Command-9 show " +
+            "one on the screen you are using. Command-Control-1 to Command-Control-9 send the window in " +
+            "front to another workspace, with its dialogs.</p>" +
+            "<p>Alt-Tab goes to the next workspace that has windows, and Alt-Shift-Tab goes back. " +
+            "Empty workspaces are skipped, so pick a new one by its number. The <b>Workspaces</b> " +
+            "module in the Control Strip shows the number of the one showing and lists them all.</p>" +
+            "<p>Choosing an application whose windows are on another workspace, with Command-Tab or the " +
+            "Application menu, shows that workspace.</p>"},
         {id: "finder", title: "Files and the Finder", body:
             "<h3>Files and the Finder</h3>" +
             "<p><b>Hard Disk</b> on the desktop is your home folder. Folders open in their own windows " +
@@ -164,6 +173,8 @@ FocusScope {
             "<li>Command-Q: Quit. Command-H: Hide</li>" +
             "<li>Command-. (period): Cancel</li>" +
             "<li>Command-Tab: next application</li>" +
+            "<li>Command-1 to 9: show that workspace. Command-Control-1 to 9: send the front window there</li>" +
+            "<li>Alt-Tab: next workspace with windows. Alt-Shift-Tab: the previous one</li>" +
             "<li>Command-Option-Space: next keyboard layout, when more than one is checked</li>" +
             "<li>Command-Shift-S: take a screenshot</li>" +
             "<li>Command-Shift-3: a picture of the whole screen on the clipboard</li>" +

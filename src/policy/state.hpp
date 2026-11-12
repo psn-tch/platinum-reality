@@ -26,7 +26,16 @@ struct WindowState
     bool collapsed{false};
     std::optional<WindowId> parent;
     bool modal{false};
+    // Kept equal across a family; the top-level window's screen decides where it shows.
+    std::uint32_t workspace{1};
     bool operator==(const WindowState &) const = default;
+};
+
+struct ScreenState
+{
+    Screen screen;
+    std::uint32_t workspace{1};
+    bool operator==(const ScreenState &) const = default;
 };
 
 struct State
@@ -44,6 +53,8 @@ struct State
     Context active;
     std::optional<MenuTracking> menu;
     std::optional<WindowMove> move;
+    // One unnamed screen until the adapter reports the real ones.
+    std::vector<ScreenState> screens{ScreenState{}};
     bool operator==(const State &) const = default;
 };
 

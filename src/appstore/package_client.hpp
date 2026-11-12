@@ -25,6 +25,8 @@ class PackageClient final : public QObject
     void catalogFailed(const QString &error);
     // step and steps are -1 when the line is not one of pacman's numbered steps.
     void progress(const QString &text, int step, int steps);
+    // Every line of a change as the programs wrote it (pacman, yay, makepkg), for Activity.
+    void output(const QString &line);
     // ok, or the reason it failed; cancelled when the password box was dismissed.
     void finished(bool ok, const QString &error, bool cancelled);
 

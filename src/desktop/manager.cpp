@@ -29,6 +29,7 @@
 #include "primary_selection.hpp"
 #include "command_keys.hpp"
 #include <QQmlProperty>
+#include <QCursor>
 #include "computer_info.hpp"
 #include "client_cursors.hpp"
 #include "session_control.hpp"
@@ -1130,6 +1131,132 @@ QVariantList NativeManager::applications() const
                                      {"agent", m_authenticationApplications.contains(id.value)}});
     return result;
 }
+void NativeManager::updateScreens(const DisplayLayout &layout)
+{
+    // The main display first; a mirrored session is one screen.
+    std::vector<Screen> screens;
+    for (const auto &output : layout.outputs())
+    {
+        const auto area = layout.mode() == DisplayLayout::Mode::Mirror ? layout.primaryRect() : output.logical;
+        Screen screen{output.name.toStdString(), {{area.x(), area.y()},
+                                                  {std::uint32_t(area.width()), std::uint32_t(area.height())}}};
+        if (output.name == layout.primary())
+            screens.insert(screens.begin(), std::move(screen));
+        else if (layout.mode() == DisplayLayout::Mode::Extend)
+            screens.push_back(std::move(screen));
+    }
+    if (!screens.empty() && screens.front().name == layout.primary().toStdString())
+        dispatch(SetScreens{std::move(screens)});
+}
+std::size_t NativeManager::currentScreen() const
+{
+    if (m_state.active.window && m_state.windows.contains(*m_state.active.window))
+        return window_screen(m_state, *m_state.active.window);
+    const auto pointer = effectiveDisplayLayout().hostToDesktop(m_view->mapFromGlobal(QCursor::pos()).toPointF());
+    if (!pointer)
+        return 0;
+    return screen_of(m_state, {{int(pointer->x()), int(pointer->y())}, {1, 1}});
+}
+int NativeManager::shownWorkspace() const
+{
+    return int(m_state.screens.at(currentScreen()).workspace);
+}
+void NativeManager::showWorkspace(int workspace)
+{
+    if (shellModal() || workspace < 1 || workspace > int(workspace_count))
+        return;
+    if (m_state.move)
+        finishWindowMove(m_state.move->window.value, false);
+    dispatch(ShowWorkspace{std::uint32_t(currentScreen()), std::uint32_t(workspace)});
+}
+void NativeManager::moveWindowToWorkspace(int workspace)
+{
+    if (shellModal() || !m_state.active.window || workspace < 1 || workspace > int(workspace_count))
+        return;
+    if (m_state.move)
+        finishWindowMove(m_state.move->window.value, false);
+    dispatch(MoveToWorkspace{*m_state.active.window, std::uint32_t(workspace)});
+}
+QVariantMap NativeManager::screenWorkspaces() const
+{
+    QVariantMap result;
+    for (const auto &screen : m_state.screens)
+        result.insert(QString::fromStdString(screen.screen.name), int(screen.workspace));
+    return result;
+}
+QString NativeManager::screenAt(const QRectF &rect) const
+{
+    const auto area = rect.toAlignedRect();
+    const auto index = screen_of(m_state, {{area.x(), area.y()},
+                                           {std::uint32_t(std::max(1, area.width())), std::uint32_t(std::max(1, area.height()))}});
+    return QString::fromStdString(m_state.screens.at(index).screen.name);
+}
+void NativeManager::showWorkspaceOn(const QString &screen, int workspace)
+{
+    if (shellModal() || workspace < 1 || workspace > int(workspace_count))
+        return;
+    for (std::size_t index = 0; index < m_state.screens.size(); ++index)
+        if (QString::fromStdString(m_state.screens[index].screen.name) == screen)
+            dispatch(ShowWorkspace{std::uint32_t(index), std::uint32_t(workspace)});
+}
+// The desktop's own windows on `screen`: their workspace numbers and names.
+static QMultiMap<int, QString> shellWorkspaces(const QVariantList &shellWindows, const QString &screen)
+{
+    QMultiMap<int, QString> result;
+    for (const auto &value : shellWindows)
+    {
+        const auto window = value.toMap();
+        const auto workspace = window.value("workspace").toInt();
+        if (window.value("screen").toString() == screen && workspace >= 1 && workspace <= int(workspace_count))
+            result.insert(workspace, window.value("name").toString());
+    }
+    return result;
+}
+void NativeManager::cycleWorkspace(int step, const QVariantList &shellWindows)
+{
+    if (shellModal())
+        return;
+    const auto screen = currentScreen();
+    auto occupied = occupied_workspaces(m_state, screen);
+    for (const auto workspace : shellWorkspaces(shellWindows, QString::fromStdString(m_state.screens.at(screen).screen.name)).keys())
+        occupied.push_back(std::uint32_t(workspace));
+    std::sort(occupied.begin(), occupied.end());
+    occupied.erase(std::unique(occupied.begin(), occupied.end()), occupied.end());
+    if (const auto next = next_workspace_among(m_state.screens.at(screen).workspace, occupied, step))
+    {
+        if (m_state.move)
+            finishWindowMove(m_state.move->window.value, false);
+        dispatch(ShowWorkspace{std::uint32_t(screen), *next});
+    }
+}
+QVariantList NativeManager::workspaceMenu(const QVariantList &shellWindows) const
+{
+    const auto screen = currentScreen();
+    const auto shell = shellWorkspaces(shellWindows, QString::fromStdString(m_state.screens.at(screen).screen.name));
+    QVariantList result;
+    for (std::uint32_t number = 1; number <= workspace_count; ++number)
+    {
+        // Each application once, in the order they were last used.
+        QStringList names;
+        for (auto it = m_state.applications_back_to_front.rbegin(); it != m_state.applications_back_to_front.rend(); ++it)
+            for (const auto window : m_state.applications.at(*it).windows_back_to_front)
+            {
+                const auto &record = m_state.windows.at(window);
+                if (!record.parent && record.workspace == number && window_screen(m_state, window) == screen)
+                {
+                    names.append(m_applicationNames.value(it->value, "Application"));
+                    break;
+                }
+            }
+        for (const auto &name : shell.values(int(number)))
+            if (!name.isEmpty() && !names.contains(name))
+                names.append(name);
+        result.push_back(QVariantMap{{"number", number},
+                                     {"shown", m_state.screens.at(screen).workspace == number},
+                                     {"applications", names}});
+    }
+    return result;
+}
 void NativeManager::refreshApplicationIcons()
 {
     m_applicationIconCache.clear();
@@ -1616,7 +1743,8 @@ void NativeManager::synchronize()
             continue;
         record->geometry = it->second.geometry;
         record->shaded = it->second.collapsed;
-        record->visible = !m_state.applications.at(it->second.application).hidden;
+        // Hidden with its application, or waiting on a workspace that isn't showing.
+        record->visible = presentation(m_state, record->identity) != Presentation::hidden;
         record->shadeAllowed = it->second.shade_eligible;
         record->selected = m_state.active.window == record->identity;
         if (record->popUpWindow)
@@ -2068,6 +2196,8 @@ void NativeManager::setDisplayLayout(const DisplayLayout &layout)
     if (m_state.move)
         finishWindowMove(m_state.move->window.value, false);
     const auto previous=effectiveDisplayLayout();
+    // Before the windows are rescued, so the policy still sees which screen each was showing on.
+    updateScreens(layout);
     m_displayLayout=layout;
     m_desktopItems->setDisplayLayout(layout);
     for(auto *window:m_windows) {
@@ -3116,10 +3246,13 @@ QVariantMap NativeManager::snapshot() const
                         {"collapsed", w->collapsed()},
                         {"shadeAnimating", w->shadeInMotion},
                         {"visible", w->shown()},
+                        {"workspace", m_state.windows.contains(w->identity)
+                                          ? int(m_state.windows.at(w->identity).workspace) : 0},
                         {"active", w->active()}});
     }
     return {{"revision", qulonglong(m_state.revision)},
             {"activeApplication", activeApplication()},
+            {"shownWorkspace", shownWorkspace()},
             {"desktopActive", desktopActive()},
             {"shellModal", shellModal()},
             {"desktopBusy", m_desktopItems->busy()},

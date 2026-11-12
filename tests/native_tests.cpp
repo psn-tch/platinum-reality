@@ -2537,6 +2537,68 @@ class NativeTests : public QObject
         mirrorImage.reset();
         qInfo()<<"Experimental spanning canvas"<<scene.view.size()<<"DPR"<<scene.view.devicePixelRatio();
     }
+    // Each screen has its own workspaces, and unplugging one never hides the windows it showed
+    // (Lily Hewitt, 2026-11-12: a laptop going to and from its dock).
+    void eachScreenHasItsOwnWorkspaces()
+    {
+        const auto ipc=qEnvironmentVariable("FRANKENSTEIN_HEADLESS_IPC");
+        QVERIFY2(ipc.startsWith("/tmp/platinum-headless."),"Requires the owned two-output venue");
+        NativeScene scene;
+        QVERIFY(scene.show());
+        QProcess command;
+        command.start("swaymsg", {"-s",ipc,QString("[pid=%1] fullscreen enable global").arg(QCoreApplication::applicationPid())});
+        QVERIFY(command.waitForFinished(3000));
+        QCOMPARE(command.exitCode(),0);
+        QTRY_COMPARE_WITH_TIMEOUT(scene.view.size(),QSize(2080,760),5000);
+        const auto both=DisplayLayout::create({{"HEADLESS-1",{0,0,1120,760},1.5,"normal"},
+                                               {"HEADLESS-2",{1120,0,960,600},2,"90"}},
+                                              "HEADLESS-1",DisplayLayout::Mode::Extend);
+        QVERIFY(both);
+        auto &manager=*scene.manager;
+        manager.setDisplayLayout(*both);
+        QTRY_COMPARE(manager.screenWorkspaces(),(QVariantMap{{"HEADLESS-1",1},{"HEADLESS-2",1}}));
+        QProcess panel,dock;
+        const auto stop=qScopeGuard([&]{for(auto *p:{&panel,&dock})if(p->state()!=QProcess::NotRunning){p->kill();p->waitForFinished(3000);}});
+        for(auto [process,name]:{std::pair{&panel,"Panel"},std::pair{&dock,"Dock"}}) {
+            process->setProcessEnvironment(scene.childEnvironment());
+            process->start(QCoreApplication::applicationDirPath()+"/native-probe",{name});
+            QVERIFY(process->waitForStarted());
+            QTRY_VERIFY(!first(manager,QString("Native Probe ")+name).isEmpty());
+        }
+        const auto window=[&](const char *name){return first(manager,QString("Native Probe ")+name);};
+        const auto dockId=window("Dock").value("id").toULongLong(), panelId=window("Panel").value("id").toULongLong();
+        manager.moveWindow(panelId,100,80);
+        manager.moveWindow(dockId,1250,80);
+        QTRY_COMPARE(window("Dock").value("x").toInt(),1250);
+        // Workspace 3 on the dock's screen, chosen while its window is in front.
+        manager.activate(dockId);
+        QTRY_VERIFY(window("Dock").value("active").toBool());
+        manager.showWorkspace(3);
+        QTRY_COMPARE(manager.screenWorkspaces(),(QVariantMap{{"HEADLESS-1",1},{"HEADLESS-2",3}}));
+        QTRY_VERIFY(!window("Dock").value("visible").toBool());
+        QVERIFY(window("Panel").value("visible").toBool()); // the other screen keeps its workspace
+        // Going back to the dock's window shows its workspace there again.
+        manager.activate(dockId);
+        QTRY_COMPARE(manager.screenWorkspaces().value("HEADLESS-2").toInt(),1);
+        QTRY_VERIFY(window("Dock").value("visible").toBool());
+        // The panel's screen goes to workspace 4; the panel's window waits on 1.
+        manager.activate(panelId);
+        QTRY_VERIFY(window("Panel").value("active").toBool());
+        manager.showWorkspace(4);
+        QTRY_VERIFY(!window("Panel").value("visible").toBool());
+        // The dock is unplugged: its window comes to the panel, on the workspace showing there.
+        const auto single=DisplayLayout::create({{"HEADLESS-1",{0,0,1120,760},1.5,"normal"}},
+                                                "HEADLESS-1",DisplayLayout::Mode::Extend);
+        QVERIFY(single);
+        manager.setDisplayLayout(*single);
+        QTRY_COMPARE(manager.screenWorkspaces(),(QVariantMap{{"HEADLESS-1",4}}));
+        QTRY_VERIFY(window("Dock").value("x").toInt()+window("Dock").value("width").toInt()<=1120);
+        QTRY_COMPARE(window("Dock").value("workspace").toInt(),4);
+        QTRY_VERIFY(window("Dock").value("visible").toBool());
+        QCOMPARE(window("Panel").value("workspace").toInt(),1); // still waiting on 1
+        QVERIFY(!window("Panel").value("visible").toBool());
+        QVERIFY(capture(scene.view,"workspaces-undocked.png"));
+    }
 #endif
     void initialFullscreenIntentSurvivesTheFirstMappedBuffer()
     {
@@ -5178,6 +5240,172 @@ class NativeTests : public QObject
         tab(true);
         QTRY_COMPARE(active(),list.at((at+2)%3));
         QVERIFY(capture(scene.view,"command-tab.png"));
+    }
+    // Workspaces, as in Sway/i3 (Lily Hewitt, 2026-11-12): Command-1…9 show one, Command-Control-1…9
+    // move the front window there, Alt-Tab visits the ones with windows, Command-Tab is unchanged.
+    void workspacesHideWindowsAndAltTabVisitsOnesInUse()
+    {
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager=*scene.manager;
+        QProcess alpha,zulu;
+        const auto stop=qScopeGuard([&]{for(auto *p:{&alpha,&zulu})if(p->state()!=QProcess::NotRunning){p->kill();p->waitForFinished(3000);}});
+        for(auto [process,name]:{std::pair{&alpha,"Alpha"},std::pair{&zulu,"Zulu"}}) {
+            process->setProcessEnvironment(scene.childEnvironment());
+            process->start(QCoreApplication::applicationDirPath()+"/native-probe",{name});
+            QVERIFY(process->waitForStarted());
+            QTRY_VERIFY(!first(manager,QString("Native Probe ")+name).isEmpty());
+        }
+        const auto window=[&](const char *name){return first(manager,QString("Native Probe ")+name);};
+        const auto shown=[&]{return manager.snapshot().value("shownWorkspace").toInt();};
+        const auto active=[&]{return manager.snapshot().value("activeApplication").toString();};
+        const auto press=[&](Qt::Key key,Qt::KeyboardModifiers modifiers,quint32 code) {
+            if(modifiers&Qt::MetaModifier)nativeKeyEvent(&scene.view,QEvent::KeyPress,Qt::Key_Meta,Qt::MetaModifier,125);
+            if(modifiers&Qt::AltModifier)nativeKeyEvent(&scene.view,QEvent::KeyPress,Qt::Key_Alt,Qt::AltModifier,56);
+            if(modifiers&Qt::ControlModifier)nativeKeyEvent(&scene.view,QEvent::KeyPress,Qt::Key_Control,modifiers,29);
+            if(modifiers&Qt::ShiftModifier)nativeKeyEvent(&scene.view,QEvent::KeyPress,Qt::Key_Shift,modifiers,42);
+            nativeKeyEvent(&scene.view,QEvent::KeyPress,key,modifiers,code);
+            nativeKeyEvent(&scene.view,QEvent::KeyRelease,key,modifiers,code);
+            if(modifiers&Qt::ShiftModifier)nativeKeyEvent(&scene.view,QEvent::KeyRelease,Qt::Key_Shift,modifiers&~Qt::ShiftModifier,42);
+            if(modifiers&Qt::ControlModifier)nativeKeyEvent(&scene.view,QEvent::KeyRelease,Qt::Key_Control,modifiers&~(Qt::ControlModifier|Qt::ShiftModifier),29);
+            if(modifiers&Qt::AltModifier)nativeKeyEvent(&scene.view,QEvent::KeyRelease,Qt::Key_Alt,Qt::NoModifier,56);
+            if(modifiers&Qt::MetaModifier)nativeKeyEvent(&scene.view,QEvent::KeyRelease,Qt::Key_Meta,Qt::NoModifier,125);
+        };
+        QCOMPARE(shown(),1);
+        QCOMPARE(window("Alpha").value("workspace").toInt(),1);
+        manager.activate(window("Alpha").value("id").toULongLong());
+        QTRY_VERIFY(window("Alpha").value("active").toBool());
+        const auto alphaName=active();
+        manager.activate(window("Zulu").value("id").toULongLong());
+        QTRY_VERIFY(window("Zulu").value("active").toBool());
+        const auto zuluName=active();
+        QVERIFY(alphaName!=zuluName);
+        // Zulu is in front: Command-Control-3 sends it to workspace 3, and Alpha comes forward.
+        press(Qt::Key_3,Qt::MetaModifier|Qt::ControlModifier,4);
+        QTRY_COMPARE(window("Zulu").value("workspace").toInt(),3);
+        QTRY_VERIFY(!window("Zulu").value("visible").toBool());
+        QTRY_COMPARE(active(),alphaName);
+        QCOMPARE(shown(),1); // Sway doesn't follow the window
+        // An empty workspace is chosen by number; Alpha waits on 1.
+        press(Qt::Key_5,Qt::MetaModifier,6);
+        QTRY_COMPARE(shown(),5);
+        QTRY_VERIFY(!window("Alpha").value("visible").toBool());
+        QTRY_VERIFY(manager.snapshot().value("desktopActive").toBool());
+        // Alt-Tab goes only to workspaces with windows: 5 → (nothing on 6-9) → 1 → 3 → 1.
+        press(Qt::Key_Tab,Qt::AltModifier,15);
+        QTRY_COMPARE(shown(),1);
+        QTRY_VERIFY(window("Alpha").value("visible").toBool());
+        QCOMPARE(active(),alphaName);
+        press(Qt::Key_Tab,Qt::AltModifier,15);
+        QTRY_COMPARE(shown(),3);
+        QTRY_VERIFY(window("Zulu").value("visible").toBool());
+        QTRY_VERIFY(!window("Alpha").value("visible").toBool());
+        QTRY_COMPARE(active(),zuluName);
+        press(Qt::Key_Backtab,Qt::AltModifier|Qt::ShiftModifier,15);
+        QTRY_COMPARE(shown(),1);
+        // The Control Strip's menu lists them, the one showing checked, with what is on each.
+        QVariant entries;
+        QMetaObject::invokeMethod(scene.view.rootObject(),"workspaceMenuEntries",Q_RETURN_ARG(QVariant,entries));
+        const auto list=entries.toList();
+        QCOMPARE(list.size(),9);
+        QVERIFY(list.at(0).toMap().value("checked").toBool());
+        QVERIFY(list.at(0).toMap().value("text").toString().contains(alphaName));
+        QVERIFY(!list.at(2).toMap().value("checked").toBool());
+        QCOMPARE(list.at(2).toMap().value("text").toString(),"Workspace 3 — "+zuluName);
+        QCOMPARE(list.at(4).toMap().value("text").toString(),QString("Workspace 5"));
+        // Command-Tab still switches applications (Finder, Alpha, Zulu by name); reaching Zulu
+        // shows the workspace its window is on.
+        QTRY_COMPARE(active(),alphaName);
+        for(int presses=0;presses<3 && active()!=zuluName;++presses) {
+            const auto before=active();
+            press(Qt::Key_Tab,Qt::MetaModifier,15);
+            QTRY_VERIFY(active()!=before);
+        }
+        QCOMPARE(active(),zuluName);
+        QTRY_COMPARE(shown(),3);
+        QTRY_VERIFY(window("Zulu").value("visible").toBool());
+        QVERIFY(!window("Alpha").value("visible").toBool());
+        QVERIFY(capture(scene.view,"workspaces.png"));
+    }
+    // The desktop's own windows are on workspaces too (WorkspaceMember.qml).
+    void deskAccessoriesWaitOnTheirWorkspace()
+    {
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager=*scene.manager;
+        auto *calculator=visualItem(scene.view.contentItem(),"calculator-window");
+        QVERIFY(calculator);
+        auto *member=calculator->property("workspaceMember").value<QObject *>();
+        QVERIFY(member);
+        const auto shown=[&]{return manager.snapshot().value("shownWorkspace").toInt();};
+        const auto away=[&]{return member->property("away").toBool();};
+        const auto press=[&](Qt::Key key,Qt::KeyboardModifiers modifiers,quint32 code) {
+            if(modifiers&Qt::MetaModifier)nativeKeyEvent(&scene.view,QEvent::KeyPress,Qt::Key_Meta,Qt::MetaModifier,125);
+            if(modifiers&Qt::AltModifier)nativeKeyEvent(&scene.view,QEvent::KeyPress,Qt::Key_Alt,modifiers,56);
+            if(modifiers&Qt::ControlModifier)nativeKeyEvent(&scene.view,QEvent::KeyPress,Qt::Key_Control,modifiers,29);
+            nativeKeyEvent(&scene.view,QEvent::KeyPress,key,modifiers,code);
+            nativeKeyEvent(&scene.view,QEvent::KeyRelease,key,modifiers,code);
+            if(modifiers&Qt::ControlModifier)nativeKeyEvent(&scene.view,QEvent::KeyRelease,Qt::Key_Control,modifiers&~Qt::ControlModifier,29);
+            if(modifiers&Qt::AltModifier)nativeKeyEvent(&scene.view,QEvent::KeyRelease,Qt::Key_Alt,Qt::NoModifier,56);
+            if(modifiers&Qt::MetaModifier)nativeKeyEvent(&scene.view,QEvent::KeyRelease,Qt::Key_Meta,Qt::NoModifier,125);
+        };
+        QVERIFY(QMetaObject::invokeMethod(calculator,"open"));
+        QTRY_VERIFY(calculator->isVisible() && calculator->hasActiveFocus());
+        QCOMPARE(member->property("workspace").toInt(),1);
+        // Opening it hands it the keyboard in a later turn of the event loop; let that settle.
+        QTest::qWait(250);
+        // Another workspace: the Calculator waits on 1, out of sight and out of the keyboard's way.
+        press(Qt::Key_2,Qt::MetaModifier,3);
+        QTRY_COMPARE(shown(),2);
+        QTRY_VERIFY(away());
+        QCOMPARE(calculator->opacity(),0.0);
+        QVERIFY(!calculator->isEnabled());
+        QVERIFY(calculator->isVisible()); // still open
+        // Alt-Tab counts it: workspace 1 has a window.
+        press(Qt::Key_Tab,Qt::AltModifier,15);
+        QTRY_COMPARE(shown(),1);
+        QTRY_VERIFY(!away());
+        QCOMPARE(calculator->opacity(),1.0);
+        // Command-Control-3 with the Calculator in front sends it to 3, and the menu says so.
+        QVERIFY(QMetaObject::invokeMethod(calculator,"open"));
+        QTRY_VERIFY(calculator->hasActiveFocus());
+        press(Qt::Key_3,Qt::MetaModifier|Qt::ControlModifier,4);
+        QTRY_COMPARE(member->property("workspace").toInt(),3);
+        QTRY_VERIFY(away());
+        QCOMPARE(shown(),1);
+        QVariant entries;
+        QMetaObject::invokeMethod(scene.view.rootObject(),"workspaceMenuEntries",Q_RETURN_ARG(QVariant,entries));
+        QCOMPARE(entries.toList().at(2).toMap().value("text").toString(),QString("Workspace 3 — Calculator"));
+        // An application window opens on workspace 3 too.
+        press(Qt::Key_3,Qt::MetaModifier,4);
+        QTRY_COMPARE(shown(),3);
+        QProcess probe;
+        const auto stop=qScopeGuard([&]{if(probe.state()!=QProcess::NotRunning){probe.kill();probe.waitForFinished(3000);}});
+        probe.setProcessEnvironment(scene.childEnvironment());
+        probe.start(QCoreApplication::applicationDirPath()+"/native-probe",{"Neighbour"});
+        QVERIFY(probe.waitForStarted());
+        QTRY_VERIFY(!first(manager,"Native Probe Neighbour").isEmpty());
+        QTRY_COMPARE(first(manager,"Native Probe Neighbour").value("workspace").toInt(),3);
+        manager.activate(first(manager,"Native Probe Neighbour").value("id").toULongLong());
+        QTRY_VERIFY(first(manager,"Native Probe Neighbour").value("active").toBool());
+        manager.showWorkspace(1);
+        QTRY_COMPARE(shown(),1);
+        QTRY_VERIFY(away());
+        // Choosing the Calculator again (the Apple menu, Command-Tab) shows its workspace, with the
+        // Calculator in front of the application window there.
+        QVERIFY(QMetaObject::invokeMethod(calculator,"open"));
+        QTRY_COMPARE(shown(),3);
+        QTRY_VERIFY(!away());
+        QTRY_VERIFY(calculator->hasActiveFocus());
+        QTRY_VERIFY(manager.snapshot().value("desktopActive").toBool());
+        QVERIFY(first(manager,"Native Probe Neighbour").value("visible").toBool());
+        // Closed and opened again, it joins the workspace showing now.
+        QVERIFY(QMetaObject::invokeMethod(calculator,"close"));
+        press(Qt::Key_5,Qt::MetaModifier,6);
+        QTRY_COMPARE(shown(),5);
+        QVERIFY(QMetaObject::invokeMethod(calculator,"open"));
+        QTRY_COMPARE(member->property("workspace").toInt(),5);
+        QVERIFY(!away());
     }
     void applicationsAskForAttentionAndRingTheBellLikeMacOS9()
     {

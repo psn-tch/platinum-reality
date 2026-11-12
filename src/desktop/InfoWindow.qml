@@ -7,6 +7,10 @@ FocusScope {
     id: info
     property var moveManager: typeof manager === "undefined" ? null : manager
     onActiveFocusChanged: if (!activeFocus && moveManager) moveManager.finishShellWindowMove(info, false)
+    // On workspaces like an application's window (WorkspaceMember.qml); hidden while away.
+    readonly property WorkspaceMember workspaceMember: WorkspaceMember {window: info; name: info.details.name + " Info"}
+    opacity: workspaceMember.away ? 0 : 1
+    enabled: !workspaceMember.away
     required property var details
     signal closeRequested()
     signal raised()

@@ -57,6 +57,8 @@ class CatalogModel final : public QAbstractTableModel
     explicit CatalogModel(QObject *parent = nullptr);
     void setCatalog(Catalog catalog);
     const Catalog &catalog() const { return m_catalog; }
+    // AUR packages whose name or description has every word (a search that found nothing elsewhere).
+    int aurMatches(const QStringList &words) const;
     void setView(View view);
     View view() const { return m_view; }
     // The package (and application, or nullptr) a row shows.
@@ -90,6 +92,7 @@ class CatalogFilter final : public QSortFilterProxyModel
     void setCategory(const QString &category);
     void setSearch(const QString &text);
     QString search() const { return m_words.join(' '); }
+    QStringList words() const { return m_words; }
 
   protected:
     bool filterAcceptsRow(int row, const QModelIndex &parent) const override;

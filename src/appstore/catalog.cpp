@@ -1,4 +1,5 @@
 #include "catalog.hpp"
+#include <algorithm>
 #include <QApplication>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -268,6 +269,19 @@ void CatalogFilter::setCategory(const QString &category)
     beginFilterChange();
     m_category = category;
     endFilterChange(Direction::Rows);
+}
+
+int CatalogModel::aurMatches(const QStringList &words) const
+{
+    if (words.isEmpty())
+        return 0;
+    int matches = 0;
+    for (const auto &p : m_catalog.packages)
+        if (p.fromAur() && std::all_of(words.begin(), words.end(), [&](const QString &word) {
+                return p.name.contains(word, Qt::CaseInsensitive) || p.description.contains(word, Qt::CaseInsensitive);
+            }))
+            ++matches;
+    return matches;
 }
 
 void CatalogFilter::setSearch(const QString &text)

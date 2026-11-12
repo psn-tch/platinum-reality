@@ -2,6 +2,7 @@
 #include "catalog.hpp"
 #include <QMainWindow>
 
+class ActivityWindow;
 class FolderHeader;
 class PackageClient;
 class QAction;
@@ -52,6 +53,7 @@ class AppStoreWindow final : public QMainWindow
     void updateAll();
     void installYay();
     void refreshAur();
+    void showAurPackages();
     bool start(const QStringList &arguments, const QString &doing);
     void changeProgress(const QString &text, int step, int steps);
     void changeFinished(bool ok, const QString &error, bool cancelled);
@@ -61,6 +63,7 @@ class AppStoreWindow final : public QMainWindow
     const Application *chosenApplication() const;
     QString desktopFile(const Application *app) const;
     void updateActions();
+    void showActivity();
 
     PackageClient *m_client;
     CatalogModel *m_model;
@@ -76,9 +79,14 @@ class AppStoreWindow final : public QMainWindow
     QPushButton *m_primary, *m_open, *m_extra;
     QProgressBar *m_progress;
     QLabel *m_status;
-    QAction *m_installAction, *m_removeAction, *m_openAction, *m_updateAllAction, *m_yayAction, *m_aurAction;
+    ActivityWindow *m_activity;
+    QPushButton *m_activityButton;
+    QAction *m_installAction, *m_removeAction, *m_openAction, *m_updateAllAction, *m_yayAction, *m_aurAction,
+        *m_activityAction;
     QString m_keepSelected, m_doing;
-    bool m_loaded = false, m_restartAdvised = false;
+    // A search found nothing here but the AUR may have it (Lily Hewitt, 2026-11-12: she kept
+    // downloading the AUR list because searches never looked in it).
+    bool m_loaded = false, m_restartAdvised = false, m_offerAur = false;
     QList<bool> m_testAnswers;
     QString m_lastQuestion, m_lastAlert;
 };

@@ -10,6 +10,11 @@ FocusScope {
     id: window
     property var moveManager: typeof manager === "undefined" ? null : manager
     onActiveFocusChanged: if (!activeFocus && moveManager) moveManager.finishShellWindowMove(window, false)
+    // On workspaces like an application's window (WorkspaceMember.qml); hidden while away.
+    readonly property Item workspaceWindow: window
+    readonly property WorkspaceMember workspaceMember: WorkspaceMember {window: workspaceWindow; name: "Control Panels"}
+    opacity: workspaceMember.away ? 0 : 1
+    enabled: !workspaceMember.away
     signal raised()
     signal closed()
     objectName: "control-panels-window"

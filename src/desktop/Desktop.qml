@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQml.Models
 import QtWayland.Compositor
 
 Rectangle {
@@ -94,6 +95,18 @@ Rectangle {
             sourceSize:layout==="center" || layout==="tile"
                        ? Qt.size(0,0) : Qt.size(Math.min(4096,width*manager.hostScale),Math.min(4096,height*manager.hostScale))
         }
+    }
+    // The desktop's own windows on workspaces (WorkspaceMember.qml registers each), and the open
+    // ones as the manager counts them for Alt-Tab and the Workspaces menu.
+    property var workspaceMembers: []
+    function shellWorkspaceWindows() {
+        return workspaceMembers.filter(function(m){return m.window && m.window.visible && m.workspace>0})
+            .map(function(m){return {screen:m.screen,workspace:m.workspace,name:m.name}})
+    }
+    function moveFrontWindowToWorkspace(number) {
+        let shell=currentShellWindow()
+        if(manager.desktopActive && shell && shell.workspaceMember)shell.workspaceMember.moveTo(number)
+        else manager.moveWindowToWorkspace(number)
     }
     function currentShellWindow() {
         let window=frontShellWindow
@@ -259,6 +272,7 @@ Rectangle {
         else if(action==="sticky-toggle")manager.stickies.setHidden(!manager.stickies.hidden)
         else if(action==="sound")soundPanel.edit()
         else if(action==="sound-output")soundPanel.service.chooseOutput(applicationId)
+        else if(action==="show-workspace")manager.showWorkspace(applicationId)
         else if(action==="bluetooth")bluetoothPanel.edit()
         else if(action==="bluetooth-add")bluetoothPanel.addDevice()
         else if(action==="bluetooth-power")bluetoothPanel.service.setPowered(applicationId===1)
@@ -423,6 +437,30 @@ Rectangle {
         closeMenu()
         activateListedApplication(next.id)
     }
+    // Workspaces, as in Sway/i3 (Lily Hewitt, 2026-11-12; docs/modern-conveniences.md): Command-1…9
+    // show one on the current screen, Command-Control-1…9 move the front window there, and
+    // Alt-Tab / Alt-Shift-Tab go to the next / previous one that has windows. Command-Tab stays 9.2.2's.
+    Instantiator {
+        model: 9
+        delegate: QtObject {
+            id: slot
+            required property int index
+            readonly property Shortcut show: Shortcut {
+                sequence:"Meta+"+(slot.index+1);autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging
+                onActivated:{desktop.closeMenu();manager.showWorkspace(slot.index+1)}
+            }
+            readonly property Shortcut move: Shortcut {
+                sequences:["Meta+Ctrl+"+(slot.index+1)];autoRepeat:false
+                enabled:!manager.shellModal && !manager.nativeDragging
+                onActivated:{desktop.closeMenu();desktop.moveFrontWindowToWorkspace(slot.index+1)}
+            }
+        }
+    }
+    Shortcut {sequence:"Alt+Tab";enabled:!manager.shellModal && !manager.nativeDragging
+              onActivated:{desktop.closeMenu();manager.cycleWorkspace(1,desktop.shellWorkspaceWindows())}}
+    Shortcut {sequences:["Alt+Shift+Tab","Alt+Shift+Backtab","Alt+Backtab"];enabled:!manager.shellModal && !manager.nativeDragging
+              onActivated:{desktop.closeMenu();manager.cycleWorkspace(-1,desktop.shellWorkspaceWindows())}
+              onActivatedAmbiguously:activated()}
     Shortcut {sequence:"Meta+Tab";enabled:!manager.shellModal && !manager.nativeDragging;onActivated:desktop.switchApplication(1)}
     // Several spellings: a real keyboard's layout makes more than one match (see the screenshot keys).
     Shortcut {sequences:["Meta+Shift+Tab","Meta+Shift+Backtab","Meta+Backtab"];enabled:!manager.shellModal && !manager.nativeDragging
@@ -699,6 +737,7 @@ Rectangle {
             return open.concat([10,25,50,75,100].map(function(l){return {text:"Brightness "+l+"%",action:"set-brightness",id:l,name:"brightness-"+l,checked:l===level}}))
         }
         if(module==="resolution")return resolutionMenuEntries()
+        if(module==="workspaces")return workspaceMenuEntries()
         // Printer Selector, as 9.2.2's: the desktop printers, the default checked; choosing one makes
         // it the default. With none, its own "No Desktop Printers".
         // Keychain, as 9.2.2's Keychain Strip: Lock or Unlock each keychain by name, then Lock All
@@ -749,6 +788,15 @@ Rectangle {
                               name:"resolution-"+o.name+"-"+m.width+"x"+m.height+"@"+m.refresh,enabled:ready})
         }
         return entries
+    }
+    // Workspaces (Lily Hewitt, 2026-11-12): this screen's nine, the one showing checked, each with
+    // the applications that have windows there. Choosing one shows it, as Command-1…9 do.
+    function workspaceMenuEntries() {
+        return manager.workspaceMenu(shellWorkspaceWindows()).map(function(w){
+            let names=w.applications.length>3?w.applications.slice(0,3).concat(["…"]):w.applications
+            return {text:"Workspace "+w.number+(names.length?" — "+names.join(", "):""),action:"show-workspace",
+                    id:w.number,name:"workspace-"+w.number,checked:w.shown}
+        })
     }
     function wifiNetworks() {return wifiAlert.service && wifiAlert.service.available?wifiAlert.service.networks:[]}
     // The networks iwd sees, strongest first (docs/wifi.md): choosing one joins it, asking for a

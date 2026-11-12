@@ -243,7 +243,9 @@ class ChangeTests(unittest.TestCase):
         packages.install(['paint'], self.reports.append, str(self.pacman))
         self.assertEqual(self.calls(), ['-S --needed paint --noconfirm --noprogressbar --color never'])
         self.assertIn({'progress': 'resolving dependencies...'}, self.reports)
-        self.assertIn({'step': 2, 'steps': 2, 'doing': 'installing', 'package': 'paint'}, self.reports)
+        # pacman's own line comes along for the App Store's Activity window.
+        self.assertIn({'step': 2, 'steps': 2, 'doing': 'installing', 'package': 'paint',
+                       'line': '( 2/2) installing paint'}, self.reports)
 
     def test_names_that_could_be_options_are_refused_before_pacman_runs(self):
         for names in (['--root=/tmp'], ['-Rns'], ['Upper'], [], ['ok', 'b c']):

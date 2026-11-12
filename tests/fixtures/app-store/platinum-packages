@@ -40,5 +40,6 @@ elif command == 'install-yay':
 elif command == 'refresh-aur':
     state['packages'].append({'name': 'aurthing', 'version': '3-1', 'description': 'Something from the AUR',
                               'repo': 'aur', 'installed': '', 'votes': 7, 'orphan': True})
+    state['aurUpdated'] = '2026-11-12T13:39:05Z'
 json.dump(state, open(state_path, 'w'))
 say(done=True)

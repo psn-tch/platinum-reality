@@ -45,7 +45,9 @@ Item {
                  {command:"printer",name:"Printer Selector"},
                  {command:"sound",name:"Sound Volume",slider:true},
                  {command:"soundsource",name:"Sound Source"},
-                 {command:"wifi",name:"Wi-Fi"}])
+                 {command:"wifi",name:"Wi-Fi"},
+                 // Platinum Reality's own (Lily Hewitt, 2026-11-12): the workspace showing, and a menu of them.
+                 {command:"workspaces",name:"Workspaces"}])
         .concat(extraModules)
     // The laptop's own battery (BatteryStatus); the module appears only when there is one.
     readonly property var battery: sessionManager.battery
@@ -194,7 +196,8 @@ Item {
                                           : module.modelData.command === "energy" ? "sleep" : module.modelData.command
                                     visible: !module.modelData.icon && !personal.visible
                                     level: strip.battery ? strip.battery.percent : -1
-                                    charging: !!strip.battery && strip.battery.pluggedIn}
+                                    charging: !!strip.battery && strip.battery.pluggedIn
+                                    number: strip.sessionManager.shownWorkspace !== undefined ? strip.sessionManager.shownWorkspace : 0}
                         Image {
                             objectName: "control-strip-icon"
                             x: 2 + module.shift; y: 3 + module.shift; width: 16; height: 16

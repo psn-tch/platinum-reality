@@ -7,10 +7,13 @@ Canvas {
     // The battery module's charge (0-100) and whether power is connected.
     property int level: -1
     property bool charging: false
+    // The workspaces module's number (1-9).
+    property int number: 0
     width: 20; height: 20
     onKindChanged: requestPaint()
     onLevelChanged: if (kind === "battery") requestPaint()
     onChargingChanged: if (kind === "battery") requestPaint()
+    onNumberChanged: if (kind === "workspaces") requestPaint()
     onAvailableChanged: if (available) requestPaint()
     onVisibleChanged: if (visible) requestPaint()
     onPaint: {
@@ -23,6 +26,12 @@ Canvas {
         if(kind==="finder") {
             c.fillStyle="#ddd";c.fillRect(1.5,4.5,13,8);c.strokeRect(1.5,4.5,13,8)
             c.fillStyle="#999";c.fillRect(2,10,12,2);c.fillStyle="#2a2";c.fillRect(11,10,2,1)
+        } else if(kind==="workspaces") {
+            // A screen with the number of the workspace showing on it.
+            c.fillStyle="#eee";c.fillRect(1.5,1.5,13,10);c.strokeRect(1.5,1.5,13,10)
+            c.fillStyle="#222";c.fillRect(6,12,4,1);c.fillRect(4,14,8,1)
+            c.font="bold 8px sans-serif";c.textAlign="center";c.textBaseline="middle"
+            c.fillText(number>0?String(number):"",8,6.75)
         } else if(kind==="applications") {
             c.fillStyle="#eee";c.fillRect(1.5,2.5,13,11);c.strokeRect(1.5,2.5,13,11)
             c.fillStyle="#999";c.fillRect(2,3,12,3);c.fillStyle="#777";c.fillRect(3,8,10,1);c.fillRect(3,10,7,1)

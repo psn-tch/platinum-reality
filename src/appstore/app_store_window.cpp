@@ -1,4 +1,5 @@
 #include "app_store_window.hpp"
+#include "activity_window.hpp"
 #include "finder/list_view_parts.hpp"
 #include "finder/platinum_style.hpp"
 #include "package_client.hpp"
@@ -168,8 +169,14 @@ AppStoreWindow::AppStoreWindow(PackageClient *client, QWidget *parent)
     m_progress->setObjectName("appStoreProgress");
     m_progress->setTextVisible(false);
     m_progress->setFixedWidth(180);
+    // Activity…: every line of the work, as its programs write it.
+    m_activity = new ActivityWindow(this);
+    m_activityButton = new QPushButton("Activity…");
+    m_activityButton->setObjectName("appStoreActivityButton");
+    connect(m_activityButton, &QPushButton::clicked, this, &AppStoreWindow::showActivity);
     workingLayout->addWidget(m_status, 1);
     workingLayout->addWidget(m_progress);
+    workingLayout->addWidget(m_activityButton);
     m_progress->hide();
     layout->addWidget(working);
     setCentralWidget(body);
@@ -182,6 +189,8 @@ AppStoreWindow::AppStoreWindow(PackageClient *client, QWidget *parent)
     connect(m_findDelay, &QTimer::timeout, this, [this] {
         m_filter->setSearch(m_find->text());
         refreshCount();
+        if (!m_list->currentIndex().isValid())
+            describe();
     });
     connect(m_show, &QComboBox::activated, this, &AppStoreWindow::showChosen);
     connect(m_list->selectionModel(), &QItemSelectionModel::currentChanged, this, &AppStoreWindow::describe);
@@ -191,7 +200,9 @@ AppStoreWindow::AppStoreWindow(PackageClient *client, QWidget *parent)
     });
     connect(m_primary, &QPushButton::clicked, this, [this] {
         const auto *p = chosenPackage();
-        if (!p && m_model->view() == CatalogModel::AurPackages)
+        if (!p && m_offerAur)
+            m_model->catalog().aurUpdated.isEmpty() ? refreshAur() : showAurPackages();
+        else if (!p && m_model->view() == CatalogModel::AurPackages)
             m_model->catalog().yay ? refreshAur() : installYay();
         else if (!p && m_model->view() == CatalogModel::Applications)
             installAppCatalog();
@@ -208,6 +219,7 @@ AppStoreWindow::AppStoreWindow(PackageClient *client, QWidget *parent)
         alert("The software lists could not be read.", error);
     });
     connect(m_client, &PackageClient::progress, this, &AppStoreWindow::changeProgress);
+    connect(m_client, &PackageClient::output, m_activity, &ActivityWindow::line);
     connect(m_client, &PackageClient::finished, this, &AppStoreWindow::changeFinished);
 
     m_showItems.append({"All Applications", CatalogModel::Applications, {}});
@@ -257,6 +269,16 @@ void AppStoreWindow::buildMenus()
     software->addSeparator();
     m_yayAction = software->addAction("Install yay…", this, &AppStoreWindow::installYay);
     m_aurAction = software->addAction("Download the AUR List", this, &AppStoreWindow::refreshAur);
+    software->addSeparator();
+    m_activityAction = software->addAction("Show Activity", this, &AppStoreWindow::showActivity);
+    setClassicShortcuts(m_activityAction, QKeySequence(Qt::CTRL | Qt::Key_L));
+}
+
+void AppStoreWindow::showActivity()
+{
+    m_activity->show();
+    m_activity->raise();
+    m_activity->activateWindow();
 }
 
 void AppStoreWindow::catalogLoaded(const Catalog &catalog)
@@ -343,6 +365,10 @@ void AppStoreWindow::describe()
         m_open->hide();
         m_extra->hide();
         m_primary->hide();
+        m_offerAur = false;
+        const bool nothingFound = m_loaded && m_model->view() != CatalogModel::AurPackages && catalog.yay &&
+                                  !m_filter->words().isEmpty() && m_filter->rowCount() == 0;
+        const int aurMatches = nothingFound ? m_model->aurMatches(m_filter->words()) : 0;
         if (m_loaded && m_model->view() == CatalogModel::AurPackages && !catalog.yay)
         {
             m_title->setText("AUR Packages");
@@ -358,6 +384,27 @@ void AppStoreWindow::describe()
             m_title->setText("AUR Packages");
             m_summary->setText("The list of AUR packages hasn't been downloaded yet (about 10 MB).");
             m_primary->setText("Download");
+            m_primary->show();
+        }
+        else if (nothingFound && (aurMatches > 0 || catalog.aurUpdated.isEmpty()))
+        {
+            // Searches look in the list showing; the AUR is a list of its own.
+            m_offerAur = true;
+            m_title->setText("Not in this list");
+            const auto search = "“" + m_find->text().simplified() + "”";
+            if (catalog.aurUpdated.isEmpty())
+            {
+                m_summary->setText("The AUR may have " + search + ". Its list of packages hasn't been "
+                                   "downloaded yet (about 10 MB).");
+                m_primary->setText("Download the AUR List");
+            }
+            else
+            {
+                m_summary->setText(QString("%1 AUR %2 %3.")
+                                       .arg(aurMatches)
+                                       .arg(aurMatches == 1 ? "package matches" : "packages match", search));
+                m_primary->setText("Show AUR Packages");
+            }
             m_primary->show();
         }
         else if (m_loaded && m_model->view() == CatalogModel::Applications && catalog.apps.isEmpty())
@@ -429,6 +476,7 @@ void AppStoreWindow::updateActions()
     m_updateAllAction->setEnabled(idle && m_loaded);
     m_yayAction->setEnabled(idle && m_loaded && !m_model->catalog().yay);
     m_aurAction->setEnabled(idle && m_loaded && m_model->catalog().yay);
+    m_aurAction->setText(m_model->catalog().aurUpdated.isEmpty() ? "Download the AUR List" : "Update the AUR List");
 }
 
 bool AppStoreWindow::ask(const QString &text, const QString &detail, const QString &action, bool caution)
@@ -468,6 +516,7 @@ bool AppStoreWindow::start(const QStringList &arguments, const QString &doing)
     if (!m_client->run(arguments))
         return false;
     m_doing = doing;
+    m_activity->begin(doing);
     m_status->setText(doing + "…");
     m_progress->setRange(0, 0);
     m_progress->show();
@@ -566,6 +615,17 @@ void AppStoreWindow::installYay()
     start({"install-yay"}, "Installing yay");
 }
 
+void AppStoreWindow::showAurPackages()
+{
+    for (int index = 0; index < m_showItems.size(); ++index)
+        if (!m_showItems[index].text.isEmpty() && m_showItems[index].view == CatalogModel::AurPackages)
+        {
+            m_show->setCurrentIndex(m_show->findText(m_showItems[index].text));
+            showChosen(m_show->currentIndex());
+            return;
+        }
+}
+
 void AppStoreWindow::refreshAur()
 {
     if (m_client->busy() || !m_model->catalog().yay)
@@ -575,6 +635,7 @@ void AppStoreWindow::refreshAur()
 
 void AppStoreWindow::changeProgress(const QString &text, int step, int steps)
 {
+    m_activity->progress(step, steps);
     if (step > 0 && steps > 0)
     {
         m_progress->setRange(0, steps);
@@ -589,6 +650,7 @@ void AppStoreWindow::changeFinished(bool ok, const QString &error, bool cancelle
 {
     m_progress->hide();
     m_status->clear();
+    m_activity->finish(ok, error, cancelled);
     const auto doing = m_doing;
     m_doing.clear();
     const auto touched = m_client->touched();
@@ -602,6 +664,9 @@ void AppStoreWindow::changeFinished(bool ok, const QString &error, bool cancelle
             QTimer::singleShot(0, this, [this] { start({"refresh-aur"}, "Downloading the AUR list"); });
             return;
         }
+        // The list is what was asked for: show it, keeping any search.
+        if (doing == "Downloading the AUR list")
+            showAurPackages();
         if (needsRestart(touched))
             alert("Restart the computer to finish updating.",
                   "Some of the system's own software was updated. It is used from the next restart.");

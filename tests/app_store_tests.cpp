@@ -1,4 +1,5 @@
 #include "appearance/interface_font.hpp"
+#include "appstore/activity_window.hpp"
 #include "appstore/app_store_window.hpp"
 #include "appstore/package_client.hpp"
 #include "finder/list_view_parts.hpp"
@@ -170,6 +171,41 @@ class AppStoreTests final : public QObject
         QCOMPARE(window.lastAlert(), QString());
     }
 
+    void activityShowsEveryLineAsItsProgramsWroteIt()
+    {
+        // Lily Hewitt, 2026-11-11: "a window ... to check and monitor ... like a mini terminal".
+        PackageClient client(path("platinum-packages"));
+        AppStoreWindow window(&client);
+        window.show();
+        QTRY_VERIFY(choose(window, "Paint"));
+        QVERIFY(window.m_activityButton->isVisible());
+        window.m_activityAction->trigger();
+        QTRY_VERIFY(window.m_activity->isVisible());
+        QCOMPARE(window.m_activity->findChild<QLabel *>("appStoreActivityHeading")->text(),
+                 QString("Nothing is being installed or removed right now."));
+        write(path("pause"), "");
+        window.m_primary->click();
+        QTRY_VERIFY(window.m_activity->findChild<QLabel *>("appStoreActivityHeading")->text().startsWith("Installing Paint"));
+        QFile::remove(path("pause"));
+        QTRY_VERIFY(!window.m_progress->isVisible());
+        const auto text = window.m_activity->text();
+        // The helper's own lines, pacman's numbered step and what yay said directly, in order.
+        QVERIFY2(text.startsWith("— Installing Paint, ") &&
+                     text.section('\n', 1).startsWith("resolving dependencies...\n(1/1) installing paint\n"
+                                                       "==> yay talks directly sometimes\n— Installing Paint: finished. —"),
+                 qPrintable(text));
+        // A failure says why, in the log too. (Once the lists have been read again after the install.)
+        QTRY_VERIFY(!client.busy() && !client.loading());
+        QVERIFY(choose(window, "Paint"));
+        QTRY_VERIFY(window.m_extra->isVisible() && window.m_extra->isEnabled());
+        write(path("fail"), "The disk is full.");
+        window.setTestAnswers({true});
+        window.m_extra->click();
+        QTRY_VERIFY(window.m_activity->text().contains("error: The disk is full."));
+        QTRY_VERIFY(window.m_activity->text().contains("didn’t work. The disk is full. —"));
+        snap(window.m_activity, "activity");
+    }
+
     void removingAsksFirstAndFailuresAreExplained()
     {
         auto state = fixture("catalog.json").replace(R"("installed": "", "url")", R"("installed": "2.0-1", "explicit": true, "url")");
@@ -231,6 +267,45 @@ class AppStoreTests final : public QObject
         QTRY_VERIFY(log().contains("install-aur aurthing"));
         QTRY_VERIFY(!client.busy());
         snap(&window, "5-aur-installed");
+    }
+
+    void searchesThatFindNothingLeadToTheAur()
+    {
+        // Lily Hewitt, 2026-11-12: she downloaded the AUR list every time she looked for software,
+        // because a search only looks in the list showing and never in the AUR's.
+        write(path("catalog.json"), fixture("catalog.json").replace(R"("yay": false)", R"("yay": true)"));
+        PackageClient client(path("platinum-packages"));
+        AppStoreWindow window(&client);
+        window.show();
+        QTRY_VERIFY(window.m_count->text().contains("applications"));
+        QCOMPARE(window.m_aurAction->text(), QString("Download the AUR List"));
+        window.m_find->setText("aurthing");
+        QTRY_COMPARE(window.m_title->text(), QString("Not in this list"));
+        QVERIFY(window.m_summary->text().contains("hasn't been downloaded"));
+        QCOMPARE(window.m_primary->text(), QString("Download the AUR List"));
+        window.m_primary->click();
+        QTRY_VERIFY(log().contains("refresh-aur"));
+        // The downloaded list shows, still searching.
+        QTRY_COMPARE(window.m_model->view(), CatalogModel::AurPackages);
+        QTRY_COMPARE(window.m_list->model()->rowCount(), 1);
+        QCOMPARE(window.m_find->text(), QString("aurthing"));
+        QTRY_COMPARE(window.m_aurAction->text(), QString("Update the AUR List"));
+        // Another time, All Applications offers the AUR's matches without downloading anything.
+        show(window, "All Applications");
+        QTRY_COMPARE(window.m_title->text(), QString("Not in this list"));
+        QCOMPARE(window.m_summary->text(), QString("1 AUR package matches “aurthing”."));
+        QCOMPARE(window.m_primary->text(), QString("Show AUR Packages"));
+        const auto downloads = log().count("refresh-aur");
+        window.m_primary->click();
+        QTRY_COMPARE(window.m_model->view(), CatalogModel::AurPackages);
+        QCOMPARE(window.m_list->model()->rowCount(), 1);
+        QCOMPARE(log().count("refresh-aur"), downloads);
+        // A search the AUR can't help with says nothing about it.
+        show(window, "All Packages");
+        window.m_find->setText("nothing like this anywhere");
+        QTRY_COMPARE(window.m_filter->rowCount(), 0);
+        QTRY_COMPARE(window.m_title->text(), QString("Choose something in the list."));
+        snap(&window, "aur-from-search");
     }
 
     void updatesGoThroughUpdateAllAndAskForARestart()
@@ -320,6 +395,14 @@ class AppStoreTests final : public QObject
         show(window, "All Packages");
         QVERIFY(window.m_list->model()->rowCount() > 10000);
         snap(&window, "real-packages");
+        // With yay and a downloaded AUR list, the AUR packages are listed without downloading again.
+        if (window.m_model->catalog().yay && !window.m_model->catalog().aurUpdated.isEmpty())
+        {
+            show(window, "AUR Packages");
+            QVERIFY(window.m_list->model()->rowCount() > 1000);
+            QVERIFY(window.m_primary->isHidden() || window.m_primary->text() != "Download");
+            snap(&window, "real-aur");
+        }
     }
 
     void aMissingHelperIsReported()

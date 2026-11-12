@@ -97,13 +97,22 @@ void PackageClient::readChange()
         {
             // Not one of the helper's lines (yay and makepkg talk directly): show it as it is.
             if (!line.isEmpty())
+            {
+                emit output(QString::fromUtf8(line));
                 emit progress(QString::fromUtf8(line), -1, -1);
+            }
             continue;
         }
         if (message.contains("error"))
+        {
             m_error = message.value("error").toString();
+            emit output("error: " + m_error);
+        }
         else if (message.value("cancelled").toBool())
+        {
             m_cancelled = true;
+            emit output("Cancelled: the password wasn’t given.");
+        }
         else if (message.contains("step"))
         {
             static const QHash<QString, QString> verbs{{"installing", "Installing"}, {"upgrading", "Updating"},
@@ -112,6 +121,9 @@ void PackageClient::readChange()
             const auto name = message.value("package").toString();
             m_touched.append(name);
             const int step = message.value("step").toInt(), steps = message.value("steps").toInt();
+            emit output(message.value("line").toString(
+                QString("(%1/%2) %3 %4").arg(message.value("step").toInt()).arg(message.value("steps").toInt())
+                    .arg(message.value("doing").toString(), name)));
             emit progress(QString("%1 %2 (%3 of %4)…")
                               .arg(verbs.value(message.value("doing").toString(), "Installing"), name)
                               .arg(step)
@@ -119,6 +131,9 @@ void PackageClient::readChange()
                           step, steps);
         }
         else if (message.contains("progress"))
+        {
+            emit output(message.value("progress").toString());
             emit progress(message.value("progress").toString(), -1, -1);
+        }
     }
 }
