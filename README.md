@@ -8,10 +8,32 @@ Linux applications: Firefox, Chromium, Steam, your terminal, your games.
 It is its own Wayland compositor (built with Qt 6), not a theme on top of another desktop, and not
 an emulator: no Apple software runs, and none is included.
 
-![Platinum Reality on its first start: the menu bar, a Finder window, the desktop and the Control Strip](docs/images/first-start.png)
+![Platinum Reality with Mac OS 9.2.2's icons imported: the Apple menu with Control Panels open, Finder windows, About This Computer and a sticky note](docs/images/screenshots/platinum-reality.png)
+
+> These pictures show Platinum Reality after **Asset Importer** has read a Mac OS 9.2.2 installation:
+> its icons, the rainbow Apple, desktop pictures, alert sounds and cursors. Platinum Reality includes
+> none of Apple's files. Bring your own Mac OS 9 installation, or use it as it comes, with its own
+> original artwork ([how that looks](#without-imported-files)).
 
 > **Status: early.** It is used daily on one machine and passes a large automatic test suite, but
 > it has been tried on very little hardware. Expect rough edges, and keep another desktop installed.
+
+## Screenshots
+
+| | |
+|:---:|:---:|
+| ![Control Panels: Desktop Picture, showing Mac OS 9.2.2's Ensemble Pictures collection](docs/images/screenshots/control-panels.png) | ![The Control Strip's Wi-Fi menu with nearby networks](docs/images/screenshots/control-strip.png) |
+| **Control Panels**, every panel in one window | **Control Strip** modules, each a pop-up menu |
+| ![The App Store with Firefox selected](docs/images/screenshots/app-store.png) | ![Calculator, Key Caps, Note Pad, Scrapbook and Stickies](docs/images/screenshots/desk-accessories.png) |
+| **App Store**: Arch packages and the AUR, Sherlock style | **Desk accessories**: Calculator, Key Caps, Note Pad, Scrapbook, Stickies |
+| ![The Installer choosing a destination disk](docs/images/screenshots/installer.png) | ![The Log In lock screen](docs/images/screenshots/lock-screen.png) |
+| **Installer**, laid out like Mac OS 9's | **Log In** lock screen, with fingerprint unlock |
+
+### Without imported files
+
+Out of the box, Platinum Reality uses its own original artwork:
+
+![The same desktop with Platinum Reality's own artwork](docs/images/screenshots/original-artwork.png)
 
 ## What you get
 
