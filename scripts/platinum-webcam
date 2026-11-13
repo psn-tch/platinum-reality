@@ -1,0 +1,42 @@
+#!/usr/bin/python3 -I
+"""The Control Strip's Camera switch (docs/camera-switch.md). JSON lines out.
+Usage: platinum-webcam status
+       platinum-webcam off     (through pkexec; no password: turning the camera off is always allowed)
+       platinum-webcam on      (through pkexec; an administrator's password)"""
+import json
+import os
+import sys
+
+sys.path.insert(0, '/usr/lib/platinum-reality')
+import platinum_webcam  # noqa: E402
+
+
+def report(message):
+    print(json.dumps(message), flush=True)
+
+
+def main(arguments):
+    os.umask(0o022)
+    if arguments == ['status']:
+        report(platinum_webcam.status())
+        return 0
+    if arguments not in (['on'], ['off']):
+        report({'error': __doc__.split('\n', 1)[1]})
+        return 2
+    if os.geteuid() != 0:
+        report({'error': 'Switching the camera needs an administrator.'})
+        return 1
+    try:
+        if arguments == ['off']:
+            platinum_webcam.turn_off()
+        else:
+            platinum_webcam.turn_on()
+    except (platinum_webcam.CameraError, OSError) as problem:
+        report({'error': str(problem), **platinum_webcam.status()})
+        return 1
+    report({'done': True, **platinum_webcam.status()})
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

@@ -17,7 +17,8 @@ DesktopWindow {
     height: details ? 574 : 322
     readonly property bool details: choosingLocal || (service !== null && service !== undefined
         && (service.phase !== "" && service.phase !== "idle" || service.checked || service.error !== ""
-            || service.available.version !== undefined || service.readyRelease.version !== undefined))
+            || service.available.version !== undefined || service.readyRelease.version !== undefined
+            || service.restartNeeded || service.message !== ""))
     required property var service
     property bool choosingLocal: false
     readonly property bool busy: service ? service.busy : false
@@ -74,7 +75,7 @@ DesktopWindow {
         }
         // Where 9.2.2 shows its schedule: ours checks once a week and only tells you.
         Rectangle {
-            x: 112; y: 28; width: 200; height: 40; color: "#eee"; border.color: "#888"
+            x: 112; y: 28; width: 200; height: 46; color: "#eee"; border.color: "#888"
             Text {
                 x: 6; y: 4; width: parent.width - 12; wrapMode: Text.WordWrap; font.pixelSize: 11; textFormat: Text.PlainText
                 color: automatic.checked ? "black" : "#888"
@@ -100,13 +101,15 @@ DesktopWindow {
                     width: parent.width; wrapMode: Text.WordWrap; font.pixelSize: 12; textFormat: Text.PlainText
                     readonly property var found: panel.service ? panel.service.available : ({})
                     readonly property var local: panel.service ? panel.service.readyRelease : ({})
-                    font.bold: found.version !== undefined || local.version !== undefined
-                    text: panel.service && panel.service.phase === "checking" ? "Checking for updates…"
+                    font.bold: found.version !== undefined || local.version !== undefined || restart
+                    readonly property bool restart: panel.service ? panel.service.restartNeeded : false
+                    text: restart && panel.service.phase === "" ? panel.service.message
+                        : panel.service && panel.service.phase === "checking" ? "Checking for updates…"
                         : local.version !== undefined ? "Platinum Reality " + local.version + " is ready to install."
                         : found.version !== undefined ? "Platinum Reality " + found.version + " is available"
                               + (found.date ? " (" + panel.dateText(found.date) + ")" : "") + "."
                         : panel.service && panel.service.checked ? "Your Platinum Reality is up to date."
-                        : "Click Check Now to look for a newer Platinum Reality."
+                        : "Click Update Now to look for a newer Platinum Reality."
                 }
                 ScrollView {
                     id: notesView
@@ -179,6 +182,9 @@ DesktopWindow {
         Text {
             objectName: "software-update-message"
             width: parent.width; wrapMode: Text.WordWrap; font.pixelSize: 12; textFormat: Text.PlainText
+            // After an install its message is in the box above, beside Restart Desktop.
+            visible: !(panel.service && panel.service.restartNeeded && panel.service.phase === ""
+                       && !panel.service.error)
             color: panel.service && panel.service.error ? "#900" : "black"
             text: !panel.service ? ""
                 : panel.service.error ? panel.service.error
@@ -192,6 +198,14 @@ DesktopWindow {
     Row {
         anchors.right: parent.right; anchors.rightMargin: 16; anchors.bottom: parent.bottom; anchors.bottomMargin: 14
         spacing: 10
+        PlatinumButton {
+            // The new version runs once the desktop restarts; the applications open again.
+            objectName: "software-update-restart-desktop"; text: "Restart Desktop"
+            visible: panel.service && panel.service.restartNeeded && typeof manager !== "undefined"
+                     && manager.restartDesktopAvailable
+            enabled: !panel.busy && typeof desktop !== "undefined" && desktop
+            onClicked: desktop.restartDesktop()
+        }
         PlatinumButton {
             objectName: "software-update-restore"; text: "Restore Previous Version…"
             visible: panel.service && panel.service.previousKept

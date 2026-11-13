@@ -1,13 +1,18 @@
 #include "puzzle_window.hpp"
 #include "finder/platinum_style.hpp"
 #include <QApplication>
+#include <QDir>
+#include <QFileInfo>
 #include <QFrame>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenuBar>
+#include <QPainter>
 #include <QPushButton>
 #include <QRandomGenerator>
 #include <QShortcut>
+#include <QStyleOptionButton>
+#include <algorithm>
 
 PuzzleWindow::PuzzleWindow(SlidingPuzzle puzzle, QWidget *parent)
     : QMainWindow(parent), m_puzzle(std::move(puzzle))
@@ -47,6 +52,24 @@ PuzzleWindow::PuzzleWindow(SlidingPuzzle puzzle, QWidget *parent)
     auto *quit = file->addAction("Quit Puzzle");
     setClassicShortcuts(quit, QKeySequence::Quit);
     connect(quit, &QAction::triggered, this, &QWidget::close);
+    // As System 7's Puzzle desk accessory: only Clear does anything, switching picture and numbers.
+    auto *editMenu = menuBar()->addMenu("Edit");
+    for (const auto &[text, key] : {std::pair{"Undo", QKeySequence::Undo}, std::pair{"", QKeySequence::UnknownKey},
+                                    std::pair{"Cut", QKeySequence::Cut}, std::pair{"Copy", QKeySequence::Copy},
+                                    std::pair{"Paste", QKeySequence::Paste}})
+    {
+        if (!*text)
+        {
+            editMenu->addSeparator();
+            continue;
+        }
+        auto *action = editMenu->addAction(text);
+        setClassicShortcuts(action, key);
+        action->setEnabled(false);
+    }
+    m_clear = editMenu->addAction("Clear", this, &PuzzleWindow::clear);
+    m_clear->setObjectName("puzzle-clear");
+    m_clear->setEnabled(false);
     // These are game controls even when a button has keyboard focus. A window
     // keyPressEvent alone loses arrows to QPushButton's focus navigation.
     for (const auto key : {Qt::Key_Left, Qt::Key_Right, Qt::Key_Up, Qt::Key_Down})
@@ -85,6 +108,69 @@ void PuzzleWindow::keyPressEvent(QKeyEvent *event)
     }
     QMainWindow::keyPressEvent(event);
 }
+QImage PuzzleWindow::personalApple()
+{
+    auto folder = qEnvironmentVariable("PLATINUM_PERSONAL_ASSETS");
+    if (folder.isEmpty())
+    {
+        auto data = qEnvironmentVariable("XDG_DATA_HOME");
+        if (!QDir::isAbsolutePath(data))
+            data = QDir::homePath() + "/.local/share";
+        folder = data + "/platinum-reality/assets";
+    }
+    for (const auto &name : {"apple-menu.png", "apple-menu-16.png"})
+    {
+        const QFileInfo file(folder + "/icons/" + name);
+        if (file.isFile() && file.size() < 1024 * 1024)
+            if (QImage image(file.filePath()); !image.isNull())
+                return image;
+    }
+    return {};
+}
+
+void PuzzleWindow::setPicture(const QImage &picture)
+{
+    m_pieces.clear();
+    if (!picture.isNull())
+    {
+        // The board is the 4x4 tiles' insides (where the style puts a button's label) side by side.
+        // The picture's visible part is enlarged by a whole number, square pixels as a Mac drew it,
+        // and centred on white, as System 7's was.
+        QStyleOptionButton option;
+        option.initFrom(m_buttons[0]);
+        option.rect = m_buttons[0]->rect();
+        const auto label = m_buttons[0]->style()->subElementRect(QStyle::SE_PushButtonContents, &option, m_buttons[0]);
+        const int inside = std::min(label.width(), label.height()), board = inside * 4;
+        QImage visible = picture.convertToFormat(QImage::Format_ARGB32);
+        QRect bounds;
+        for (int y = 0; y < visible.height(); ++y)
+            for (int x = 0; x < visible.width(); ++x)
+                if (qAlpha(visible.pixel(x, y)) > 0)
+                    bounds |= QRect(x, y, 1, 1);
+        if (bounds.isValid())
+            visible = visible.copy(bounds);
+        const int scale = std::max(1, std::min(board / visible.width(), board / visible.height()));
+        QPixmap whole(board, board);
+        whole.fill(Qt::white);
+        QPainter painter(&whole);
+        const QSize size = visible.size() * scale;
+        painter.drawImage(QRect(QPoint((board - size.width()) / 2, (board - size.height()) / 2), size), visible);
+        painter.end();
+        for (int n = 0; n < 15; ++n)
+            m_pieces.append(whole.copy((n % 4) * inside, (n / 4) * inside, inside, inside));
+        for (auto *button : m_buttons)
+            button->setIconSize(QSize(inside, inside));
+    }
+    m_clear->setEnabled(!m_pieces.isEmpty());
+    refresh();
+}
+
+void PuzzleWindow::clear()
+{
+    m_showPicture = !m_showPicture;
+    refresh();
+}
+
 void PuzzleWindow::newPuzzle()
 {
     m_puzzle.shuffle(QRandomGenerator::global()->generate());
@@ -100,7 +186,9 @@ void PuzzleWindow::refresh()
     for (int i = 0; i < 16; ++i)
     {
         const auto number = m_puzzle.tiles()[i];
-        m_buttons[i]->setText(number ? QString::number(number) : QString());
+        const bool picture = number && showingPicture();
+        m_buttons[i]->setText(number && !picture ? QString::number(number) : QString());
+        m_buttons[i]->setIcon(picture ? QIcon(m_pieces[number - 1]) : QIcon());
         m_buttons[i]->setVisible(number != 0);
         m_buttons[i]->setAccessibleName(number ? QString("Tile %1").arg(number) : "Empty space");
     }

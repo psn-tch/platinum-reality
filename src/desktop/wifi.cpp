@@ -3,6 +3,7 @@
 #include <QDBusMetaType>
 #include <QDBusPendingCallWatcher>
 #include <QDBusServiceWatcher>
+#include <QFile>
 #include <QNetworkInterface>
 #include <QRegularExpression>
 #include <QSet>
@@ -538,6 +539,53 @@ void WifiService::propertiesChanged(const QString &interface, const QVariantMap 
         scheduleChanged();
 }
 
+QHash<QString, QString> WifiService::routers(const QString &routeFile)
+{
+    // Iface Destination Gateway Flags ...: the default route (destination 0) has the router,
+    // in hexadecimal, least significant byte first.
+    QHash<QString, QString> result;
+    QFile file(routeFile);
+    if (!file.open(QIODevice::ReadOnly))
+        return result;
+    file.readLine();
+    while (!file.atEnd())
+    {
+        const auto fields = QString::fromLatin1(file.readLine()).split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        bool ok = false;
+        const auto gateway = fields.size() > 2 ? fields[2].toUInt(&ok, 16) : 0;
+        if (!ok || fields[1] != "00000000" || gateway == 0 || result.contains(fields[0]))
+            continue;
+        result.insert(fields[0], QString("%1.%2.%3.%4").arg(gateway & 0xff).arg((gateway >> 8) & 0xff)
+                                     .arg((gateway >> 16) & 0xff).arg(gateway >> 24));
+    }
+    return result;
+}
+QVariantMap WifiService::readResolvConf(const QStringList &files)
+{
+    for (const auto &path : files)
+    {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly) || file.size() > 64 * 1024)
+            continue;
+        QStringList servers, domains;
+        for (const auto &line : QString::fromUtf8(file.readAll()).split('\n'))
+        {
+            const auto words = line.simplified().split(' ', Qt::SkipEmptyParts);
+            if (words.size() >= 2 && words[0] == "nameserver" && !servers.contains(words[1]))
+                servers.append(words[1]);
+            else if (words.size() >= 2 && (words[0] == "search" || words[0] == "domain"))
+                for (const auto &domain : words.mid(1))
+                    if (!domains.contains(domain)) domains.append(domain);
+        }
+        return {{"servers", servers}, {"domains", domains}};
+    }
+    return {{"servers", QStringList()}, {"domains", QStringList()}};
+}
+QVariantMap WifiService::nameServers() const
+{
+    // systemd-resolved's own list holds the real servers; /etc/resolv.conf then names only its stub.
+    return readResolvConf({"/run/systemd/resolve/resolv.conf", "/etc/resolv.conf"});
+}
 QVariantList WifiService::connections() const
 {
     QVariantList result;
@@ -554,13 +602,15 @@ QVariantList WifiService::connections() const
             // Link-local IPv6 addresses (fe80::) say nothing useful about the connection.
             if (ip.isNull() || ip.isLinkLocal())
                 continue;
-            addresses.append(QVariantMap{{"address", ip.toString()},
-                                         {"version", ip.protocol() == QAbstractSocket::IPv6Protocol ? 6 : 4}});
+            const bool v6 = ip.protocol() == QAbstractSocket::IPv6Protocol;
+            addresses.append(QVariantMap{{"address", ip.toString()}, {"version", v6 ? 6 : 4},
+                                         {"netmask", v6 ? QString() : entry.netmask().toString()}});
         }
         if (addresses.isEmpty())
             continue;
         const auto type = interface.type();
         result.append(QVariantMap{{"name", interface.humanReadableName()},
+                                  {"router", routers().value(interface.name())},
                                   {"kind", type == QNetworkInterface::Wifi ? "Wi-Fi"
                                            : type == QNetworkInterface::Ethernet ? "Ethernet" : "Other"},
                                   {"hardware", interface.hardwareAddress()},

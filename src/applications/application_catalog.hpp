@@ -14,6 +14,9 @@ class ApplicationCatalog final : public QAbstractListModel
     Q_PROPERTY(bool ready READ ready NOTIFY stateChanged)
     Q_PROPERTY(QString notice READ notice NOTIFY stateChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    // File Exchange (docs/file-exchange.md): the common kinds of document and every kind with a
+    // chosen application: [{type, kind, extension, application, applicationName}], by extension.
+    Q_PROPERTY(QVariantList fileTypes READ fileTypes NOTIFY associationsChanged)
   public:
     enum Role { IdRole = Qt::UserRole + 1, NameRole, DescriptionRole, LaunchableRole, ReasonRole };
     ApplicationCatalog(QStringList directories, QString workspace, QString profile,
@@ -40,6 +43,13 @@ class ApplicationCatalog final : public QAbstractListModel
     QString builtInAction(const QString &id) const;
     QString preferredApplication(const QString &document) const;
     bool rememberApplication(const QString &id, const QString &document, QString &error);
+    QVariantList fileTypes() const;
+    // The applications that say they open this kind of document: [{id, name, icon}], by name.
+    Q_INVOKABLE QVariantList applicationsFor(const QString &type) const;
+    // The application that opens this kind from now on; an empty id forgets the choice.
+    Q_INVOKABLE bool setFileTypeApplication(const QString &type, const QString &id);
+    // The kind of document an extension ("txt" or ".txt") names: {type, kind, extension}, or {}.
+    Q_INVOKABLE QVariantMap fileTypeFor(const QString &extension) const;
     QString applicationName(const QString &waylandId) const;
     QString applicationIcon(const QString &waylandId) const;
   signals:
@@ -47,8 +57,10 @@ class ApplicationCatalog final : public QAbstractListModel
     void stateChanged();
     void countChanged();
     void refreshed();
+    void associationsChanged();
   private:
     void filter();
+    bool saveAssociations(QMap<QString, QString> next, QString &error);
     QString reason(const frankenstein::applications::DesktopEntry &) const;
     bool matchesDocument(const frankenstein::applications::DesktopEntry &) const;
     const frankenstein::applications::DesktopEntry *find(const QString &id) const;

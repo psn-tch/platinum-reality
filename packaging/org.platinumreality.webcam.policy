@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- The Control Strip's Camera switch (docs/camera-switch.md), through this one helper only.
+     Turning the camera off never asks: it only takes access away. Turning it on asks for an
+     administrator's password every time, so no program can quietly switch the camera back on. -->
+<policyconfig>
+  <vendor>Platinum Reality</vendor>
+  <vendor_url>https://github.com/psn-tch/platinum-reality</vendor_url>
+  <action id="org.platinumreality.webcam.off">
+    <description>Turn the camera off</description>
+    <message>Turning the camera off needs permission.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/platinum-reality/platinum-webcam</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">off</annotate>
+  </action>
+  <action id="org.platinumreality.webcam.on">
+    <description>Turn the camera on</description>
+    <message>The Control Strip needs an administrator's password to turn the camera back on.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/platinum-reality/platinum-webcam</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">on</annotate>
+  </action>
+</policyconfig>

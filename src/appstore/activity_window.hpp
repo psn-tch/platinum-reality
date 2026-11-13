@@ -6,7 +6,7 @@ class QPlainTextEdit;
 class QProgressBar;
 
 // Software ▸ Show Activity (Lily Hewitt, 2026-11-11): what the App Store is doing, line by line, as
-// pacman, yay and makepkg write it, like a small Terminal window. It only shows; it never asks or
+// pacman, the AUR helper (yay or paru) and makepkg write it, like a small Terminal window. It only shows; it never asks or
 // types anything. The log is kept while the App Store is open, the newest 5000 lines.
 class ActivityWindow final : public QWidget
 {

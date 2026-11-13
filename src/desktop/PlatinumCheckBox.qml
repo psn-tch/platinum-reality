@@ -20,6 +20,10 @@ CheckBox {
             id: tick
             anchors.fill:parent
             Connections {target:control;function onCheckedChanged(){tick.requestPaint()} function onEnabledChanged(){tick.requestPaint()}}
+            // A box already ticked in a panel that was hidden when made: paint once it can be seen.
+            onAvailableChanged: if (available) requestPaint()
+            onVisibleChanged: if (visible) requestPaint()
+            onWidthChanged: requestPaint()
             onPaint: {
                 let c = getContext("2d");c.clearRect(0,0,width,height)
                 if(control.checked){c.strokeStyle=control.enabled?"#111":"#888";c.lineWidth=2;c.beginPath();c.moveTo(3,6);c.lineTo(6,9);c.lineTo(11,3);c.stroke()}

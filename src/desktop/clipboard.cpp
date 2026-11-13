@@ -4,6 +4,7 @@
 #include "clipboard_transfers.hpp"
 #include <new>
 #include <QBuffer>
+#include <QCryptographicHash>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QHash>
@@ -21,6 +22,7 @@
 #include <QtWaylandCompositor/private/qwayland-server-wayland.h>
 #include <QtWaylandCompositor/private/qwldatadevice_p.h>
 #include <QtWaylandCompositor/private/qwldatadevicemanager_p.h>
+#include <QtWaylandCompositor/private/qwldatasource_p.h>
 #include <wayland-server-core.h>
 #include <wayland-server-protocol.h>
 #include <functional>
@@ -107,6 +109,19 @@ template struct Expose<QtRetainedData, &QtWayland::DataDeviceManager::m_retained
 template struct Expose<QtRetainedBuffer, &QtWayland::DataDeviceManager::m_retainedReadBuf>;
 template struct Expose<QtOwnsSelection, &QtWayland::DataDeviceManager::m_compositorOwnsSelection>;
 template struct Expose<QtSeats, &QWaylandCompositorPrivate::seats>;
+// The source of the drag in progress, and the types it offers (for dragOfferedTypes).
+struct QtDragSource
+{
+    using type = QtWayland::DataSource *QtWayland::DataDevice::*;
+    friend type exposed(QtDragSource);
+};
+struct QtSourceTypes
+{
+    using type = QList<QString> QtWayland::DataSource::*;
+    friend type exposed(QtSourceTypes);
+};
+template struct Expose<QtDragSource, &QtWayland::DataDevice::m_dragDataSource>;
+template struct Expose<QtSourceTypes, &QtWayland::DataSource::m_mimeTypes>;
 
 // X11 selection-protocol targets that X toolkits on Wayland (GTK) still offer.
 // They are requests to a clipboard manager, not data: GTK never answers a read
@@ -598,6 +613,12 @@ Clipboard::Clipboard(QWaylandCompositor *compositor, QObject *parent) : QObject(
     m_state->forgotten = [this]
     {
         remember(nullptr);
+        // Cleared: none of the recent clippings is the clipboard now (they stay in the list).
+        if (!m_currentKey.isEmpty())
+        {
+            m_currentKey.clear();
+            emit historyChanged();
+        }
         if (auto *shell = QGuiApplication::clipboard(); shell && shell->ownsClipboard())
         {
             m_state->echo = true;
@@ -641,6 +662,8 @@ std::unique_ptr<QMimeData> copied(const QMimeData &data)
 void Clipboard::retained(const QMimeData *data)
 {
     remember(data);
+    if (data)
+        keep(*data);
     // Snapshot input for newly advertised compositor-owned offers.
     if (m_state && data)
     {
@@ -807,4 +830,125 @@ void Clipboard::remember(const QMimeData *data)
     m_text = text;
     m_picture = picture;
     emit changed();
+}
+
+QStringList dragOfferedTypes(QWaylandSeat *seat)
+{
+    auto *device = seat ? QWaylandSeatPrivate::get(seat)->dataDevice() : nullptr;
+    auto *source = device ? device->*exposed(QtDragSource{}) : nullptr;
+    return source ? QStringList(source->*exposed(QtSourceTypes{})) : QStringList();
+}
+
+namespace
+{
+// Recent Clippings' budget: the newest first, within this many bytes in all.
+constexpr qsizetype historyBudget = 96 * 1024 * 1024;
+// A password manager marks what it copies (KeePassXC, KDE): never kept.
+bool secretCopy(const QMimeData &data)
+{
+    return data.data("x-kde-passwordManagerHint").trimmed() == "secret";
+}
+} // namespace
+
+void Clipboard::keep(const QMimeData &data)
+{
+    if (m_kind == "none" || secretCopy(data))
+        return;
+    // The same clipping copied again (or restored) moves to the top instead of repeating.
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    qsizetype bytes = 0;
+    auto formats = data.formats();
+    formats.removeAll(fromApplications);
+    formats.sort();
+    const QStringList textTypes{"text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING", "TEXT"};
+    for (const auto &format : formats)
+    {
+        const auto content = data.data(format);
+        bytes += content.size();
+        // Applications offer the same text under several names, in different sets: the text decides.
+        if (m_kind == "text" ? textTypes.contains(format) : format.startsWith("image/"))
+        {
+            hash.addData(format.toUtf8());
+            hash.addData(content);
+        }
+    }
+    if (bytes > historyBudget)
+        return;
+    const auto key = hash.result();
+    for (auto it = m_history.begin(); it != m_history.end(); ++it)
+        if (it->key == key)
+        {
+            m_historyBytes -= it->bytes;
+            m_history.erase(it);
+            break;
+        }
+    Clipping clipping;
+    clipping.key = key;
+    clipping.bytes = bytes;
+    clipping.kind = m_kind;
+    auto copy = std::make_unique<QMimeData>();
+    for (const auto &format : formats)
+        copy->setData(format, data.data(format));
+    clipping.data = std::move(copy);
+    if (m_kind == "text")
+    {
+        auto line = m_text.simplified();
+        clipping.label = line.size() > 48 ? line.left(47) + QChar(0x2026) : line;
+        if (clipping.label.isEmpty())
+            clipping.label = tr("Blank text");
+    }
+    else
+    {
+        QImage image;
+        image.loadFromData(QByteArray::fromBase64(m_picture.toString().section(',', 1).toLatin1()), "PNG");
+        clipping.label = image.isNull() ? tr("Picture") : tr("Picture, %1 × %2").arg(image.width()).arg(image.height());
+        if (!image.isNull())
+        {
+            QByteArray png;
+            QBuffer buffer(&png);
+            buffer.open(QIODevice::WriteOnly);
+            image.scaled(32, 32, Qt::KeepAspectRatio, Qt::SmoothTransformation).save(&buffer, "PNG");
+            clipping.thumbnail = QUrl("data:image/png;base64," + QString::fromLatin1(png.toBase64()));
+        }
+    }
+    m_history.push_front(std::move(clipping));
+    m_historyBytes += bytes;
+    while (int(m_history.size()) > historyLimit || m_historyBytes > historyBudget)
+    {
+        m_historyBytes -= m_history.back().bytes;
+        m_history.pop_back();
+    }
+    m_currentKey = key;
+    emit historyChanged();
+}
+
+QVariantList Clipboard::history() const
+{
+    QVariantList result;
+    for (const auto &clipping : m_history)
+        result.append(QVariantMap{{"label", clipping.label}, {"kind", clipping.kind},
+                                  {"thumbnail", clipping.thumbnail}, {"current", clipping.key == m_currentKey}});
+    return result;
+}
+
+bool Clipboard::restore(int index)
+{
+    if (index < 0 || index >= int(m_history.size()))
+        return false;
+    if (m_history[index].key == m_currentKey)
+        return true;
+    // As a clipboard tool's copy: offered to applications and the shell's own text fields alike.
+    return setSelectionFromTool(beginToolCopy(), copied(*m_history[index].data));
+}
+
+void Clipboard::clearHistory()
+{
+    // The clipboard itself stays as it is; only the list of earlier clippings goes.
+    std::deque<Clipping> kept;
+    for (auto &clipping : m_history)
+        if (clipping.key == m_currentKey)
+            kept.push_back(std::move(clipping));
+    m_history = std::move(kept);
+    m_historyBytes = m_history.empty() ? 0 : m_history.front().bytes;
+    emit historyChanged();
 }

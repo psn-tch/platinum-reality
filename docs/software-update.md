@@ -73,8 +73,21 @@ administrator password (action `org.platinumreality.update.install`). The helper
    `/var/cache/platinum-update/previous/`, and, on btrfs with snapper, takes a "pre" snapshot;
 6. runs `pacman -U --noconfirm <package>` and reports pacman's result.
 
-If the installation fails, pacman leaves the old version in place. The new desktop is used
-after logging out and in again; nothing restarts by itself.
+If the installation fails, pacman leaves the old version in place.
+
+After an install (or Restore Previous Version), Software Update offers **Restart Desktop**
+(Lily Hewitt, 2026-11-12): the new version runs without logging out. The applications are asked
+to close as at Log Out (each keeps its own save prompt; one that refuses keeps the session as it
+is). The desktop notes the applications with desktop entries and its own open windows in
+`<profile>/reopen-after-restart.json`, then exits with status 75; the session supervisor
+(`standalone-session.py`) starts a new desktop in the same session, without Log In, and that
+desktop opens them again. A note older than five minutes is ignored. The supervisor tells each desktop it can restart it
+(`PLATINUM_DESKTOP_RESTART=75`); a session started before update 48 has an older supervisor, so
+there Software Update still says to log out and back in, once. Applications open fresh:
+a browser restores its tabs as it would after a crash. The session supervisor itself, Sway and
+the lock screen keep running, so changes to them still wait for the next login. The App Store,
+a program of its own, also closes and opens on the new version right after the install,
+unless it is in the middle of something.
 
 ## Recovery
 

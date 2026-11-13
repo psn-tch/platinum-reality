@@ -27,6 +27,10 @@ does the same (Finishing School Phase 11, 2026-10-21).
 
 - When alerts open (`ShellDialog.alertSound`): Empty Trash, Forget Device, desktop messages, and
   Bluetooth pairing questions.
+- When a password box appears (the polkit agent's window; Lily Hewitt, 2026-11-12: the Mac bing on
+  the password box). It sounds once per box, as it appears, not again while the box shows or as it
+  closes (`NativeManager`, where it finds the box's layer). With her 9.2.2 sounds imported, this is
+  her chosen 9.2.2 alert.
 - When you click outside a modal dialog. Qt's overlay reports every press while a popup is open,
   so presses inside the dialog are marked first, and only the dialog holding focus answers.
 - **Sound ▸ Alert Sounds,** the first tab, as in Mac OS 9 (the panel still opens on Output).
@@ -42,6 +46,33 @@ does the same (Finishing School Phase 11, 2026-10-21).
 - **Silent cases:** at volume 0, without a player, in previews and desktop tests (no compositor),
   and in native tests (`FRANKENSTEIN_NATIVE_TEST=1`), alerts flash the menu bar for 140 ms. **No
   test ever plays through the speakers.**
+
+## Mac sounds only
+
+Lily Hewitt, 2026-11-12, about the Arch and KDE desktop sounds: "i want them GONE". Then she asked for it
+as an option for everyone, to remove them or download them again. **Sound ▸ Alert Sounds ▸ Mac sounds
+only** asks for an administrator's password, then:
+
+- **On:** a `NoExtract` line in `/etc/pacman.conf`, after its own `#NoExtract` example and marked
+  `# Platinum Reality: no Arch/KDE desktop sounds`, keeps updates from extracting the sound themes:
+  `/usr/share/sounds/{freedesktop,ocean,oxygen,plasma-bigscreen}` and the loose `Oxygen-*` files.
+  Then those are deleted. The packages stay installed, so nothing that depends on them breaks
+  (libcanberra needs sound-theme-freedesktop, plasma-workspace needs ocean-sound-theme).
+  `/usr/share/sounds/alsa` (speaker-test's voices) and everything else stays.
+- **Off:** the two lines come out of `pacman.conf`, and pacman reinstalls the packages that own those
+  files (read from its local database, which still lists the deleted files). If the download fails,
+  it says so: the sounds come back with the next Update All Software… anyway.
+
+`scripts/platinum_system_sounds.py` does the work. The root helper `platinum-system-sounds` runs
+through pkexec (polkit action `org.platinumreality.sounds.manage`, `auth_admin`); `status` needs no
+administrator. The helper only removes its own two lines from `pacman.conf`, and recognizes the
+lines from the first script (`remove-arch-sounds.sh`, 11-12, on potato and the laptop), so turning
+it off works there too. It has `pacman-conf` read every changed file before replacing the real one,
+and keeps the first original as `pacman.conf.before-sounds`.
+
+Proven 2026-11-12 in the test VM with real pacman: Remove deleted the sounds; reinstalling
+sound-theme-freedesktop while removed did not bring them back; Restore downloaded them again, and
+`pacman.conf` was identical to its original.
 
 ## The startup sound
 
@@ -61,6 +92,10 @@ does the same (Finishing School Phase 11, 2026-10-21).
   Off, or volume 0, means no chime.
 
 ## Tests
+
+- `tests/platinum_system_sounds_tests.py` (ctest `system-sounds`): Mac sounds only, on Arch's own
+  `pacman.conf`, with the real `pacman-conf` reading every result. `DesktopTests::macSoundsOnlyRemovesAndRestoresTheDesktopSounds`
+  covers the checkbox, including a dismissed password box.
 
 `desktop_tests` `alertSoundsUseOriginalBeepPersonalWavsAndFlashWhenSilent` uses a fake player
 that records its arguments. It covers:

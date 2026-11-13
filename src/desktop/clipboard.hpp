@@ -1,10 +1,17 @@
 #pragma once
 #include <QObject>
 #include <QUrl>
+#include <QVariantList>
 #include <QWaylandQuickCompositor>
+#include <deque>
 #include <memory>
 
 class QMimeData;
+class QWaylandSeat;
+
+// The MIME types the drag in progress offers (empty when there is none). Read from Qt's own data
+// device, which keeps them private.
+QStringList dragOfferedTypes(QWaylandSeat *seat);
 
 // The desktop's compositor. Its retained-selection notification remains
 // available to the adapter; automatic bounded captures notify it directly.
@@ -49,6 +56,10 @@ class Clipboard final : public QObject
     Q_PROPERTY(QString kind READ kind NOTIFY changed)
     Q_PROPERTY(QString text READ text NOTIFY changed)
     Q_PROPERTY(QUrl picture READ picture NOTIFY changed)
+    // Recent Clippings (Lily Hewitt, 2026-11-12: "copy multiple things and be able to switch between
+    // them"), newest first: [{label, kind ("text" or "picture"), thumbnail, current}]. Kept in memory
+    // only, never written to disk; a password manager's copies (marked secret) are never kept.
+    Q_PROPERTY(QVariantList history READ history NOTIFY historyChanged)
   public:
     Clipboard(QWaylandCompositor *, QObject *parent);
     ~Clipboard() override;
@@ -61,6 +72,12 @@ class Clipboard final : public QObject
     Q_INVOKABLE void copyText(const QString &text);
     // The shell copies a picture (Scrapbook): a local PNG or a data: URL; false when unreadable.
     Q_INVOKABLE bool copyImage(const QUrl &picture);
+
+    QVariantList history() const;
+    // Make a recent clipping the clipboard again; it moves to the top. False when it is gone.
+    Q_INVOKABLE bool restore(int index);
+    Q_INVOKABLE void clearHistory();
+    static constexpr int historyLimit = 12;
 
     // For clipboard tools (data_control.cpp), which read and set the clipboard without
     // having the keyboard. The types the clipboard holds now (empty: nothing).
@@ -83,11 +100,24 @@ class Clipboard final : public QObject
     // What the clipboard holds changed (an application copied, quit, cleared it, or a tool set it).
     void selectionChanged();
     void copyIntentChanged(quint64 intent);
+    void historyChanged();
 
   private:
     void retained(const QMimeData *data);
     void shellClipboardChanged();
     void remember(const QMimeData *data);
+    void keep(const QMimeData &data);
+    struct Clipping
+    {
+        std::shared_ptr<const QMimeData> data;
+        QByteArray key;
+        QString kind, label;
+        QUrl thumbnail;
+        qsizetype bytes = 0;
+    };
+    std::deque<Clipping> m_history;
+    qsizetype m_historyBytes = 0;
+    QByteArray m_currentKey;
     struct State;
     std::unique_ptr<State> m_state;
     QString m_kind = "none";

@@ -1,5 +1,5 @@
 {
- "yay": false, "aurUpdated": "",
+ "aurHelper": "", "aurHelpers": [], "aurUpdated": "",
  "packages": [
   {"name": "chess", "version": "1.0-1", "description": "A chess game", "repo": "extra", "size": 2048000, "installed": ""},
   {"name": "libfoo", "version": "2-1", "description": "A library", "repo": "extra", "size": 1000, "installed": ""},

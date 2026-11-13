@@ -1,3 +1,4 @@
+#include <QDateTime>
 #include "applications/application_catalog.hpp"
 #include "desktop/appearance_settings.hpp"
 #include "desktop/alert_sounds.hpp"
@@ -16,6 +17,8 @@
 #include "desktop/software_update.hpp"
 #include "desktop/window_move_outline.hpp"
 #include "desktop/printer_selector.hpp"
+#include "desktop/camera_switch.hpp"
+#include "desktop/system_sounds.hpp"
 #include "desktop/keychain_service.hpp"
 #include "desktop/sticky_notes.hpp"
 #include "desktop/note_pad.hpp"
@@ -290,6 +293,191 @@ class DesktopTests : public QObject
         QTRY_VERIFY(!about->isVisible());
         const auto evidence=qEnvironmentVariable("FRANKENSTEIN_EVIDENCE_DIR");
         if(!evidence.isEmpty()){QDir().mkpath(evidence);QVERIFY(view.grabWindow().save(evidence+"/menu-bar-measured.png"));}
+    }
+    // Apple Menu Options (9.2.2's, captured 2026-11-12): Submenus On or Off, and how many recent
+    // applications to remember, or none. The Apple menu follows at once; the settings persist.
+    void appleMenuOptionsShapeTheAppleMenu()
+    {
+        QTemporaryDir root;
+        QDir().mkpath(root.filePath("profile"));
+        {
+            QFile recent(root.filePath("profile/recent-applications.json"));
+            QVERIFY(recent.open(QIODevice::WriteOnly));
+            QJsonArray list;
+            for (const auto *name : {"Alpha", "Beta", "Gamma", "Delta", "Epsilon"})
+                list.append(QJsonObject{{"id", QString(name).toLower() + ".desktop"}, {"name", name}});
+            recent.write(QJsonDocument(list).toJson());
+        }
+        QQuickView view; view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.filePath("profile"), {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop = view.rootObject();
+        auto *appearance = qobject_cast<AppearanceSettings *>(manager.appearance());
+        QVERIFY(appearance);
+        const auto apple = [&] {
+            QVariant entries;
+            QMetaObject::invokeMethod(desktop, "shellMenuEntries", Q_RETURN_ARG(QVariant, entries), Q_ARG(QVariant, 0));
+            QVariantMap byText;
+            QStringList order;
+            for (const auto &value : entries.toList()) {
+                const auto entry = value.toMap();
+                if (entry.value("separator").toBool()) continue;
+                byText.insert(entry.value("text").toString(), entry);
+                order << entry.value("text").toString();
+            }
+            byText.insert("__order", order);
+            return byText;
+        };
+        const auto set = [&](const QString &key, const QVariant &value) {
+            bool accepted = false;
+            QMetaObject::invokeMethod(appearance, "setAppleMenuOption", Q_RETURN_ARG(bool, accepted),
+                                      Q_ARG(QString, key), Q_ARG(QVariant, value));
+            return accepted;
+        };
+        // Defaults: submenus, ten remembered (five here), Recent Applications between Stickies and Terminal.
+        auto menu = apple();
+        QCOMPARE(menu.value("Recent Applications").toMap().value("children").toList().size(), 5);
+        QVERIFY(!menu.value("Control Panels").toMap().value("children").toList().isEmpty());
+        auto order = menu.value("__order").toStringList();
+        QCOMPARE(order.indexOf("Recent Applications"), order.indexOf("Stickies") + 1);
+        QCOMPARE(order.indexOf("Terminal"), order.indexOf("Recent Applications") + 1);
+        QVERIFY(menu.value("Control Panels").toMap().value("children").toString().isEmpty());
+        bool listed = false;
+        for (const auto &child : menu.value("Control Panels").toMap().value("children").toList())
+            listed = listed || child.toMap().value("text").toString() == "Apple Menu Options…";
+        QVERIFY(listed);
+        // The panel: its controls set the options.
+        QVERIFY(QMetaObject::invokeMethod(desktop, "dispatchShellCommand", Q_ARG(QVariant, QVariant("apple-menu-options")), Q_ARG(QVariant, QVariant(0))));
+        auto *panel = desktop->findChild<QObject *>("apple-menu-options-panel");
+        QVERIFY(panel);
+        QTRY_VERIFY(panel->property("opened").toBool());
+        const auto item = [&](const QString &name) { view.grabWindow(); return visualItem(view.contentItem(), name); };
+        const auto click = [&](QQuickItem *target) {
+            QTest::mouseClick(&view, Qt::LeftButton, {}, target->mapToScene(QPointF(8, target->height() / 2)).toPoint());
+        };
+        QTRY_VERIFY(item("apple-menu-submenus-off") && item("apple-menu-submenus-off")->isVisible());
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/apple-menu-options.png"));
+        click(item("apple-menu-submenus-off"));
+        QTRY_COMPARE(appearance->appleMenu().value("submenus").toBool(), false);
+        QVERIFY(item("apple-menu-submenus-off")->property("checked").toBool());
+        QVERIFY(!item("apple-menu-submenus-on")->property("checked").toBool());
+        menu = apple();
+        QVERIFY(menu.value("Control Panels").toMap().value("children").toList().isEmpty());
+        QCOMPARE(menu.value("Control Panels").toMap().value("action").toString(), QString("control-panels-window"));
+        QCOMPARE(menu.value("Recent Applications").toMap().value("action").toString(), QString("applications"));
+        // How many: two.
+        auto *field = item("apple-menu-recent-applications");
+        QVERIFY(field);
+        field->forceActiveFocus();
+        QVERIFY(QMetaObject::invokeMethod(field, "selectAll"));
+        QTest::keyClick(&view, Qt::Key_2);
+        QTest::keyClick(&view, Qt::Key_Return);
+        QTRY_COMPARE(appearance->appleMenu().value("recentApplications").toInt(), 2);
+        QVERIFY(set("submenus", true));
+        menu = apple();
+        const auto recent = menu.value("Recent Applications").toMap().value("children").toList();
+        QCOMPARE(recent.size(), 2);
+        QCOMPARE(recent.at(0).toMap().value("text").toString(), QString("Alpha"));
+        // Remembering off: no Recent Applications at all.
+        click(item("apple-menu-remember"));
+        QTRY_COMPARE(appearance->appleMenu().value("rememberRecent").toBool(), false);
+        QVERIFY(!apple().contains("Recent Applications"));
+        QVERIFY(!item("apple-menu-recent-applications")->isEnabled());
+        // Kept in appearance.json.
+        QFile saved(root.filePath("profile/appearance.json"));
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        const auto options = QJsonDocument::fromJson(saved.readAll()).object().value("appleMenu").toObject();
+        QCOMPARE(options.value("submenus").toBool(true), true);
+        QCOMPARE(options.value("rememberRecent").toBool(true), false);
+        QCOMPARE(options.value("recentApplications").toInt(), 2);
+        // Out-of-range values are refused, on a second instance (an error alert would block this view).
+        AppearanceSettings other(root.filePath("other-profile"));
+        QVERIFY(!other.setAppleMenuOption("recentApplications", 0));
+        QVERIFY(!other.setAppleMenuOption("recentApplications", 100));
+        QVERIFY(!other.setAppleMenuOption("submenus", 1));
+        QVERIFY(!other.setAppleMenuOption("servers", 5));
+        QVERIFY(other.setAppleMenuOption("recentApplications", 99));
+    }
+    // File Exchange (after 9.2.2's PC Exchange, captured 2026-11-12): which application opens each kind
+    // of document from the Finder and the desktop. Change… offers the applications that say they open it.
+    void fileExchangeChoosesWhichApplicationOpensEachKind()
+    {
+        QTemporaryDir root;
+        const auto apps = root.filePath("applications");
+        QDir().mkpath(apps);
+        const auto entry = [&](const QString &file, const QString &body) {
+            QFile f(apps + "/" + file); QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(("[Desktop Entry]\nType=Application\n" + body).toUtf8());
+        };
+        entry("viewer.desktop", "Name=Picture Viewer\nExec=/usr/bin/true %f\nMimeType=image/png;image/jpeg;\n");
+        entry("painter.desktop", "Name=Painter\nExec=/usr/bin/true %U\nMimeType=image/png;\n");
+        entry("clock.desktop", "Name=Clock\nExec=/usr/bin/true\nMimeType=image/png;\n"); // Opens no documents.
+        QQuickView view; view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.filePath("profile"), {}, {apps});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop = view.rootObject();
+        auto *catalog = qobject_cast<ApplicationCatalog *>(manager.applicationCatalog());
+        QVERIFY(catalog);
+        QVERIFY(QMetaObject::invokeMethod(desktop, "dispatchShellCommand", Q_ARG(QVariant, QVariant("file-exchange")), Q_ARG(QVariant, QVariant(0))));
+        auto *panel = desktop->findChild<QObject *>("file-exchange-panel");
+        QVERIFY(panel);
+        QTRY_VERIFY(panel->property("opened").toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(catalog->ready(), 10000);
+        const auto item = [&](const QString &name) { view.grabWindow(); return visualItem(view.contentItem(), name); };
+        const auto click = [&](QQuickItem *target) {
+            QTest::mouseClick(&view, Qt::LeftButton, {}, target->mapToScene(QPointF(target->width() / 2, target->height() / 2)).toPoint());
+        };
+        // The common kinds are listed; text opens in the editor until something else is chosen.
+        QQuickItem *png = nullptr;
+        QTRY_VERIFY((png = item("file-exchange-png")) && png->isVisible());
+        QVERIFY(item("file-exchange-txt"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/file-exchange.png"));
+        click(png);
+        QTRY_COMPARE(panel->property("selectedType").toString(), QString("image/png"));
+        QVERIFY(!item("file-exchange-remove")->isEnabled()); // Nothing chosen yet.
+        click(item("file-exchange-change"));
+        auto *chooser = panel->findChild<QObject *>("file-exchange-chooser");
+        QVERIFY(chooser);
+        QStringList offered;
+        for (const auto &choice : chooser->property("choices").toList()) offered << choice.toMap().value("name").toString();
+        QCOMPARE(offered, (QStringList{"Painter", "Picture Viewer"})); // Not Clock: it opens no documents.
+        QTest::keyClick(&view, Qt::Key_Escape);
+        QVERIFY(QMetaObject::invokeMethod(panel, "choose", Q_ARG(QVariant, QVariant("image/png")), Q_ARG(QVariant, QVariant("viewer.desktop"))));
+        QCOMPARE(catalog->preferredApplication(root.filePath("photo.png")), QString("viewer.desktop"));
+        QFile saved(root.filePath("profile/associations.json"));
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(saved.readAll()).object().value("types").toObject().value("image/png").toString(), QString("viewer.desktop"));
+        bool shown = false;
+        for (const auto &row : catalog->fileTypes())
+            if (row.toMap().value("type") == "image/png") shown = row.toMap().value("applicationName").toString() == "Picture Viewer";
+        QVERIFY(shown);
+        QTRY_VERIFY(item("file-exchange-remove")->isEnabled());
+        click(item("file-exchange-remove"));
+        QTRY_VERIFY(catalog->preferredApplication(root.filePath("photo.png")).isEmpty());
+        // Add…: an extension names a kind; an unknown one says so.
+        click(item("file-exchange-add"));
+        auto *field = item("file-exchange-extension");
+        QTRY_VERIFY(field && field->isVisible());
+        field->setProperty("text", "zzzq");
+        click(item("file-exchange-add-kind"));
+        QTRY_VERIFY(item("file-exchange-message")->property("text").toString().contains("zzzq"));
+        QCOMPARE(catalog->fileTypeFor(".WebP").value("type").toString(), QString("image/webp"));
+        field->setProperty("text", "webp");
+        click(item("file-exchange-add-kind"));
+        QTRY_COMPARE(panel->property("selectedType").toString(), QString("image/webp"));
+        QVERIFY(item("file-exchange-webp"));
+        QTest::keyClick(&view, Qt::Key_Escape);
+        // Refused: an application that opens no documents, or a kind that isn't one.
+        QVERIFY(!catalog->setFileTypeApplication("image/png", "clock.desktop"));
+        QVERIFY(!catalog->setFileTypeApplication("not/a-type", "viewer.desktop"));
     }
     void menuBarSizeEnlargesBarMenusAndStripTogether()
     {
@@ -1220,6 +1408,67 @@ class DesktopTests : public QObject
         SoftwareUpdate again(QCoreApplication::applicationDirPath() + "/platinum-software-update", keyring,
                              root.path() + "/software-update.json");
         QVERIFY(again.automatic());
+    }
+    // After an install, Software Update offers Restart Desktop instead of asking for Log Out
+    // (Lily Hewitt, 2026-11-12). A stand-in updater reports a finished install.
+    void softwareUpdateOffersRestartDesktopAfterInstalling()
+    {
+        QTemporaryDir root;
+        qputenv("PLATINUM_DESKTOP_RESTART", "75");
+        const auto unset = qScopeGuard([] { qunsetenv("PLATINUM_DESKTOP_RESTART"); });
+        const auto client = root.path() + "/fake-update.py";
+        QFile script(client);
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write("import json, sys\n"
+                     "say = lambda **m: print(json.dumps(m), flush=True)\n"
+                     "command = sys.argv[1]\n"
+                     "if command == 'verify':\n"
+                     "    say(ready=sys.argv[2], release={'version': '99.0-1', 'notes': 'Faster folders.'})\n"
+                     "elif command == 'install':\n"
+                     "    say(step='verify'); say(step='install', version='99.0-1'); say(done=True, version='99.0-1')\n"
+                     "else:\n"
+                     "    say(installed='98.0-1')\n");
+        script.close();
+        QVERIFY(QDir().mkpath(root.path() + "/bundle"));
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.path() + "/profile", {});
+        SoftwareUpdate service(client, root.path() + "/keys.gpg", root.path() + "/software-update.json");
+        QSignalSpy finished(&service, &SoftwareUpdate::installFinished);
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        auto *window = view.rootObject()->findChild<QObject *>("software-update-window");
+        QVERIFY(window && window->setProperty("service", QVariant::fromValue(static_cast<QObject *>(&service))));
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QVariant("software-update")), Q_ARG(QVariant, QVariant(0))));
+        QTRY_VERIFY(visualItem(view.contentItem(), "software-update-window")->isVisible());
+        QTRY_VERIFY_WITH_TIMEOUT(!service.busy(), 20000);
+        QVERIFY(!service.restartNeeded());
+        QVERIFY(!visualItem(view.contentItem(), "software-update-restart-desktop")->isVisible());
+        service.useLocal(root.path() + "/bundle");
+        QTRY_VERIFY_WITH_TIMEOUT(!service.busy() && !service.ready().isEmpty(), 20000);
+        service.install();
+        QTRY_VERIFY_WITH_TIMEOUT(!service.busy(), 20000);
+        QVERIFY(service.restartNeeded());
+        QCOMPARE(finished.count(), 1);
+        QCOMPARE(finished.at(0).at(0).toString(), QString("99.0-1"));
+        QCOMPARE(service.message(), QString("Platinum Reality 99.0-1 is installed. Restart Desktop to use it: "
+                                            "your applications close and open again."));
+        auto *restart = visualItem(view.contentItem(), "software-update-restart-desktop");
+        QTRY_VERIFY(restart->isVisible() && restart->isEnabled());
+        // Restart Desktop ends this desktop for a new one, noting Software Update to open again.
+        QSignalSpy ended(&manager, &NativeManager::sessionEnded);
+        QTest::mouseClick(&view, Qt::LeftButton, {}, restart->mapToScene(QPointF(restart->width() / 2, restart->height() / 2)).toPoint());
+        QTRY_COMPARE(ended.count(), 1);
+        QCOMPARE(ended.at(0).at(0).toInt(), NativeManager::RestartDesktopExit);
+        QFile note(root.path() + "/profile/reopen-after-restart.json");
+        QVERIFY(note.open(QIODevice::ReadOnly));
+        QVERIFY(QJsonDocument::fromJson(note.readAll()).object().value("shell").toArray().contains("software-update"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/software-update-restart.png"));
     }
     void softwareUpdateChecksAfterInstallingUntilTheNetworkAnswers()
     {
@@ -2649,6 +2898,84 @@ class DesktopTests : public QObject
         QTest::keyClick(&view, Qt::Key_Escape);
         QTRY_VERIFY(!panel->property("visible").toBool());
     }
+    // Sound ▸ Alert Sounds ▸ Mac sounds only (Lily Hewitt, 2026-11-12), over a stand-in helper that keeps
+    // the state in a file: checking it removes the desktop sounds, unchecking downloads them again, and a
+    // dismissed password box (pkexec's 126, nothing said) leaves the box as it was.
+    void macSoundsOnlyRemovesAndRestoresTheDesktopSounds()
+    {
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        const auto state = root.filePath("removed");
+        QFile helper(root.filePath("platinum-system-sounds"));
+        QVERIFY(helper.open(QIODevice::WriteOnly));
+        helper.write("import json, os, sys\n"
+                     "state = " + QJsonDocument(QJsonArray{state}).toJson(QJsonDocument::Compact).mid(1).chopped(1) + "\n"
+                     "if sys.argv[1] != 'status' and os.path.exists(state + '.cancel'): sys.exit(126)\n"
+                     "if sys.argv[1] == 'remove': open(state, 'w').close()\n"
+                     "if sys.argv[1] == 'restore' and os.path.exists(state): os.unlink(state)\n"
+                     "removed = os.path.exists(state)\n"
+                     "print(json.dumps({'done': sys.argv[1] != 'status', 'removed': removed,\n"
+                     "                  'present': [] if removed else ['freedesktop', 'ocean'], 'packages': []}))\n");
+        helper.close();
+        const QByteArray previous = qgetenv("FRANKENSTEIN_SYSTEM_SOUNDS_HELPER");
+        const auto restore = qScopeGuard([&] { qputenv("FRANKENSTEIN_SYSTEM_SOUNDS_HELPER", previous); });
+        qputenv("FRANKENSTEIN_SYSTEM_SOUNDS_HELPER", root.filePath("platinum-system-sounds").toUtf8());
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.filePath("ws"), root.filePath("desktop-profile"), {});
+        auto *sounds = qobject_cast<SystemSounds *>(manager.systemSounds());
+        QVERIFY(sounds && sounds->available());
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto item = [&](const QString &name) { view.grabWindow(); return visualItem(view.contentItem(), name); };
+        const auto click = [&](QQuickItem *target, qreal x = -1)
+        {
+            QTest::mouseClick(&view, Qt::LeftButton, {},
+                              target->mapToScene(QPointF(x < 0 ? target->width() / 2 : x, target->height() / 2)).toPoint());
+        };
+        AudioService absent(root.filePath("absent-audio.py"));
+        auto *panel = view.rootObject()->findChild<QObject *>("sound-panel");
+        QVERIFY(panel);
+        QVERIFY(panel->setProperty("service", QVariant::fromValue(static_cast<QObject *>(&absent))));
+        QVERIFY(QMetaObject::invokeMethod(panel, "edit"));
+        QTRY_VERIFY(panel->property("opened").toBool());
+        click(item("sound-tab-alerts"));
+        QTRY_VERIFY(panel->property("alerts").toBool());
+        QQuickItem *box = nullptr;
+        QTRY_VERIFY((box = item("sound-mac-only")) && box->isVisible());
+        const auto message = [&] { return item("sound-mac-only-message")->property("text").toString(); };
+        QTRY_VERIFY(message().startsWith("Removes the Arch and KDE desktop sounds"));
+        QVERIFY(!box->property("checked").toBool());
+        // Checked: removed.
+        click(box, 8);
+        QTRY_VERIFY(!sounds->changing() && sounds->removed());
+        QTRY_VERIFY(box->property("checked").toBool());
+        QVERIFY(message().contains("updates won’t bring them back"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/sound-mac-only.png"));
+        // A dismissed password box: still checked, nothing said.
+        QFile cancel(state + ".cancel");
+        QVERIFY(cancel.open(QIODevice::WriteOnly));
+        cancel.close();
+        click(box, 8);
+        QTRY_VERIFY(!sounds->changing());
+        QTRY_VERIFY(box->property("checked").toBool());
+        QVERIFY(sounds->removed());
+        QCOMPARE(sounds->error(), QString());
+        // Unchecked: downloaded again.
+        QVERIFY(cancel.remove());
+        click(box, 8);
+        QTRY_VERIFY(!sounds->changing() && !sounds->removed());
+        QTRY_VERIFY(!box->property("checked").toBool());
+        QCOMPARE(sounds->present(), (QStringList{"freedesktop", "ocean"}));
+        // Without its helper the option isn't offered.
+        SystemSounds missing(root.filePath("none"), {});
+        QVERIFY(panel->setProperty("systemSounds", QVariant::fromValue(static_cast<QObject *>(&missing))));
+        QTRY_VERIFY(!item("sound-mac-only")->isVisible());
+    }
     void startupSoundCanBeTurnedOffAndSetLouderOrQuieter()
     {
         // Lily Hewitt, 2026-10-29: "an option to enable / disable the beep on boot up and a volume slider".
@@ -2974,6 +3301,96 @@ class DesktopTests : public QObject
         QTest::keyClick(&view, Qt::Key_Escape);
         QTRY_VERIFY(!panel->property("opened").toBool());
         QCOMPARE(commands.size(), 2);
+    }
+    // The Camera module over a stand-in helper that keeps the switch in a file: Camera On and Camera
+    // Off with the current one checked, the cameras below, and the helper's own error shown.
+    void cameraModuleSwitchesTheCamera()
+    {
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        const auto state = root.filePath("off");
+        QFile helper(root.filePath("platinum-webcam"));
+        QVERIFY(helper.open(QIODevice::WriteOnly));
+        helper.write(("import json, os, sys\n"
+                      "state = " + QJsonDocument(QJsonArray{state}).toJson(QJsonDocument::Compact).mid(1).chopped(1) + "\n"
+                      "if os.path.exists(state + '.refuse') and sys.argv[1] != 'status':\n"
+                      "    print(json.dumps({'error': 'Could not turn off Logitech Camera.'})); sys.exit(1)\n"
+                      "if sys.argv[1] == 'off': open(state, 'w').close()\n"
+                      "if sys.argv[1] == 'on' and os.path.exists(state): os.unlink(state)\n"
+                      "off = os.path.exists(state)\n"
+                      "print(json.dumps({'done': sys.argv[1] != 'status', 'off': off, 'others': ['IPU6 Capture'],\n"
+                      "                  'cameras': [{'id': '1-6', 'name': 'Integrated Camera', 'blocked': off}]}))\n"));
+        helper.close();
+        CameraSwitch direct(root.filePath("platinum-webcam"), {});
+        QVERIFY(direct.available());
+        direct.refresh();
+        QTRY_COMPARE(direct.cameras().size(), 1);
+        QVERIFY(!direct.off());
+        QCOMPARE(direct.others(), QStringList{"IPU6 Capture"});
+        direct.setOff(true);
+        QVERIFY(direct.changing());
+        QTRY_VERIFY(!direct.changing() && direct.off());
+        QVERIFY(direct.cameras().at(0).toMap().value("blocked").toBool());
+        direct.setOff(false);
+        QTRY_VERIFY(!direct.changing() && !direct.off());
+        CameraSwitch missing(root.filePath("none"), {});
+        QVERIFY(!missing.available());
+        missing.setOff(true);
+        QVERIFY(!missing.changing());
+        // In the desktop: the strip's module and menu.
+        const QByteArray previous = qgetenv("FRANKENSTEIN_WEBCAM_HELPER");
+        const auto restore = qScopeGuard([&] { qputenv("FRANKENSTEIN_WEBCAM_HELPER", previous); });
+        qputenv("FRANKENSTEIN_WEBCAM_HELPER", root.filePath("platinum-webcam").toUtf8());
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.filePath("ws"), root.filePath("desktop-profile"), {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QTRY_VERIFY(visualItem(view.contentItem(), "control-strip-camera"));
+        auto *camera = qobject_cast<CameraSwitch *>(manager.camera());
+        QVERIFY(camera);
+        const auto entries = [&] {
+            QVariant result;
+            QMetaObject::invokeMethod(view.rootObject(), "stripMenuEntries", Q_RETURN_ARG(QVariant, result),
+                                      Q_ARG(QVariant, QString("camera")));
+            QStringList rows;
+            for (const auto &entry : result.toList())
+            {
+                const auto map = entry.toMap();
+                rows.append(map.value("separator").toBool() ? QString("-")
+                            : (map.value("checked").toBool() ? "✓" : "") + map.value("text").toString()
+                                  + (map.value("enabled", true).toBool() ? "" : " (dim)"));
+            }
+            return rows;
+        };
+        QTRY_VERIFY(!camera->cameras().isEmpty());
+        QCOMPARE(entries(), (QStringList{"✓Camera On", "Camera Off", "-", "Integrated Camera (dim)",
+                                         "IPU6 Capture (Can’t Be Turned Off) (dim)"}));
+        // Turning it on while on asks nothing (no helper run).
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QString("camera-on")), Q_ARG(QVariant, QString())));
+        QVERIFY(!camera->changing());
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QString("camera-off")), Q_ARG(QVariant, QString())));
+        QVERIFY(camera->changing());
+        QCOMPARE(entries().mid(0, 4), (QStringList{"✓Camera On (dim)", "Camera Off (dim)", "-", "Switching… (dim)"}));
+        QTRY_VERIFY(!camera->changing() && camera->off());
+        QCOMPARE(entries().mid(0, 2), (QStringList{"Camera On", "✓Camera Off"}));
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QString("camera-on")), Q_ARG(QVariant, QString())));
+        QTRY_VERIFY(!camera->changing() && !camera->off());
+        // A failed switch says why, under the line.
+        QFile refuse(state + ".refuse");
+        QVERIFY(refuse.open(QIODevice::WriteOnly));
+        refuse.close();
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QString("camera-off")), Q_ARG(QVariant, QString())));
+        QTRY_VERIFY(!camera->changing());
+        QCOMPARE(entries().at(3), QString("Could not turn off Logitech Camera. (dim)"));
     }
     // The Printer Selector module (9.2.2's: desktop printers, the default checked, "No Desktop
     // Printers" without any) over stand-in lpstat/lpoptions that keep the default in a file.
@@ -4023,9 +4440,11 @@ class DesktopTests : public QObject
         {
             auto *tab = visualItem(view.contentItem(), "control-strip-tab");
             const auto point = tab->mapToScene(QPointF(8, 14)).toPoint();
+            // Leftwards: the strip's tab is near the middle of this 1120-pixel view, and the outline
+            // attaches to the edge on the pointer's side.
             QTest::mousePress(&view, Qt::LeftButton, Qt::AltModifier, point);
-            QTest::mouseMove(&view, point + QPoint(40, -50), 30);
-            QTest::mouseMove(&view, point + QPoint(90, -100), 30);
+            QTest::mouseMove(&view, point + QPoint(-40, -50), 30);
+            QTest::mouseMove(&view, point + QPoint(-90, -100), 30);
             QTRY_VERIFY(outline->isVisible());
             QCOMPARE(strip->position(), old);
             QCOMPARE(qRound(outline->x()), -1);
@@ -4033,7 +4452,7 @@ class DesktopTests : public QObject
             QCOMPARE(qRound(outline->width()), qRound(strip->width() + 2));
             QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() +
                                            "/artifacts/control-strip-move-outline.png"));
-            QTest::mouseRelease(&view, Qt::LeftButton, Qt::AltModifier, point + QPoint(90, -100), 30);
+            QTest::mouseRelease(&view, Qt::LeftButton, Qt::AltModifier, point + QPoint(-90, -100), 30);
         }
         QTRY_COMPARE(strip->position(), QPointF(0, old.y() - 100));
         QVERIFY(!outline->isVisible());
@@ -4731,6 +5150,59 @@ class DesktopTests : public QObject
         QCOMPARE(errors.count(), 2);
         QTRY_VERIFY(!items->busy());
         QVERIFY(QFileInfo(items->directory() + "/Still running").isDir());
+    }
+    // Restart Desktop (Lily Hewitt, 2026-11-12): the desktop notes what to open again, ends with
+    // RestartDesktopExit, and the next desktop opens it once, if the note is fresh.
+    void restartDesktopNotesWhatToReopen()
+    {
+        QTemporaryDir fixture;
+        QQuickView view;
+        const auto profile = fixture.path() + "/profile";
+        NativeManager manager(nullptr, &view, fixture.path(), profile, {});
+        QSignalSpy ended(&manager, &NativeManager::sessionEnded);
+        QSignalSpy errors(&manager, &NativeManager::errorOccurred);
+        // Under a session supervisor from before update 48, a restart would be a Log Out: refused.
+        qunsetenv("PLATINUM_DESKTOP_RESTART");
+        manager.restartDesktop({"calculator"});
+        QCOMPARE(ended.count(), 0);
+        QCOMPARE(errors.count(), 1);
+        QVERIFY(!QFileInfo::exists(profile + "/reopen-after-restart.json"));
+        qputenv("PLATINUM_DESKTOP_RESTART", "75");
+        const auto unset = qScopeGuard([] { qunsetenv("PLATINUM_DESKTOP_RESTART"); });
+        manager.restartDesktop({"calculator", "note-pad", "../bad"});
+        QCOMPARE(ended.count(), 1);
+        QCOMPARE(ended.at(0).at(0).toInt(), NativeManager::RestartDesktopExit);
+        QFile note(profile + "/reopen-after-restart.json");
+        QVERIFY(note.open(QIODevice::ReadOnly));
+        const auto saved = QJsonDocument::fromJson(note.readAll()).object();
+        note.close();
+        QCOMPARE(saved.value("shell").toArray(), (QJsonArray{"calculator", "note-pad"}));
+        QCOMPARE(saved.value("applications").toArray(), QJsonArray{});
+
+        NativeManager next(nullptr, &view, fixture.path(), profile, {});
+        QSignalSpy reopen(&next, &NativeManager::reopenShellWindows);
+        next.reopenAfterRestart();
+        QCOMPARE(reopen.count(), 1);
+        QCOMPARE(reopen.at(0).at(0).toStringList(), (QStringList{"calculator", "note-pad"}));
+        QVERIFY(!QFileInfo::exists(note.fileName())); // once only
+        next.reopenAfterRestart();
+        QCOMPARE(reopen.count(), 1);
+
+        // A note left by a restart that never finished is old news at the next login.
+        QVERIFY(note.open(QIODevice::WriteOnly));
+        note.write(QJsonDocument(QJsonObject{{"shell", QJsonArray{"calculator"}},
+                                             {"written", QDateTime::currentSecsSinceEpoch() - 3600}}).toJson());
+        note.close();
+        next.reopenAfterRestart();
+        QCOMPARE(reopen.count(), 1);
+        QVERIFY(!QFileInfo::exists(note.fileName()));
+        // Log Out still ends with 0.
+        NativeManager last(nullptr, &view, fixture.path(), profile, {});
+        QSignalSpy loggedOut(&last, &NativeManager::sessionEnded);
+        last.quitSession();
+        QCOMPARE(loggedOut.count(), 1);
+        QCOMPARE(loggedOut.at(0).at(0).toInt(), 0);
+        QVERIFY(!QFileInfo::exists(note.fileName()));
     }
     void realDesktopIconCanBeSelectedMovedAndRestored()
     {

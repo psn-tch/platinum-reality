@@ -4893,6 +4893,95 @@ class NativeTests : public QObject
         b.call("Finish");
         QTRY_COMPARE(target.state(),QProcess::NotRunning);
     }
+    // Recent Clippings (Lily Hewitt, 2026-11-12: "copy multiple things and be able to switch between them"):
+    // each copy joins the history once, newest first; a password manager's secret copy never does;
+    // choosing an older clipping makes it what the next paste gets, from the strip's menu as well.
+    void recentClippingsSwitchWhatThePasteGets()
+    {
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager=*scene.manager;
+        auto *clipboard=qobject_cast<Clipboard *>(manager.clipboard());
+        QVERIFY(clipboard);
+        QProcess source,target;
+        const auto cleanup=qScopeGuard([&]{for(auto *process:{&source,&target})
+            if(process->state()!=QProcess::NotRunning){process->kill();process->waitForFinished(3000);}});
+        for(auto [process,name]:{std::pair{&source,"HistA"},std::pair{&target,"HistB"}}) {
+            process->setProcessEnvironment(scene.childEnvironment());
+            process->start(QCoreApplication::applicationDirPath()+"/native-probe",{name});
+            QVERIFY(process->waitForStarted());
+        }
+        QTRY_VERIFY(!first(manager,"Native Probe HistA").isEmpty());
+        QTRY_VERIFY(!first(manager,"Native Probe HistB").isEmpty());
+        QDBusInterface a("org.frankenstein.NativeProbeHistA","/Probe","org.frankenstein.NativeProbe");
+        QDBusInterface b("org.frankenstein.NativeProbeHistB","/Probe","org.frankenstein.NativeProbe");
+        QVERIFY(a.isValid() && b.isValid());
+        const auto focus=[&](const QString &title){const auto id=first(manager,title).value("id").toULongLong();
+            manager.activate(id);
+            auto *item=qobject_cast<QWaylandQuickItem *>(visualItem(scene.view.contentItem(),"client-"+QString::number(id)));
+            return QTest::qWaitFor([&]{return item && item->hasActiveFocus();},3000);};
+        // Never a blocking call into a probe that may be pasting: it waits on this compositor.
+        const auto text=[&](QDBusInterface &probe){
+            QDBusPendingReply<QString> reply=probe.asyncCall("Text");
+            if(!QTest::qWaitFor([&]{return reply.isFinished();},2000) || reply.isError())
+                return QString("<inspection unavailable>");
+            return reply.value();};
+        const auto labels=[&]{QStringList result;for(const auto &c:clipboard->history())result<<c.toMap().value("label").toString();return result;};
+        const auto current=[&]{for(const auto &c:clipboard->history())if(c.toMap().value("current").toBool())return c.toMap().value("label").toString();return QString();};
+        QVERIFY(focus("Native Probe HistA"));
+        for(const auto *copy:{"First clipping","Second clipping","First clipping","Third clipping"}) {
+            a.call("SetClipboard",QString::fromUtf8(copy));
+            QTRY_COMPARE(current(),QString::fromUtf8(copy));
+        }
+        // Copied again, "First" moved up instead of repeating.
+        QCOMPARE(labels(),(QStringList{"Third clipping","First clipping","Second clipping"}));
+        a.call("SetSecretClipboard",QString("hunter2"));
+        QTRY_VERIFY(current().isEmpty()); // The clipboard holds the secret, which no clipping shows.
+        QTest::qWait(300);
+        QCOMPARE(labels(),(QStringList{"Third clipping","First clipping","Second clipping"}));
+        // From the strip's menu: the clippings, the clipboard's own checked, then its commands.
+        const auto entries=[&]{QVariant result;QMetaObject::invokeMethod(scene.view.rootObject(),"stripMenuEntries",
+            Q_RETURN_ARG(QVariant,result),Q_ARG(QVariant,QString("clipboard")));return result.toList();};
+        QCOMPARE(entries().size(),6);
+        QCOMPARE(entries().at(2).toMap().value("text").toString(),QString("Second clipping"));
+        QCOMPARE(entries().at(4).toMap().value("text").toString(),QString("Show Clipboard"));
+        QVERIFY(QMetaObject::invokeMethod(scene.view.rootObject(),"dispatchShellCommand",
+            Q_ARG(QVariant,QVariant("clipping")),Q_ARG(QVariant,QVariant(2))));
+        QTRY_COMPARE(current(),QString("Second clipping"));
+        QCOMPARE(labels().first(),QString("Second clipping"));
+        QVERIFY(entries().at(0).toMap().value("checked").toBool());
+        // The next paste gets it: here, in the application that has the keyboard.
+        QTRY_VERIFY_WITH_TIMEOUT(probeAcceptsTextInput(a),3000);
+        commandKey(&scene.view,Qt::Key_V,47);
+        QTRY_COMPARE(text(a),QString("Second clipping"));
+        // The application that copied them quits; the clippings stay.
+        a.call("Finish");
+        QTRY_COMPARE(source.state(),QProcess::NotRunning);
+        QTRY_VERIFY(first(manager,"Native Probe HistA").isEmpty());
+        QCOMPARE(labels(),(QStringList{"Second clipping","Third clipping","First clipping"}));
+        // The Clipboard window lists them too; clicking one switches the clipboard.
+        QVERIFY(QMetaObject::invokeMethod(scene.view.rootObject(),"dispatchShellCommand",
+            Q_ARG(QVariant,QVariant("show-clipboard")),Q_ARG(QVariant,QVariant(0))));
+        QQuickItem *row=nullptr;
+        QTRY_VERIFY((row=visualItem(scene.view.contentItem(),"clipboard-history-2")) && row->isVisible());
+        QVERIFY(capture(scene.view,"native-clipboard-history.png"));
+        QTest::mouseClick(&scene.view,Qt::LeftButton,{},row->mapToScene(QPointF(row->width()/2,row->height()/2)).toPoint());
+        QTRY_COMPARE(current(),QString("First clipping"));
+        QTRY_COMPARE(visualItem(scene.view.contentItem(),"clipboard-text")->property("text").toString(),QString("First clipping"));
+        // Pasted in another application, given the keyboard after the switch (the window closed first).
+        nativeKeyEvent(&scene.view,QEvent::KeyPress,Qt::Key_Escape,{},1);
+        nativeKeyEvent(&scene.view,QEvent::KeyRelease,Qt::Key_Escape,{},1);
+        QTRY_VERIFY(!visualItem(scene.view.contentItem(),"clipboard-history-2") || !visualItem(scene.view.contentItem(),"clipboard-history-2")->isVisible());
+        // Closing the window gives the keyboard straight back to the application in front, so
+        // Command-V goes to it, not to the desktop.
+        QTRY_VERIFY_WITH_TIMEOUT(probeAcceptsTextInput(b),3000);
+        commandKey(&scene.view,Qt::Key_V,47);
+        QTRY_COMPARE(text(b),QString("First clipping"));
+        // Clear Clipboard History keeps only the clipboard itself.
+        clipboard->clearHistory();
+        QCOMPARE(labels(),(QStringList{"First clipping"}));
+        b.call("Finish");
+    }
     void shellTextFieldsShareTheClipboardWithApplications()
     {
         NativeScene scene;
@@ -5406,6 +5495,81 @@ class NativeTests : public QObject
         QVERIFY(QMetaObject::invokeMethod(calculator,"open"));
         QTRY_COMPARE(member->property("workspace").toInt(),5);
         QVERIFY(!away());
+    }
+    // Restart Desktop (Lily Hewitt, 2026-11-12): applications close as at Log Out, the desktop ends
+    // with RestartDesktopExit, and the next desktop opens them again, with the desk accessories.
+    void restartDesktopClosesApplicationsAndReopensThem()
+    {
+        qputenv("PLATINUM_DESKTOP_RESTART", "75"); // as the session supervisor sets it
+        const auto unset=qScopeGuard([]{qunsetenv("PLATINUM_DESKTOP_RESTART");});
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager=*scene.manager;
+        QVERIFY(QDir().mkpath(scene.files.path()+"/applications"));
+        QFile entry(scene.files.path()+"/applications/org.frankenstein.NativeProbeReopen.desktop");
+        QVERIFY(entry.open(QIODevice::WriteOnly));
+        entry.write("[Desktop Entry]\nType=Application\nName=Reopen Probe\nExec="+
+                    (QCoreApplication::applicationDirPath()+"/native-probe Reopen").toUtf8()+"\n");
+        entry.close();
+        auto *catalog=qobject_cast<ApplicationCatalog *>(manager.applicationCatalog());
+        QVERIFY(catalog);
+        catalog->refresh();
+        QTRY_VERIFY(catalog->ready());
+        const auto finish=qScopeGuard([&]{
+            QDBusInterface api("org.frankenstein.NativeProbeReopen","/Probe","org.frankenstein.NativeProbe");
+            if(api.isValid()) api.call("Finish");
+        });
+        manager.launchApplication("org.frankenstein.NativeProbeReopen.desktop");
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager,"Native Probe Reopen").isEmpty(),10000);
+        auto *calculator=visualItem(scene.view.contentItem(),"calculator-window");
+        QVERIFY(calculator);
+        QVERIFY(QMetaObject::invokeMethod(calculator,"open"));
+        QTRY_VERIFY(calculator->isVisible());
+        QSignalSpy ended(&manager,&NativeManager::sessionEnded);
+        QVERIFY(QMetaObject::invokeMethod(scene.view.rootObject(),"restartDesktop"));
+        // The application was asked to close, and did; then the desktop ended for a restart.
+        QTRY_VERIFY_WITH_TIMEOUT(first(manager,"Native Probe Reopen").isEmpty(),5000);
+        QTRY_COMPARE(ended.count(),1);
+        QCOMPARE(ended.at(0).at(0).toInt(),NativeManager::RestartDesktopExit);
+        QFile note(scene.files.path()+"/profile/reopen-after-restart.json");
+        QVERIFY(note.open(QIODevice::ReadOnly));
+        const auto saved=QJsonDocument::fromJson(note.readAll()).object();
+        note.close();
+        QCOMPARE(saved.value("applications").toArray(),QJsonArray{"org.frankenstein.NativeProbeReopen.desktop"});
+        QVERIFY(saved.value("shell").toArray().contains("calculator"));
+        // Standing in for the next desktop: it opens them again.
+        QVERIFY(QMetaObject::invokeMethod(calculator,"close"));
+        QTRY_VERIFY(!calculator->isVisible());
+        manager.reopenAfterRestart();
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager,"Native Probe Reopen").isEmpty(),10000);
+        QTRY_VERIFY(calculator->isVisible());
+        QVERIFY(!note.exists());
+    }
+    // After an update the App Store, a program of its own, closes and opens on the new version.
+    void appStoreReopensAfterAnUpdate()
+    {
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager=*scene.manager;
+        QProcess store;
+        const auto stop=qScopeGuard([&]{if(store.state()!=QProcess::NotRunning){store.kill();store.waitForFinished(3000);}});
+        store.setProcessEnvironment(scene.childEnvironment());
+        store.start(QCoreApplication::applicationDirPath()+"/native-probe",{"Store","--app-id=org.platinumreality.AppStore"});
+        QVERIFY(store.waitForStarted());
+        QTRY_VERIFY(!first(manager,"Native Probe Store").isEmpty());
+        // Applications that aren't the App Store are left alone.
+        QProcess other;
+        const auto stopOther=qScopeGuard([&]{if(other.state()!=QProcess::NotRunning){other.kill();other.waitForFinished(3000);}});
+        other.setProcessEnvironment(scene.childEnvironment());
+        other.start(QCoreApplication::applicationDirPath()+"/native-probe",{"Other"});
+        QVERIFY(other.waitForStarted());
+        QTRY_VERIFY(!first(manager,"Native Probe Other").isEmpty());
+        manager.reopenUpdatedPrograms();
+        QTRY_VERIFY_WITH_TIMEOUT(store.state()==QProcess::NotRunning,5000);
+        // The new one: the real App Store from this build.
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager,"App Store").isEmpty(),10000);
+        QVERIFY(!first(manager,"Native Probe Other").isEmpty());
+        // (The new App Store leaves with this scene's compositor.)
     }
     void applicationsAskForAttentionAndRingTheBellLikeMacOS9()
     {
@@ -6601,6 +6765,12 @@ class NativeTests : public QObject
         QVERIFY(QFile::copy(QCoreApplication::applicationDirPath() + "/native-probe", agent));
         QVERIFY(QFile::setPermissions(agent, QFile::ReadOwner | QFile::ExeOwner));
         manager.setAuthenticationAgents({agent});
+        // Each box sounds the alert once as it appears (Lily Hewitt, 2026-11-12: the Mac bing); with no
+        // player here the alert is the menu-bar flash.
+        auto *sounds = qobject_cast<AlertSounds *>(manager.alertSounds());
+        QVERIFY(sounds);
+        QSignalSpy flashed(sounds, &AlertSounds::flash), played(sounds, &AlertSounds::played);
+        const auto alerts = [&] { return flashed.count() + played.count(); };
         QList<QProcess *> processes;
         const auto stop = qScopeGuard([&] {
             for (auto *process : processes)
@@ -6624,10 +6794,12 @@ class NativeTests : public QObject
         QTRY_VERIFY(panels->isVisible() && panels->hasActiveFocus() && manager.desktopActive());
         const auto passwordBox = [&](const QString &label, bool switchAway)
         {
+            const int before = alerts();
             auto *box = run(agent, label);
             const auto title = "Native Probe " + label;
             QTRY_VERIFY(first(manager, title).value("active").toBool());
             QVERIFY(first(manager, title).value("authentication").toBool());
+            QTRY_COMPARE(alerts(), before + 1);
             QTRY_COMPARE(manager.authenticationLayer(), first(manager, title).value("layer").toInt());
             // Beneath the box, above the other application.
             QTRY_COMPARE(panels->z(), manager.authenticationLayer() - 0.5);
@@ -6656,6 +6828,7 @@ class NativeTests : public QObject
             QTRY_COMPARE(box->state(), QProcess::NotRunning);
             QTRY_VERIFY(first(manager, title).isEmpty());
             QTRY_COMPARE(manager.authenticationLayer(), 0);
+            QCOMPARE(alerts(), before + 1); // Not again while it showed, nor as it closed.
         };
         passwordBox("Password", false);
         // The box closed: the panel is in front with the keyboard again.
@@ -9427,6 +9600,50 @@ class NativeTests : public QObject
         QTRY_VERIFY2_WITH_TIMEOUT(QFileInfo::exists(desktopItems->directory() + "/Fingered.txt"),
                                   "A finger drag did not reach the desktop", 8000);
         QTRY_VERIFY(!manager.nativeDragging() && !desktopItems->busy());
+    }
+    // Lily Hewitt, 2026-11-12: a Firefox tab dragged to her other monitor wouldn't come away. The desktop
+    // took the tab's link as a file drop (and said it had no files), so Firefox never heard its tab
+    // was let go over nothing. A tab drag now has nothing under it on the desktop: the browser
+    // detaches it, and its new window opens where it was let go. The probe drags Firefox's types.
+    void aBrowserTabLetGoOverTheDesktopDetachesWhereItLands()
+    {
+        NativeScene scene;
+        auto &manager = *scene.manager;
+        QVERIFY(scene.show());
+        QTRY_VERIFY_WITH_TIMEOUT(manager.snapshot().value("dropReceiverReady").toBool(), 10000);
+        auto *browser = new QProcess(&scene.view);
+        browser->setProcessEnvironment(scene.childEnvironment());
+        browser->start(QCoreApplication::applicationDirPath() + "/native-probe", {"Browser", "--tab-drag"});
+        const auto stop = qScopeGuard([&] {
+            if (browser->state() != QProcess::NotRunning) { browser->kill(); browser->waitForFinished(3000); }
+        });
+        QTRY_VERIFY_WITH_TIMEOUT(first(manager, "Native Probe Browser").value("active").toBool(), 10000);
+        const auto id = first(manager, "Native Probe Browser").value("id").toULongLong();
+        manager.moveWindow(id, 60, 80);
+        QTRY_COMPARE(first(manager, "Native Probe Browser").value("x").toInt(), 60);
+        QDBusInterface probe("org.frankenstein.NativeProbeBrowser", "/Probe", "org.frankenstein.NativeProbe");
+        QTRY_VERIFY(probe.isValid());
+        auto *client = qobject_cast<QWaylandQuickItem *>(visualItem(scene.view.contentItem(), "client-" + QString::number(id)));
+        QVERIFY(client);
+        const auto start = client->mapToScene(client->mapFromSurface({120, 120})).toPoint();
+        const QPoint end(700, 520); // Empty desktop.
+        QSignalSpy errors(&manager, &NativeManager::errorOccurred);
+        QTest::mousePress(&scene.view, Qt::LeftButton, {}, start);
+        QTest::mouseMove(&scene.view, start + QPoint(30, 0), 40);
+        QTRY_VERIFY(manager.nativeDragging());
+        QTest::mouseMove(&scene.view, end, 40);
+        QTest::qWait(300);
+        QVERIFY2(!manager.nativeDragOnDesktop(), "the desktop must not take a browser tab");
+        QTest::mouseRelease(&scene.view, Qt::LeftButton, {}, end, 40);
+        QTRY_COMPARE(QDBusReply<int>(probe.call("LastDragResult")).value(), int(Qt::IgnoreAction));
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager, "Detached Tab").isEmpty(), 10000);
+        const auto detached = first(manager, "Detached Tab");
+        QCOMPARE(detached.value("x").toInt(), end.x() - 80);
+        QCOMPARE(detached.value("y").toInt(), end.y() - 12);
+        QTest::qWait(300);
+        QVERIFY2(errors.isEmpty(), qPrintable(errors.isEmpty() ? QString() : errors.first().first().toString()));
+        QVERIFY(capture(scene.view, "native-tab-detached.png"));
+        probe.call("Finish");
     }
     void finderDragsReachDesktopAndBackgroundFoldersAndRightClickMenus()
     {

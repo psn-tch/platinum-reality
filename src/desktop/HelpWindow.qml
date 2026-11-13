@@ -29,7 +29,9 @@ FocusScope {
         {id: "menus", title: "The menu bar", body:
             "<h3>The menu bar and Control Strip</h3>" +
             "<p>The menu at the far left of the menu bar is the <b>Apple menu</b>. It has About This " +
-            "Computer, Applications…, Calculator, the Control Panels, Key Caps, Note Pad, Scrapbook, Recent Applications and Terminal.</p>" +
+            "Computer, Applications…, Calculator, the Control Panels, Key Caps, Note Pad, Puzzle, Scrapbook, Snapshot, " +
+            "Recent Applications and Terminal. Control Panels ▸ Apple Menu Options chooses whether its folders have " +
+            "submenus and how many recent applications it remembers.</p>" +
             "<p>The menus next to it belong to the application in front. On the desktop they are File, " +
             "Edit, View, Window, Special and Help.</p>" +
             "<p>The <b>application menu</b> at the far right shows which application is in front. Choose " +
@@ -37,7 +39,9 @@ FocusScope {
             "tear it off as the <b>Application Switcher</b>, a palette of running applications: " +
             "click one to switch to it.</p>" +
             "<p>The <b>Control Strip</b> in the bottom-left corner has volume, brightness, monitors, " +
-            "battery, Wi-Fi and Bluetooth. Click its tab to fold it away. Drag the tab sideways to make the " +
+            "battery, Wi-Fi and Bluetooth. Its <b>Camera</b> module turns the camera off so that nothing at all " +
+            "can use it (turning it on asks for an administrator's password), and its <b>Clipboard</b> module " +
+            "lists what you copied recently: choose one to paste it again. Click its tab to fold it away. Drag the tab sideways to make the " +
             "strip shorter or longer. Drag it up or down to move the strip, and across the screen to put it " +
             "on the other side; holding down Option (Alt) while you drag always moves it.</p>"},
         {id: "computer", title: "About This Computer", body:
@@ -135,11 +139,13 @@ FocusScope {
             "from the list on the left. Changes take effect as you make them; close the window when " +
             "you are done. The Control Strip's menus open the same window at their panel.</p><ul>" +
             "<li><b>Appearance</b>: highlight colour, sounds, WindowShade and the Control Strip.</li>" +
+            "<li><b>Apple Menu Options</b>: submenus on or off, and how many recent applications to remember.</li>" +
             "<li><b>Bluetooth</b>: pair, connect and forget devices.</li>" +
             "<li><b>Date &amp; Time</b>: a calendar, the time zone, and the menu bar clock (24-hour, " +
             "seconds, the date). Click the clock in the menu bar to see the date.</li>" +
             "<li><b>Desktop Picture</b>: choose a picture, then Set Desktop.</li>" +
             "<li><b>Energy Saver</b>: when the display turns off and the computer sleeps.</li>" +
+            "<li><b>File Exchange</b>: which application opens each kind of document from the Finder and the desktop.</li>" +
             "<li><b>General Controls</b>: whether the desktop's icons show behind other applications, " +
             "how many times a chosen menu item blinks, and how fast the insertion point blinks.</li>" +
             "<li><b>Keyboard</b>: your keyboard layouts (check more than one for a keyboard menu in the menu bar), " +
@@ -148,8 +154,18 @@ FocusScope {
             "arrangement. A change goes back by itself after 15 seconds unless you click Keep, so a " +
             "blank screen fixes itself.</li>" +
             "<li><b>Mouse &amp; Trackpad</b>: tracking speed, scrolling direction, tap to click.</li>" +
-            "<li><b>Network</b>: join and forget Wi-Fi networks, and this computer's addresses.</li>" +
-            "<li><b>Sound</b>: speakers and microphones, alert sounds and the startup sound.</li></ul>"},
+            "<li><b>Network</b>: join and forget Wi-Fi networks, and TCP/IP: this computer's addresses, router " +
+            "and name servers.</li>" +
+            "<li><b>Sound</b>: alert sounds, microphones, speakers, Main Volume and the startup sound. " +
+            "<b>Mac sounds only</b> removes the Arch and KDE desktop sounds (or downloads them again).</li></ul>"},
+        {id: "snapshot", title: "Snapshot", body:
+            "<h3>Snapshot</h3>" +
+            "<p>Choose <b>Apple menu ▸ Snapshot</b> to take pictures with your camera. The camera's picture " +
+            "shows in the window; click <b>Take Picture</b> (or press Return). Pictures are saved in the " +
+            "Snapshot folder in your Pictures folder, named for when they were taken; <b>Show Pictures</b> " +
+            "opens it.</p>" +
+            "<p>If no camera is available, Snapshot says so. Check that the Control Strip's Camera module " +
+            "is On, or connect a camera: the picture appears by itself when one does.</p>"},
         {id: "stickies", title: "Stickies", body:
             "<h3>Stickies</h3>" +
             "<p>Choose <b>Apple menu ▸ Stickies ▸ New Note</b> for a note on your desktop, ready " +

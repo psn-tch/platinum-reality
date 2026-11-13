@@ -148,6 +148,17 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
         nativeTest ? qEnvironmentVariable("FRANKENSTEIN_FINGERPRINT_HELPER")
                    : QCoreApplication::applicationDirPath() + "/platinum-fingerprint-login",
         nativeTest ? QStringList() : QStringList{"pkexec"}, this);
+    // The Camera switch: its root helper through pkexec only in a real session, so no test can ever
+    // switch the host's camera; tests name a stand-in, which runs without pkexec.
+    const bool hostCamera = c != nullptr && !nativeTest;
+    m_camera = new CameraSwitch(hostCamera ? QCoreApplication::applicationDirPath() + "/platinum-webcam"
+                                           : qEnvironmentVariable("FRANKENSTEIN_WEBCAM_HELPER"),
+                                hostCamera ? QStringList{"pkexec"} : QStringList(), this);
+    m_camera->refresh();
+    // Mac sounds only: the same, with its own root helper.
+    m_systemSounds = new SystemSounds(hostCamera ? QCoreApplication::applicationDirPath() + "/platinum-system-sounds"
+                                                 : qEnvironmentVariable("FRANKENSTEIN_SYSTEM_SOUNDS_HELPER"),
+                                      hostCamera ? QStringList{"pkexec"} : QStringList(), this);
     m_power = new PowerControl(hostBluetooth ? QDBusConnection::systemBus() : QDBusConnection(QString()), this);
     connect(m_power, &PowerControl::lockFailed, this, &NativeManager::errorOccurred);
     connect(m_power, &PowerControl::finished, this, [this](bool ok, const QString &error)
@@ -178,8 +189,10 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     const auto appDir = QCoreApplication::applicationDirPath();
     const auto keyring = QFileInfo::exists(appDir + "/release-keys.gpg")
         ? appDir + "/release-keys.gpg" : QString("/usr/share/platinum-reality/release-keys.gpg");
-    m_softwareUpdate = new SoftwareUpdate(appDir + "/platinum-software-update", keyring,
-                                          m_profile + "/software-update.json", this);
+    auto *softwareUpdate = new SoftwareUpdate(appDir + "/platinum-software-update", keyring,
+                                              m_profile + "/software-update.json", this);
+    m_softwareUpdate = softwareUpdate;
+    connect(softwareUpdate, &SoftwareUpdate::installFinished, this, &NativeManager::reopenUpdatedPrograms);
     // CUPS's own tools; tests name stand-ins.
     m_printers = new PrinterSelector(qEnvironmentVariable("FRANKENSTEIN_LPSTAT", "lpstat"),
                                      qEnvironmentVariable("FRANKENSTEIN_LPOPTIONS", "lpoptions"), this);
@@ -246,12 +259,12 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     {
         // Apple menu > Recent Applications. Bounded, validated, profile-local.
         QFile recent(m_profile + "/recent-applications.json");
-        if (recent.open(QIODevice::ReadOnly) && recent.size() <= 16 * 1024)
+        if (recent.open(QIODevice::ReadOnly) && recent.size() <= 128 * 1024)
             for (const auto &value : QJsonDocument::fromJson(recent.readAll()).array())
             {
                 const auto entry = value.toObject();
                 if (entry.value("id").isString() && entry.value("name").isString() &&
-                    m_recentApplications.size() < 10)
+                    m_recentApplications.size() < 99)
                     m_recentApplications.push_back(QVariantMap{
                         {"id", entry.value("id").toString().left(512)},
                         {"name", entry.value("name").toString().left(256)}});
@@ -703,6 +716,19 @@ void NativeManager::beginNativeDrop(QPoint position, bool desktop)
                            }
                        });
 }
+bool NativeManager::browserTabDrag(const QStringList &types)
+{
+    // Firefox's own tab type; Chromium's tab strip drags carry its own as well.
+    return types.contains("application/x-moz-tabbrowser-tab") || types.contains("application/x-chromium-tab");
+}
+void NativeManager::rememberTabDetach(QPointF point)
+{
+    if (m_nativeDragHasTarget || !browserTabDrag(dragOfferedTypes(m_compositor->defaultSeat())))
+        return;
+    m_tabDetach.pid = liveSurfaceClientPid(m_dragOrigin);
+    m_tabDetach.at = point.toPoint();
+    m_tabDetach.since.start();
+}
 bool NativeManager::routeNativeDrag(QPointF point, Qt::KeyboardModifiers modifiers)
 {
     auto *drag = m_compositor->defaultSeat()->drag();
@@ -748,8 +774,11 @@ bool NativeManager::routeNativeDrag(QPointF point, Qt::KeyboardModifiers modifie
                 }
                 break;
             }
+            // A browser tab dragged out of its window (Lily Hewitt, 2026-11-12: a Firefox tab dragged
+            // to her other monitor wouldn't come away) is no file for the desktop: with nothing
+            // under it, the browser opens it in a new window where it was let go.
             if (!overWindow && !m_desktopItems->busy() && m_dropSurface &&
-                m_dropSurface->hasContent())
+                m_dropSurface->hasContent() && !browserTabDrag(dragOfferedTypes(m_compositor->defaultSeat())))
             {
                 QVariant allowed;
                 QMetaObject::invokeMethod(m_view->rootObject(), "isDesktopDropPoint",
@@ -777,6 +806,7 @@ bool NativeManager::routeNativeDrag(QPointF point, Qt::KeyboardModifiers modifie
         qInfo("Drop desktop target=%d; target peer=%d", desktopTarget,
               int(liveSurfaceClientPid(target)));
     m_nativeDragOnDesktop = desktopTarget;
+    m_nativeDragHasTarget = target != nullptr;
     emit nativeDragChanged();
     // Explicit null focus on desktop chrome/outside. Qt's built-in Quick route
     // updates client targets only, otherwise retaining the previous offer.
@@ -1287,6 +1317,7 @@ QUrl NativeManager::applicationIcon(QString identity, int size) const
         {"shell:asset-importer", {"asset-importer", "document-import"}},
         {"shell:app-store", {"app-store", "system-software-install"}},
         {"shell:puzzle", {"puzzle", "applications-games"}},
+        {"shell:snapshot", {"snapshot", "camera-photo"}},
         {"shell:sticky-notes", {"stickies", "knotes"}},
         {"shell:terminal", {"terminal", "utilities-terminal"}},
         {"shell:appearance", {"appearance", "preferences-desktop-theme"}},
@@ -1295,6 +1326,8 @@ QUrl NativeManager::applicationIcon(QString identity, int size) const
         {"shell:desktop-picture", {"desktop-picture", "preferences-desktop-wallpaper"}},
         {"shell:energy", {"energy-saver", "preferences-system-power-management"}},
         {"shell:fingerprints", {"fingerprints", "preferences-desktop-user-password"}},
+        {"shell:apple-menu-options", {"apple-menu-options", "preferences-desktop-menu"}},
+        {"shell:file-exchange", {"file-exchange", "preferences-desktop-default-applications"}},
         {"shell:keyboard", {"keyboard", "input-keyboard"}},
         {"shell:monitors", {"monitors", "preferences-desktop-display"}},
         {"shell:mouse", {"mouse", "input-mouse"}},
@@ -1487,6 +1520,16 @@ void NativeManager::createWindow(QWaylandXdgToplevel *top, QWaylandXdgSurface *x
                 {primary.x()+80 + int((m_nextWindow - 1) % 7) * 30,
                  primary.y()+65 + int((m_nextWindow - 1) % 7) * 28},
                 {uint(size.width()), uint(size.height())}};
+            // A tab dragged out of its browser opens where it was let go, on whichever display
+            // that was, with the pointer over its tab strip (Lily Hewitt, 2026-11-12).
+            if (!parent && m_tabDetach.pid && m_tabDetach.since.isValid() && m_tabDetach.since.elapsed() < 3000 &&
+                liveSurfaceClientPid(xdg->surface()) == m_tabDetach.pid)
+            {
+                const auto position = effectiveDisplayLayout().reachablePosition(
+                    {m_tabDetach.at.x() - 80, m_tabDetach.at.y() - 12}, size, true);
+                record->geometry.position = {position.x(), position.y()};
+                m_tabDetach = {};
+            }
             if (parent && record->modal())
             {
                 const auto &owner = m_state.windows.at(*parent).geometry;
@@ -1775,6 +1818,14 @@ void NativeManager::synchronize()
         m_wantsAttention.remove(m_state.active.application->value);
     for (auto it = m_wantsAttention.begin(); it != m_wantsAttention.end();)
         it = m_state.applications.contains(ApplicationId{*it}) ? std::next(it) : m_wantsAttention.erase(it);
+    // A password box sounds the alert as it appears, as a 9.2.2 alert does (Lily Hewitt, 2026-11-12:
+    // the Mac bing on the password box): the alert sound chosen in the Sound control panel, her own
+    // 9.2.2 sounds when imported. Once per box, not on every change while it shows.
+    const bool passwordBox = m_authenticationLayer > 0;
+    if (passwordBox && !m_passwordBoxShowing)
+        if (auto *sounds = qobject_cast<AlertSounds *>(m_alertSounds))
+            sounds->play();
+    m_passwordBoxShowing = passwordBox;
     emit contextChanged();
     auto focus = desired_focus(m_state);
     auto *window = !shellModal() && focus.window ? find(focus.window->value) : nullptr;
@@ -1846,7 +1897,21 @@ void NativeManager::activate(qulonglong id, bool expand)
 {
     if (shellModal())
         return;
+    // Already in front, the state doesn't change and nothing would give its client the keyboard
+    // back if a desktop window had taken it: a click on the window always does.
+    const bool already = m_state.active.window && m_state.active.window->value == id;
     dispatch(ActivateWindow{{id}, expand ? Expansion::restore : Expansion::preserve});
+    if (already)
+        refocus();
+}
+void NativeManager::refocus()
+{
+    const auto focus = desired_focus(m_state);
+    auto *window = !shellModal() && focus.window ? find(focus.window->value) : nullptr;
+    if (window)
+        emit focusWindow(window->id());
+    else
+        emit focusDesktop();
 }
 void NativeManager::contextClickWindow(qulonglong id, QPointF point)
 {
@@ -2846,6 +2911,20 @@ void NativeManager::launchPuzzle()
 {
     launch(QCoreApplication::applicationDirPath() + "/frankenstein-puzzle", {});
 }
+void NativeManager::launchSnapshot()
+{
+    // Qt's camera support is optional, so an update never needs software that isn't installed
+    // (Software Update refuses that): without it, say what to install.
+    if (!QFileInfo::exists("/usr/lib/libQt6MultimediaWidgets.so.6") ||
+        !QFileInfo::exists("/usr/lib/qt6/plugins/multimedia/libffmpegmediaplugin.so"))
+    {
+        emit errorOccurred("Snapshot needs Qt’s camera support, which isn’t installed. Install "
+                           "qt6-multimedia-ffmpeg in the App Store (or in Terminal: sudo pacman -S "
+                           "qt6-multimedia-ffmpeg v4l-utils), then open Snapshot again.");
+        return;
+    }
+    launch(QCoreApplication::applicationDirPath() + "/platinum-snapshot", {});
+}
 void NativeManager::launchAppStore()
 {
     launch(QCoreApplication::applicationDirPath() + "/platinum-app-store", {});
@@ -2979,6 +3058,7 @@ bool NativeManager::eventFilter(QObject *object, QEvent *event)
                 return true;
             if (desktop && m_dragOrigin)
                 m_dragOrigin->setProperty("platinumDeferTouchEnd", true);
+            rememberTabDetach(point);
             beginNativeDrop(point.toPoint(), desktop);
             m_compositor->defaultSeat()->drag()->drop();
             queueClientFlush();
@@ -2993,7 +3073,10 @@ bool NativeManager::eventFilter(QObject *object, QEvent *event)
         if (event->type() == QEvent::MouseMove)
             return true;
         if (mouse->button() == Qt::LeftButton)
+        {
+            rememberTabDetach(mouse->position());
             beginNativeDrop(mouse->position().toPoint(), desktop);
+        }
         // Let the source surface item end its grab and dispatch wl_data_device.drop.
     }
     if (object == m_view &&
@@ -3056,6 +3139,11 @@ void NativeManager::quitSession()
                                timer->deleteLater();
                                m_quitting = false;
                                m_pendingPower.reset();
+                               if (m_restartingDesktop)
+                               {
+                                   m_restartingDesktop = false;
+                                   QFile::remove(m_profile + "/reopen-after-restart.json");
+                               }
                                emit errorOccurred(
                                    "The session remains open. Save or close application windows, "
                                    "then try again.");
@@ -3076,7 +3164,110 @@ void NativeManager::endSession()
         return;
     }
     m_allowExit = true;
-    QCoreApplication::quit();
+    emit sessionEnded(m_restartingDesktop ? RestartDesktopExit : 0);
+}
+bool NativeManager::restartDesktopAvailable()
+{
+    return qEnvironmentVariable("PLATINUM_DESKTOP_RESTART") == QString::number(RestartDesktopExit);
+}
+void NativeManager::restartDesktop(const QStringList &shellWindows)
+{
+    if (m_quitting || shellModal())
+        return;
+    if (!restartDesktopAvailable())
+    {
+        emit errorOccurred("This session started before Restart Desktop existed. Log out and back in to "
+                           "use the new version.");
+        return;
+    }
+    // The applications with windows, by their desktop entries; ones without an entry can't be
+    // started again and are only asked to close.
+    QJsonArray applications;
+    for (const auto id : m_state.applications_back_to_front)
+    {
+        const auto key = m_applicationIds.key(id);
+        if (id == m_desktopApplication || key.isEmpty() || m_state.applications.at(id).windows_back_to_front.empty())
+            continue;
+        const auto entry = key.endsWith(".desktop") ? key : key + ".desktop";
+        if (!m_catalog->applicationName(entry).isEmpty() && !applications.contains(entry))
+            applications.append(entry);
+    }
+    QJsonArray shell;
+    for (const auto &action : shellWindows)
+        if (QRegularExpression("^[a-z][a-z-]{0,40}$").match(action).hasMatch())
+            shell.append(action);
+    QSaveFile file(m_profile + "/reopen-after-restart.json");
+    if (!file.open(QIODevice::WriteOnly) ||
+        file.write(QJsonDocument(QJsonObject{{"applications", applications}, {"shell", shell},
+                                             {"written", QDateTime::currentSecsSinceEpoch()}})
+                       .toJson()) < 0 ||
+        !file.commit())
+    {
+        emit errorOccurred("The desktop could not note its open applications, so it was not restarted.");
+        return;
+    }
+    m_restartingDesktop = true;
+    quitSession();
+    if (!m_quitting)
+    {
+        m_restartingDesktop = false;
+        QFile::remove(m_profile + "/reopen-after-restart.json");
+    }
+}
+void NativeManager::reopenUpdatedPrograms()
+{
+    const auto app = m_applicationIds.value("org.platinumreality.AppStore");
+    if (!app.value || !m_state.applications.contains(app))
+        return;
+    bool asked = false;
+    for (auto *window : QList(m_windows))
+        if (window->top && m_state.windows.contains(window->identity) &&
+            m_state.windows.at(window->identity).application == app)
+        {
+            window->top->sendClose();
+            asked = true;
+        }
+    if (!asked)
+        return;
+    queueClientFlush();
+    auto *timer = new QTimer(this);
+    timer->setInterval(200);
+    connect(timer, &QTimer::timeout, this, [this, timer, app, tries = 0]() mutable {
+        if (!m_state.applications.contains(app))
+        {
+            timer->stop();
+            timer->deleteLater();
+            launchAppStore();
+        }
+        else if (++tries >= 25)
+        {
+            timer->stop();
+            timer->deleteLater();
+        }
+    });
+    timer->start();
+}
+void NativeManager::reopenAfterRestart()
+{
+    QFile file(m_profile + "/reopen-after-restart.json");
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 64 * 1024)
+        return;
+    const auto saved = QJsonDocument::fromJson(file.readAll()).object();
+    file.close();
+    file.remove();
+    // Only a restart that just happened; a stale note from an interrupted one is ignored.
+    const auto age = QDateTime::currentSecsSinceEpoch() - saved.value("written").toInteger();
+    if (age < 0 || age > 300)
+        return;
+    for (const auto &value : saved.value("applications").toArray())
+        if (value.isString() && !m_catalog->applicationName(value.toString()).isEmpty())
+            launchApplication(value.toString(), {}, false);
+    QStringList shell;
+    for (const auto &value : saved.value("shell").toArray())
+        if (value.isString())
+            shell.append(value.toString());
+    if (!shell.isEmpty())
+        emit reopenShellWindows(shell);
 }
 bool NativeManager::powerAvailable() const
 {
@@ -3114,6 +3305,9 @@ void NativeManager::shutDownComputer()
 }
 void NativeManager::rememberRecentApplication(const QString &id)
 {
+    // Apple Menu Options ▸ Remember recently used items, off: nothing new is remembered.
+    if (!m_appearance->appleMenu().value("rememberRecent").toBool())
+        return;
     auto name = m_catalog->applicationName(id);
     if (name.isEmpty())
         name = QString(id).remove(".desktop").section('.', -1);
@@ -3122,7 +3316,8 @@ void NativeManager::rememberRecentApplication(const QString &id)
                        [&](const QVariant &entry) { return entry.toMap().value("id") == id; }),
         m_recentApplications.end());
     m_recentApplications.prepend(QVariantMap{{"id", id}, {"name", name}});
-    while (m_recentApplications.size() > 10)
+    // As many as Apple Menu Options says to remember (the menu shows that many).
+    while (m_recentApplications.size() > m_appearance->appleMenu().value("recentApplications").toInt())
         m_recentApplications.removeLast();
     QJsonArray array;
     for (const auto &entry : m_recentApplications)

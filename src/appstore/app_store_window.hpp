@@ -1,5 +1,6 @@
 #pragma once
 #include "catalog.hpp"
+#include <QHash>
 #include <QMainWindow>
 
 class ActivityWindow;
@@ -9,6 +10,7 @@ class QAction;
 class QComboBox;
 class QLabel;
 class QLineEdit;
+class QMenu;
 class QProgressBar;
 class QPushButton;
 class QTextBrowser;
@@ -27,6 +29,8 @@ class AppStoreWindow final : public QMainWindow
     explicit AppStoreWindow(PackageClient *client, QWidget *parent = nullptr);
     // Tests answer the questions a person would, in order: true is the question's action button.
     void setTestAnswers(QList<bool> answers) { m_testAnswers = std::move(answers); }
+    // And which button they click when there are several ("" for Cancel).
+    void setTestChoices(QStringList choices) { m_testChoices = std::move(choices); }
     QString lastQuestion() const { return m_lastQuestion; }
     QString lastAlert() const { return m_lastAlert; }
 
@@ -51,13 +55,17 @@ class AppStoreWindow final : public QMainWindow
     void update();
     void open();
     void updateAll();
-    void installYay();
+    // Install yay or paru; with no name, ask which (Lily Hewitt, 2026-11-12: let people choose).
+    void installHelper(const QString &name = {});
+    void useHelper(const QString &name);
     void refreshAur();
     void showAurPackages();
     bool start(const QStringList &arguments, const QString &doing);
     void changeProgress(const QString &text, int step, int steps);
     void changeFinished(bool ok, const QString &error, bool cancelled);
     bool ask(const QString &text, const QString &detail, const QString &action, bool caution);
+    // Several actions after Cancel; the last is the default. Returns the one clicked, or "".
+    QString choose(const QString &text, const QString &detail, const QStringList &actions);
     void alert(const QString &text, const QString &detail = {});
     const Package *chosenPackage() const;
     const Application *chosenApplication() const;
@@ -81,12 +89,15 @@ class AppStoreWindow final : public QMainWindow
     QLabel *m_status;
     ActivityWindow *m_activity;
     QPushButton *m_activityButton;
-    QAction *m_installAction, *m_removeAction, *m_openAction, *m_updateAllAction, *m_yayAction, *m_aurAction,
-        *m_activityAction;
+    QAction *m_installAction, *m_removeAction, *m_openAction, *m_updateAllAction, *m_aurAction, *m_activityAction;
+    // Software ▸ AUR Helper: yay and paru, the one in use checked.
+    QMenu *m_helperMenu;
+    QHash<QString, QAction *> m_helperActions;
     QString m_keepSelected, m_doing;
     // A search found nothing here but the AUR may have it (Lily Hewitt, 2026-11-12: she kept
     // downloading the AUR list because searches never looked in it).
     bool m_loaded = false, m_restartAdvised = false, m_offerAur = false;
     QList<bool> m_testAnswers;
+    QStringList m_testChoices;
     QString m_lastQuestion, m_lastAlert;
 };

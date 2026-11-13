@@ -88,7 +88,12 @@ All values in screen pixels; x from the screen edge, y from the strip's top.
   `Control Strip Modules` and writes 16 px icons for Sound Volume, SoundSource and Energy
   Settings to `assets/icons/control-strip/`; the strip shows them in place of our drawings.
   On Lily Hewitt's 9.2.2 disk the three imported icons match the strip capture pixel for pixel.
-- Not yet: our own module icons are drawn at 16 px on our 16-unit grid (no Apple art); per-module widths other than 30; the active arrow colours
+- 2026-11-12 (Lily Hewitt: "doesnt 9.2.2 have color in its control strip"): yes. The 11-08 capture's module icons are
+  colour: crisp black outlines, platinum bodies lit from the top left (white highlight, `#888` shade), and strong accents
+  (an indigo night sky and screens, a lavender folder, red/yellow/green/blue bars, small red and green lights). Our own
+  drawings (`src/desktop/StripGlyph.qml`) now use that palette; they remain our own shapes, no Apple art. The workspace
+  number is drawn in our own 3x5 pixel figures so it stays crisp at 16 px.
+- Not yet: per-module widths other than 30; the active arrow colours
   (assumed black outline, white fill; not yet captured); the slider's exact value scale (the
   thumb travels 46 px; 9.2.2's 8 volume steps not yet mapped).
 
@@ -128,3 +133,11 @@ freedesktop Secret Service (GNOME Keyring on potato, optional dependency): one r
 desktop never sees the password), a line, Lock All Keychains. Open Keychain Access is left out:
 there is no keychain application to open unless one is installed. Tested against a throwaway
 unlocked GNOME Keyring on a private bus: `scripts/test-keychain.sh build`.
+
+## Camera (added 2026-11-12)
+
+Platinum Reality's own module, not one from 9.2.2 (Lily Hewitt: a webcam kill switch, "like nothing can
+access it if its toggled off"). Its menu follows the wording of 9.2.2's AppleTalk Switch: **Camera On**
+and **Camera Off**, with the current one checked; then a line and the cameras in italics. The kernel
+does the blocking (docs/camera-switch.md). The glyph is our own drawing: a webcam on its stand, with a
+closed lens and a red strike when Off. It sits between Brightness and Energy Settings (alphabetical by name).

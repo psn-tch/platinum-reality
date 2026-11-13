@@ -1,12 +1,13 @@
 #!/usr/bin/python3 -I
 """The App Store's helper (docs/app-store.md), run as the user. JSON lines out.
-Usage: platinum-packages catalog                 (one JSON document: packages, apps, yay)
+Usage: platinum-packages catalog                 (one JSON document: packages, apps, AUR helpers)
        platinum-packages refresh-aur
        platinum-packages install <package>…     (official packages, through pkexec)
        platinum-packages remove <package>…
        platinum-packages update-all
-       platinum-packages install-yay
-       platinum-packages install-aur <package>…  (with yay; it asks for the password itself)"""
+       platinum-packages install-helper yay|paru (builds it from the AUR; it becomes the one in use)
+       platinum-packages use-helper yay|paru     (the installed helper to use)
+       platinum-packages install-aur <package>…  (with the helper in use; it asks for the password itself)"""
 import json
 import os
 import subprocess
@@ -61,10 +62,14 @@ def main(arguments):
             admin([command, *platinum_packages.check_names(rest)])
         elif command == 'update-all' and not rest:
             admin(['update-all'])
-        elif command == 'install-yay' and not rest:
-            platinum_packages.install_yay(report, admin)
+        elif command == 'install-helper' and len(rest) == 1:
+            platinum_packages.install_helper(rest[0], report, admin)
+        elif command == 'use-helper' and len(rest) == 1:
+            if rest[0] not in platinum_packages.installed_helpers():
+                raise platinum_packages.PackageError(f'{rest[0]} isn’t installed.')
+            platinum_packages.choose_helper(rest[0])
         elif command == 'install-aur' and rest:
-            platinum_packages.install_aur(rest, report)
+            platinum_packages.install_aur(rest, report, platinum_packages.aur_helper())
         else:
             report({'error': __doc__.split('\n', 1)[1]})
             return 2

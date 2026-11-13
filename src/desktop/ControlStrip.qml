@@ -38,6 +38,10 @@ Item {
         .concat(battery && battery.present ? [{command:"battery",name:"Battery"}] : [])
         .concat([{command:"bluetooth",name:"Bluetooth"},
                  {command:"monitors",name:"Brightness"},
+                 // Platinum Reality's own (Lily Hewitt, 2026-11-12): a switch that takes the camera away from everything.
+                 {command:"camera",name:"Camera"},
+                 // Platinum Reality's own (Lily Hewitt, 2026-11-12): recent clippings, to switch between them.
+                 {command:"clipboard",name:"Clipboard"},
                  {command:"energy",name:"Energy Settings"}])
         .concat(handheld && handheld.available ? [{command:"handheld",name:"Handheld"}] : [])
         .concat([{command:"keychain",name:"Keychain"},
@@ -197,6 +201,7 @@ Item {
                                     visible: !module.modelData.icon && !personal.visible
                                     level: strip.battery ? strip.battery.percent : -1
                                     charging: !!strip.battery && strip.battery.pluggedIn
+                                    off: !!strip.sessionManager.camera && strip.sessionManager.camera.off
                                     number: strip.sessionManager.shownWorkspace !== undefined ? strip.sessionManager.shownWorkspace : 0}
                         Image {
                             objectName: "control-strip-icon"

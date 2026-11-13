@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets DBus Test Quick Qml WaylandCompositor Concurrent Network)
+# Snapshot's camera (docs/snapshot.md).
+find_package(Qt6 6.8 REQUIRED COMPONENTS Multimedia MultimediaWidgets)
 # Pointer capture needs the host wl_surface of the desktop window and wl_region contents, and
 # precise scrolling needs the clients' wl_pointer resources. All are private Qt API, confined to
 # src/desktop/host_pointer.cpp, pointer_constraints.cpp and client_surface_item.cpp. Qt Quick's is
@@ -115,6 +117,8 @@ target_sources(frankenstein-desktop PRIVATE src/desktop/host_pointer.cpp src/des
                src/desktop/removable_media.cpp src/desktop/removable_media.hpp
                src/desktop/handheld.cpp src/desktop/handheld.hpp
                src/desktop/fingerprints.cpp src/desktop/fingerprints.hpp
+               src/desktop/camera_switch.cpp src/desktop/camera_switch.hpp
+               src/desktop/system_sounds.cpp src/desktop/system_sounds.hpp
                src/desktop/scroll_bar_art.cpp src/desktop/scroll_bar_art.hpp
                src/desktop/icon_store.cpp src/desktop/icon_store.hpp
                src/desktop/notifications.cpp src/desktop/notifications.hpp
@@ -182,13 +186,17 @@ configure_file(scripts/platinum-software-update platinum-software-update COPYONL
 configure_file(scripts/platinum_update.py platinum_update.py COPYONLY)
 configure_file(scripts/platinum-fingerprint-login platinum-fingerprint-login COPYONLY)
 configure_file(scripts/platinum_fingerprint.py platinum_fingerprint.py COPYONLY)
+configure_file(scripts/platinum-webcam platinum-webcam COPYONLY)
+configure_file(scripts/platinum_webcam.py platinum_webcam.py COPYONLY)
+configure_file(scripts/platinum-system-sounds platinum-system-sounds COPYONLY)
+configure_file(scripts/platinum_system_sounds.py platinum_system_sounds.py COPYONLY)
 configure_file(packaging/release-keys.gpg release-keys.gpg COPYONLY)
 target_sources(frankenstein-desktop PRIVATE src/desktop/audio_service.cpp src/desktop/audio_service.hpp)
 target_include_directories(frankenstein-desktop PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(frankenstein-desktop PUBLIC frankenstein-policy frankenstein-applications Qt6::Quick Qt6::Qml Qt6::DBus Qt6::WaylandCompositor PRIVATE PkgConfig::WAYLAND_SERVER PkgConfig::WAYLAND_CLIENT Qt6::GuiPrivate Qt6::WaylandCompositorPrivate Qt6::QuickPrivate Qt6::Network)
 target_include_directories(frankenstein-desktop PRIVATE ${PLATINUM_PROTOCOLS})
 target_compile_options(frankenstein-desktop PRIVATE -Wall -Wextra -Wpedantic)
-qt_add_resources(frankenstein-desktop desktop-assets PREFIX "/desktop" FILES src/desktop/Desktop.qml src/desktop/ClientSurface.qml src/desktop/DesktopIcon.qml src/desktop/MenuGlyph.qml src/desktop/ShellDialog.qml src/desktop/PlatinumButton.qml src/desktop/TitleBox.qml src/desktop/titlebar/close-active.svg src/desktop/titlebar/close-pressed.svg src/desktop/titlebar/close-inactive.svg src/desktop/titlebar/zoom-active.svg src/desktop/titlebar/zoom-pressed.svg src/desktop/titlebar/zoom-inactive.svg src/desktop/titlebar/shade-active.svg src/desktop/titlebar/shade-pressed.svg src/desktop/titlebar/shade-inactive.svg src/desktop/PlatinumCheckBox.qml src/desktop/PlatinumRadioButton.qml src/desktop/ApplicationBrowser.qml src/desktop/NotificationAlerts.qml src/desktop/MonitorsPanel.qml src/desktop/InfoWindow.qml src/desktop/ClipboardWindow.qml src/desktop/HelpWindow.qml src/desktop/ControlPanelsWindow.qml src/desktop/NetworkPanel.qml src/desktop/DateTimePanel.qml src/desktop/KeyboardPanel.qml src/desktop/EnergySaverPanel.qml src/desktop/StickyNote.qml src/desktop/ShellWindowFocus.qml src/desktop/WorkspaceMember.qml src/desktop/MousePanel.qml src/desktop/PlatinumSlider.qml src/desktop/PlatinumGroup.qml src/desktop/GeneralControlsPanel.qml src/desktop/FieldBackground.qml src/desktop/ApplicationSwitcher.qml src/desktop/PlatinumPopup.qml)
+qt_add_resources(frankenstein-desktop desktop-assets PREFIX "/desktop" FILES src/desktop/Desktop.qml src/desktop/ClientSurface.qml src/desktop/DesktopIcon.qml src/desktop/MenuGlyph.qml src/desktop/ShellDialog.qml src/desktop/PlatinumButton.qml src/desktop/TitleBox.qml src/desktop/titlebar/close-active.svg src/desktop/titlebar/close-pressed.svg src/desktop/titlebar/close-inactive.svg src/desktop/titlebar/zoom-active.svg src/desktop/titlebar/zoom-pressed.svg src/desktop/titlebar/zoom-inactive.svg src/desktop/titlebar/shade-active.svg src/desktop/titlebar/shade-pressed.svg src/desktop/titlebar/shade-inactive.svg src/desktop/PlatinumCheckBox.qml src/desktop/PlatinumRadioButton.qml src/desktop/ApplicationBrowser.qml src/desktop/NotificationAlerts.qml src/desktop/MonitorsPanel.qml src/desktop/InfoWindow.qml src/desktop/ClipboardWindow.qml src/desktop/HelpWindow.qml src/desktop/ControlPanelsWindow.qml src/desktop/NetworkPanel.qml src/desktop/DateTimePanel.qml src/desktop/KeyboardPanel.qml src/desktop/EnergySaverPanel.qml src/desktop/StickyNote.qml src/desktop/ShellWindowFocus.qml src/desktop/WorkspaceMember.qml src/desktop/MousePanel.qml src/desktop/PlatinumSlider.qml src/desktop/PlatinumGroup.qml src/desktop/GeneralControlsPanel.qml src/desktop/AppleMenuOptionsPanel.qml src/desktop/FileExchangePanel.qml src/desktop/FieldBackground.qml src/desktop/ApplicationSwitcher.qml src/desktop/PlatinumPopup.qml)
 qt_add_resources(frankenstein-desktop appearance-assets PREFIX "/desktop" FILES src/desktop/WindowRoll.qml src/desktop/PopUpTab.qml src/desktop/AppearanceDialog.qml src/desktop/ControlStrip.qml src/desktop/StripGlyph.qml src/desktop/PlatinumScrollBar.qml)
 qt_add_resources(frankenstein-desktop computer-assets PREFIX "/desktop" FILES src/desktop/AboutComputerWindow.qml)
 qt_add_resources(frankenstein-desktop picture-assets PREFIX "/desktop" FILES src/desktop/DesktopPictureDialog.qml)
@@ -236,6 +244,14 @@ target_compile_options(frankenstein-puzzle-ui PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(frankenstein-puzzle src/puzzle/main.cpp)
 target_link_libraries(frankenstein-puzzle PRIVATE frankenstein-puzzle-ui)
 add_dependencies(frankenstein frankenstein-puzzle)
+# Snapshot (docs/snapshot.md): pictures with the camera.
+add_library(platinum-snapshot-ui src/snapshot/snapshot_window.cpp src/snapshot/snapshot_window.hpp)
+target_include_directories(platinum-snapshot-ui PUBLIC src)
+target_link_libraries(platinum-snapshot-ui PUBLIC frankenstein-appearance Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets)
+target_compile_options(platinum-snapshot-ui PRIVATE -Wall -Wextra -Wpedantic)
+add_executable(platinum-snapshot src/snapshot/main.cpp)
+target_link_libraries(platinum-snapshot PRIVATE platinum-snapshot-ui)
+add_dependencies(frankenstein platinum-snapshot)
 # Install Platinum Reality: the installation disk's installer window. The install engine does
 # the disk work (distro/installer-engine).
 add_library(platinum-installer-ui src/installer/engine_client.cpp src/installer/engine_client.hpp
@@ -287,7 +303,7 @@ file(RELATIVE_PATH PLATINUM_LIB_FROM_BIN "${CMAKE_INSTALL_FULL_BINDIR}"
 configure_file(packaging/platinum-reality.in platinum-reality @ONLY)
 configure_file(packaging/platinum-reality-session.in platinum-reality-session @ONLY)
 install(TARGETS frankenstein frankenstein-finder frankenstein-editor frankenstein-drop-receiver frankenstein-puzzle
-                platinum-lock platinum-app-store
+                platinum-lock platinum-app-store platinum-snapshot
         RUNTIME DESTINATION "${PLATINUM_LIBDIR}")
 install(TARGETS frankenstein-style LIBRARY DESTINATION "${PLATINUM_LIBDIR}/plugins/styles")
 install(PROGRAMS "${CMAKE_CURRENT_BINARY_DIR}/platinum-reality"
@@ -312,6 +328,15 @@ install(FILES packaging/release-keys.gpg DESTINATION "${CMAKE_INSTALL_DATADIR}/p
 install(FILES scripts/platinum_fingerprint.py DESTINATION "${PLATINUM_LIBDIR}")
 install(PROGRAMS scripts/platinum-fingerprint-login DESTINATION "${PLATINUM_LIBDIR}")
 install(FILES packaging/org.platinumreality.fingerprint.policy DESTINATION "${CMAKE_INSTALL_DATADIR}/polkit-1/actions")
+# The Control Strip's Camera switch (docs/camera-switch.md): its root helper and polkit actions
+# (off without a password, on with an administrator's).
+install(FILES scripts/platinum_webcam.py DESTINATION "${PLATINUM_LIBDIR}")
+install(PROGRAMS scripts/platinum-webcam DESTINATION "${PLATINUM_LIBDIR}")
+install(FILES packaging/org.platinumreality.webcam.policy DESTINATION "${CMAKE_INSTALL_DATADIR}/polkit-1/actions")
+# Sound ▸ Mac sounds only (docs/alert-sounds.md): removes or restores the Arch/KDE desktop sounds.
+install(FILES scripts/platinum_system_sounds.py DESTINATION "${PLATINUM_LIBDIR}")
+install(PROGRAMS scripts/platinum-system-sounds DESTINATION "${PLATINUM_LIBDIR}")
+install(FILES packaging/org.platinumreality.sounds.policy DESTINATION "${CMAKE_INSTALL_DATADIR}/polkit-1/actions")
 install(FILES scripts/platinum_packages.py DESTINATION "${PLATINUM_LIBDIR}")
 install(PROGRAMS scripts/platinum-packages scripts/platinum-packages-admin DESTINATION "${PLATINUM_LIBDIR}")
 install(FILES packaging/org.platinumreality.packages.policy DESTINATION "${CMAKE_INSTALL_DATADIR}/polkit-1/actions")
@@ -327,7 +352,7 @@ if(PLATINUM_XWAYLAND_SATELLITE)
                   packaging/xwayland-satellite-qt-shell-v1.patch scripts/build-x11-bridge.py
             DESTINATION "${CMAKE_INSTALL_DOCDIR}/xwayland-satellite")
 endif()
-install(FILES packaging/platinum-reality.desktop packaging/org.platinumreality.AppStore.desktop
+install(FILES packaging/platinum-reality.desktop packaging/org.platinumreality.AppStore.desktop packaging/org.platinumreality.Snapshot.desktop
         DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
 install(FILES packaging/platinum-reality.svg DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
 install(FILES docs/install.md docs/first-session.md docs/x11-integration.md DESTINATION "${CMAKE_INSTALL_DOCDIR}")
@@ -365,6 +390,10 @@ if(BUILD_TESTING)
         endif()
     endforeach()
     add_executable(application-probe tests/application_probe.cpp)
+    add_executable(snapshot-tests tests/snapshot_tests.cpp)
+    target_link_libraries(snapshot-tests PRIVATE platinum-snapshot-ui Qt6::Test)
+    add_test(NAME snapshot COMMAND snapshot-tests)
+    set_tests_properties(snapshot PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(puzzle-tests tests/puzzle_tests.cpp)
     target_link_libraries(puzzle-tests PRIVATE frankenstein-puzzle-ui Qt6::Test)
     add_test(NAME puzzle COMMAND puzzle-tests)
@@ -433,6 +462,8 @@ if(BUILD_TESTING)
     add_test(NAME audio-controls COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/audio_controls_tests.py)
     add_test(NAME software-update COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/platinum_update_tests.py)
     add_test(NAME fingerprint-login COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/platinum_fingerprint_tests.py)
+    add_test(NAME camera-switch COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/platinum_webcam_tests.py)
+    add_test(NAME system-sounds COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/platinum_system_sounds_tests.py)
     add_executable(audio-service-tests tests/audio_service_tests.cpp)
     target_link_libraries(audio-service-tests PRIVATE frankenstein-desktop Qt6::Test)
     target_compile_definitions(audio-service-tests PRIVATE
@@ -467,6 +498,8 @@ if(BUILD_TESTING)
     target_link_libraries(output-capture PRIVATE PkgConfig::WAYLAND_CLIENT m)
     target_compile_options(output-capture PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME lock-session COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/lock_session_tests.py)
+    add_test(NAME restart-desktop COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/restart_desktop_tests.py)
+    set_tests_properties(restart-desktop PROPERTIES ENVIRONMENT "FRANKENSTEIN_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR};TMPDIR=/tmp")
     set_tests_properties(lock-session PROPERTIES ENVIRONMENT "FRANKENSTEIN_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}"
                          TIMEOUT 120)
     add_executable(policy-tests tests/policy_tests.cpp)

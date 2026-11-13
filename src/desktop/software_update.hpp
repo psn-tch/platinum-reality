@@ -30,6 +30,8 @@ class SoftwareUpdate final : public QObject
     Q_PROPERTY(bool checked READ checked NOTIFY changed)
     Q_PROPERTY(bool automatic READ automatic WRITE setAutomatic NOTIFY changed)
     Q_PROPERTY(QString lastChecked READ lastChecked NOTIFY changed)
+    // A new version was installed or the previous one restored: Restart Desktop puts it to use.
+    Q_PROPERTY(bool restartNeeded READ restartNeeded NOTIFY changed)
   public:
     SoftwareUpdate(QString client, QString keyring, QString settingsFile, QObject *parent = nullptr);
     ~SoftwareUpdate() override;
@@ -58,10 +60,13 @@ class SoftwareUpdate final : public QObject
     // A newly installed computer: check now, and keep trying (across logins) until a check gets an
     // answer, since the network may not be up yet. Like an automatic check, it only reports.
     Q_INVOKABLE void checkAfterInstall();
+    bool restartNeeded() const { return m_restartNeeded; }
   signals:
     void changed();
     // An automatic check found a newer release: the desktop may say so; nothing installs.
     void updateFound(const QString &version);
+    // The installer finished: separate programs (the App Store) can reopen on the new version.
+    void installFinished(const QString &version);
   private:
     void run(const QString &phase, const QStringList &arguments);
     void handle(const QJsonObject &message);
@@ -71,7 +76,7 @@ class SoftwareUpdate final : public QObject
     QVariantMap m_available, m_readyRelease;
     QVariantList m_bundles;
     double m_progress = 0;
-    bool m_previousKept = false, m_checked = false, m_automatic = false, m_silent = false, m_pending = false;
+    bool m_restartNeeded = false, m_previousKept = false, m_checked = false, m_automatic = false, m_silent = false, m_pending = false;
     QDateTime m_lastChecked;
     QByteArray m_buffer;
     QProcess m_process;

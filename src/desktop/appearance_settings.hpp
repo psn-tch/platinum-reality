@@ -48,6 +48,8 @@ class AppearanceSettings final : public QObject
     // 2 fast), barSize (the menu bar, its menus and the Control Strip, 100-150 percent; not in
     // 9.2.2, Lily Hewitt's request 2026-11-09)}.
     Q_PROPERTY(QVariantMap general READ general NOTIFY changed)
+    // Apple Menu Options: {submenus, rememberRecent, recentApplications} (AppleMenuOptionsPanel.qml).
+    Q_PROPERTY(QVariantMap appleMenu READ appleMenu NOTIFY changed)
     // The insertion point's full on-and-off cycle in milliseconds, from caretBlink.
     Q_PROPERTY(int caretFlashTime READ caretFlashTime NOTIFY changed)
     // The Application Switcher palette torn off the Application menu: {visible, x, y}.
@@ -116,6 +118,9 @@ class AppearanceSettings final : public QObject
     bool keepScreenAwake() const { return m_keepScreenAwake; }
     QVariantMap clock() const;
     QVariantMap general() const;
+    QVariantMap appleMenu() const;
+    // One of appleMenu()'s keys: submenus and rememberRecent on or off, recentApplications 1-99.
+    Q_INVOKABLE bool setAppleMenuOption(QString key, QVariant value);
     QVariantMap switcher() const;
     int caretFlashTime() const;
     QString defaultWallpaperPath() const;
@@ -170,6 +175,8 @@ class AppearanceSettings final : public QObject
     // Shown, 12-hour, no seconds, no weekday or date, steady separators: as before this setting.
     // As 9.2.2 ships: the desktop shown, menus blink three times, medium insertion point.
     bool m_showDesktop = true;
+    bool m_appleSubmenus = true, m_rememberRecent = true;
+    int m_recentApplications = 10;
     int m_menuBlinks = 3, m_caretBlink = 1;
     int m_barSize = 100;
     bool m_switcherVisible = false;

@@ -243,6 +243,7 @@ Rectangle {
         else if(action==="open")manager.launchFinder()
         else if(action==="terminal")manager.launchTerminal()
         else if(action==="puzzle")manager.launchPuzzle()
+        else if(action==="snapshot")manager.launchSnapshot()
         else if(action==="app-store")manager.launchAppStore()
         else if(action==="screenshot")takeScreenshot()
         else if(action==="applications")applicationBrowser.browse("")
@@ -253,6 +254,10 @@ Rectangle {
         else if(action==="keychain-unlock")manager.keychains.unlock(applicationId)
         else if(action==="keychain-lock-all")manager.keychains.lockAll()
         else if(action==="default-printer")manager.printers.setDefault(applicationId)
+        else if(action==="clipping")manager.clipboard.restore(applicationId)
+        else if(action==="clear-clippings")manager.clipboard.clearHistory()
+        else if(action==="camera-off")manager.camera.setOff(true)  // again while Off catches a camera still on
+        else if(action==="camera-on" && manager.camera.off)manager.camera.setOff(false)
         else if(action==="display-mode")manager.setDisplayMode(applicationId.output,applicationId.width,applicationId.height,applicationId.refresh)
         else if(action==="network")networkPanel.edit()
         else if(action==="date-time")dateTimePanel.edit()
@@ -261,6 +266,8 @@ Rectangle {
         else if(action==="mouse")mousePanel.edit()
         else if(action==="fingerprints")fingerprintsPanel.edit()
         else if(action==="control-panels-window")controlPanels.show("")
+        else if(action==="apple-menu-options")appleMenuOptionsPanel.edit()
+        else if(action==="file-exchange")fileExchangePanel.edit()
         else if(action==="calculator")calculator.open()
         else if(action==="asset-importer")assetImporter.open()
         else if(action==="software-update")softwareUpdate.open()
@@ -324,7 +331,7 @@ Rectangle {
                 let window=desktop.helpWindow
                 desktop.helpWindow=null
                 window.destroy()
-                desktop.forceActiveFocus()
+                manager.refocus()
             })
         }
         helpWindow.show(topic)
@@ -333,6 +340,9 @@ Rectangle {
     // A newly installed account's first login also checks for a newer Platinum Reality than the one
     // the installer carried (it keeps trying until the network answers).
     Timer {interval:1500;running:true;onTriggered:if(manager.takeWelcome()){desktop.showHelp("welcome");manager.softwareUpdate.checkAfterInstall()}}
+    // Closing a desktop window (the Clipboard, Help, Get Info) gives the keyboard back to what is in
+    // front (manager.refocus): the front application window, else the desktop. It used to go to the
+    // desktop even with an application in front, which then took the next Command-V as its own.
     function showClipboard() {
         if(!manager.clipboard)return
         if(!clipboardWindow) {
@@ -347,7 +357,7 @@ Rectangle {
                 let window=desktop.clipboardWindow
                 desktop.clipboardWindow=null
                 window.destroy()
-                desktop.forceActiveFocus()
+                manager.refocus()
             })
         }
         clipboardWindow.forceActiveFocus()
@@ -376,7 +386,7 @@ Rectangle {
         window.closeRequested.connect(function(){
             delete desktop.infoWindows[details.key]
             window.destroy()
-            desktop.forceActiveFocus()
+            manager.refocus()
         })
         window.raised.connect(function(){desktop.raiseInfo(window)})
         raiseInfo(window)
@@ -416,6 +426,15 @@ Rectangle {
             return {id:"shell:"+w.action,name:w.name,icon:manager.applicationIcon("shell:"+w.action),hidden:false,attention:false,shell:true,
                     active:manager.desktopActive && Boolean(w.item.front)}})
     }
+    // Restart Desktop after an update (Software Update): the open applications and the desktop's own
+    // windows close as at Log Out and open again in a new desktop, without Log In.
+    function restartDesktop() {
+        let windows=openShellApplications().map(function(w){return String(w.id).slice(6)})
+        manager.restartDesktop(windows)
+    }
+    Connections {target:manager;function onReopenShellWindows(actions){
+        for(const action of actions)desktop.dispatchShellCommand(action,0)
+    }}
     function applicationsByName() {
         const shell=openShellApplications()
         // Finder is active only while no built-in window is in front.
@@ -496,7 +515,13 @@ Rectangle {
             // folders a folder, each control panel its own (imported when there is one).
             const icon=function(name){return manager.applicationIcon("shell:"+name)}
             const panel=function(text,action){return {text:text,action:action,glyph:"control-panel",icon:icon(action)}}
-            let recent=manager.recentApplications.map(function(a){return {text:a.name,action:"launch",id:a.id,glyph:"application",icon:manager.applicationIcon(a.id)}})
+            // Apple Menu Options: folders without submenus open as themselves (Control Panels its window,
+            // Recent Applications the Applications browser); remembering recent items can be off.
+            const options=desktop.appearance.appleMenu||({})
+            const submenus=options.submenus!==false
+            let recent=manager.recentApplications.slice(0,options.recentApplications||10)
+                .map(function(a){return {text:a.name,action:"launch",id:a.id,glyph:"application",icon:manager.applicationIcon(a.id)}})
+            const folder=function(item,action,children){return submenus?Object.assign(item,{children:children}):Object.assign(item,{action:action})}
             return [
                 {text:"About This Computer",action:"about"},
                 {separator:true,action:"separator"},
@@ -505,15 +530,17 @@ Rectangle {
                 {text:"Asset Importer",action:"asset-importer",glyph:"application",icon:icon("asset-importer")},
                 {text:"Calculator",action:"calculator",glyph:"application",icon:icon("calculator")},
                 {text:"Control Panel",action:"control-panel",glyph:"application",icon:icon("control-panel")},
-                {text:"Control Panels",action:"control-panels",glyph:"folder",icon:icon("folder"),children:[
+                folder({text:"Control Panels",action:"control-panels",glyph:"folder",icon:icon("folder")},"control-panels-window",[
                     {text:"All Control Panels…",action:"control-panels-window",glyph:"control-panel",icon:icon("control-panels-window")},
                     {separator:true,action:"separator"},
                     panel("Appearance…","appearance"),
+                    panel("Apple Menu Options…","apple-menu-options"),
                     panel("Bluetooth…","bluetooth"),
                     {text:"Control Strip",action:"control-strip",checked:desktop.appearance.controlStripVisible,glyph:"control-panel",icon:icon("control-panel")},
                     panel("Date & Time…","date-time"),
                     panel("Desktop Picture…","desktop-picture"),
                     panel("Energy Saver…","energy"),
+                    panel("File Exchange…","file-exchange"),
                     panel("Fingerprints…","fingerprints"),
                     panel("Keyboard…","keyboard"),
                     panel("Monitors…","monitors"),
@@ -521,18 +548,20 @@ Rectangle {
                     panel("Network…","network"),
                     panel("Quick Controls…","quick-controls"),
                     panel("Software Update…","software-update"),
-                    panel("Sound…","sound")]},
+                    panel("Sound…","sound")]),
                 {text:"Key Caps",action:"key-caps",glyph:"application",icon:icon("key-caps")},
                 {text:"Note Pad",action:"note-pad",glyph:"application",icon:icon("note-pad")},
                 {text:"Puzzle",action:"puzzle",glyph:"application",icon:icon("puzzle")},
                 {text:"Scrapbook",action:"scrapbook",glyph:"application",icon:icon("scrapbook")},
+                {text:"Snapshot",action:"snapshot",glyph:"application",icon:icon("snapshot")},
                 {text:"Stickies",action:"sticky-notes",glyph:"application",icon:icon("sticky-notes"),children:[
                     {text:"New Note",action:"sticky-new"},
                     {separator:true,action:"separator"},
                     {text:manager.stickies.hidden?"Show All Notes":"Hide All Notes",action:"sticky-toggle",enabled:manager.stickies.count>0}]},
-                {text:"Recent Applications",action:"recent-applications",glyph:"folder",icon:icon("folder"),
-                 children:recent.length?recent:[{text:"No Recent Applications",action:"none",enabled:false}]},
-                {text:"Terminal",action:"terminal",glyph:"application",icon:icon("terminal")}]
+                ].concat(options.rememberRecent===false?[]:[
+                    folder({text:"Recent Applications",action:"recent-applications",glyph:"folder",icon:icon("folder")},"applications",
+                           recent.length?recent:[{text:"No Recent Applications",action:"none",enabled:false}])])
+                .concat([{text:"Terminal",action:"terminal",glyph:"application",icon:icon("terminal")}])
         }
         let kind=barEntries[index]?barEntries[index].kind:""
         let ready=!desktopFiles.busy
@@ -623,6 +652,7 @@ Rectangle {
         if(module==="soundsource" && soundPanel.service)soundPanel.service.refresh()
         if(module==="printer" && manager.printers)manager.printers.refresh()
         if(module==="keychain" && manager.keychains)manager.keychains.refresh()
+        if(module==="camera")manager.camera.refresh()
         if(module==="handheld")manager.handheld.refresh()
         // Opening the Wi-Fi module looks for networks, as later AirPort menus do.
         if(module==="wifi")wifiAlert.service.scan()
@@ -761,6 +791,8 @@ Rectangle {
             return printers.map(function(p){return {text:p.name,action:"default-printer",id:p.name,name:"printer-"+p.name,
                                                      checked:p.default,enabled:!manager.printers.busy}})
         }
+        if(module==="camera")return cameraMenuEntries()
+        if(module==="clipboard")return clipboardMenuEntries()
         if(module==="bluetooth")return bluetoothMenuEntries()
         if(module==="battery")return batteryMenuEntries()
         if(module==="handheld")return handheldMenuEntries()
@@ -770,6 +802,39 @@ Rectangle {
         let entries=open.concat([{text:"Wi-Fi: "+(radio.enabled?"On":"Off"),action:"none",name:"status",enabled:false},
                                  {text:(radio.enabled?"Turn Wi-Fi Off":"Turn Wi-Fi On"),action:"set-wifi",id:radio.enabled?0:1,name:"wifi"}])
         return radio.enabled?entries.concat(wifiMenuEntries()):entries
+    }
+    // Clipboard (Lily Hewitt, 2026-11-12: "copy multiple things and be able to switch between them"):
+    // the recent clippings, newest first, the clipboard's own checked; choosing one makes it the
+    // clipboard again. Then Show Clipboard, and Clear Clipboard History (the clipboard itself stays).
+    function clipboardMenuEntries() {
+        let clipboard=manager.clipboard, list=clipboard?clipboard.history:[]
+        let entries=list.length?list.map(function(c,i){return {text:c.label,action:"clipping",id:i,name:"clipping-"+i,
+                                                               checked:c.current,glyph:c.kind==="picture"?"application":undefined,
+                                                               icon:c.kind==="picture"?c.thumbnail:undefined}})
+                               :[{text:"No Clippings",action:"none",name:"clipping-none",enabled:false}]
+        return entries.concat([{separator:true,action:"separator"},
+                               {text:"Show Clipboard",action:"show-clipboard",name:"clipboard-show",enabled:Boolean(clipboard)},
+                               {text:"Clear Clipboard History",action:"clear-clippings",name:"clipboard-clear",
+                                enabled:list.length>1 || (list.length===1 && !list[0].current)}])
+    }
+    // Camera (Lily Hewitt, 2026-11-12), worded as 9.2.2's AppleTalk Switch: Camera On and Camera Off,
+    // the current one checked; then the cameras it covers, and any it cannot switch. Off takes the
+    // camera away from every program at once; On asks for an administrator's password.
+    function cameraMenuEntries() {
+        let camera=manager.camera
+        if(!camera.available)return [{text:"Camera Switch Unavailable",action:"none",name:"camera-none",enabled:false}]
+        let entries=[{text:"Camera On",action:"camera-on",name:"camera-on",checked:!camera.off,enabled:!camera.changing},
+                     {text:"Camera Off",action:"camera-off",name:"camera-off",checked:camera.off,enabled:!camera.changing},
+                     {separator:true,action:"separator"}]
+        if(camera.changing)entries.push({text:"Switching…",action:"none",name:"camera-status",enabled:false})
+        else if(camera.error!=="")entries.push({text:camera.error,action:"none",name:"camera-status",enabled:false})
+        if(!camera.cameras.length && !camera.others.length)
+            entries.push({text:"No Camera Found",action:"none",name:"camera-status",enabled:false})
+        for(let c of camera.cameras)
+            entries.push({text:c.name+(camera.off && !c.blocked?" (Still On)":""),action:"none",heading:true,enabled:false,name:"camera-"+c.id})
+        for(let name of camera.others)
+            entries.push({text:name+" (Can’t Be Turned Off)",action:"none",heading:true,enabled:false,name:"camera-other"})
+        return entries
     }
     // Monitor Resolution, as 9.2.2's: its control panel, a line, then each display's name in italics
     // over its resolutions, the current one marked with a bullet. Choosing one waits for Keep.
@@ -2050,12 +2115,14 @@ Rectangle {
         // In the list's order, alphabetical as in Mac OS 9's Control Panels folder.
         AppearanceDialog {id:appearanceDialog;sessionManager:manager;settings:desktop.appearance
             onPlacePictureRequested:desktopPictureDialog.edit()}
+        AppleMenuOptionsPanel {id:appleMenuOptionsPanel;settings:desktop.appearance}
         // Tests substitute bluetoothPanel.service; the alert, strip module and Quick Controls follow it.
         BluetoothPanel {id:bluetoothPanel;service:manager.bluetooth
             onForgetRequested:function(path,name){forgetBluetoothDialog.path=path;forgetBluetoothDialog.name=name;forgetBluetoothDialog.open()}}
         DateTimePanel {id:dateTimePanel;settings:desktop.appearance}
         DesktopPictureDialog {id:desktopPictureDialog;settings:desktop.appearance}
         EnergySaverPanel {id:energyPanel;settings:manager.energy;sessionManager:manager}
+        FileExchangePanel {id:fileExchangePanel;catalog:manager.applicationCatalog}
         FingerprintsPanel {id:fingerprintsPanel;service:manager ? manager.fingerprints : null}
         GeneralControlsPanel {id:generalPanel;settings:desktop.appearance}
         // Listed only on a computer whose Handheld Daemon can hide its built-in controller.
@@ -2067,7 +2134,7 @@ Rectangle {
         NetworkPanel {id:networkPanel;service:wifiAlert.service;controls:quickControls.service
             onForgetRequested:function(path,name){forgetWifiDialog.path=path;forgetWifiDialog.name=name;forgetWifiDialog.open()}}
         QuickControls {id:quickControls;service:manager.systemControls;bluetooth:bluetoothPanel.service}
-        SoundPanel {id:soundPanel;service:manager.audio;alertSounds:manager.alertSounds;startupSound:manager.startupSound}
+        SoundPanel {id:soundPanel;service:manager.audio;alertSounds:manager.alertSounds;startupSound:manager.startupSound;systemSounds:manager.systemSounds}
     }
     // A silent alert (alert volume 0, or no sound player) flashes the menu bar, as Mac OS 9 did.
     Timer {id:menuFlash;interval:140}

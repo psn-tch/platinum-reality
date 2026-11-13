@@ -112,11 +112,13 @@ class CatalogTests(unittest.TestCase):
         with gzip.open(self.cache / 'aur-packages.json.gz', 'wt') as stream:
             json.dump(entries, stream)
 
-    def catalog(self, yay=False):
-        marker = self.root / 'yay'
-        if yay:
-            marker.write_text('')
-        return packages.catalog(self.root, self.cache, yay=str(marker))
+    def catalog(self, yay=False, paru=False):
+        programs = {}
+        for name, installed in (('yay', yay), ('paru', paru)):
+            programs[name] = str(self.root / name)
+            if installed:
+                (self.root / name).write_text('')
+        return packages.catalog(self.root, self.cache, config=self.root / 'config', programs=programs)
 
     def test_official_packages_installed_versions_and_installed_only_packages(self):
         result = self.catalog()
@@ -131,7 +133,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(by_name['libdep']['repo'], 'local')
         self.assertFalse(by_name['libdep']['explicit'])
         self.assertEqual(by_name['handmade']['size'], 77)
-        self.assertFalse(result['yay'])
+        self.assertEqual((result['aurHelper'], result['aurHelpers']), ('', []))
 
     def test_applications_come_from_appstream_untranslated_with_category_and_icon(self):
         apps = {a['id']: a for a in self.catalog()['apps']}
@@ -148,7 +150,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(apps['org.example.Chess']['stock'], 'gnome-chess')
         self.assertEqual(paint['stock'], '')
 
-    def test_aur_is_listed_only_with_yay_and_never_replaces_an_official_package(self):
+    def test_aur_is_listed_only_with_a_helper_and_never_replaces_an_official_package(self):
         self.write_aur([{'Name': 'aurthing', 'Version': '3-1', 'Description': 'From the AUR', 'NumVotes': 12,
                          'Popularity': 1.5, 'OutOfDate': None, 'Maintainer': 'someone'},
                         {'Name': 'paint', 'Version': '99-1', 'Description': 'An AUR copy'},
@@ -157,7 +159,7 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn('aurthing', [p['name'] for p in self.catalog()['packages']])
         result = self.catalog(yay=True)
         by_name = {p['name']: p for p in result['packages']}
-        self.assertTrue(result['yay'])
+        self.assertEqual(result['aurHelper'], 'yay')
         self.assertTrue(result['aurUpdated'])
         self.assertEqual(by_name['aurthing']['repo'], 'aur')
         self.assertEqual(by_name['aurthing']['votes'], 12)
@@ -167,14 +169,31 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(by_name['handmade']['orphan'])
         self.assertNotIn('--evil', by_name)
 
-    def test_yay_is_the_program_whichever_package_installed_it(self):
+    def test_a_helper_is_the_program_whichever_package_installed_it(self):
         self.write_aur([{'Name': 'aurthing', 'Version': '3-1'}])
-        self.assertFalse(packages.catalog(self.root, self.cache)['yay'])
+        config = self.root / 'config'
+        self.assertEqual(packages.catalog(self.root, self.cache, config=config)['aurHelper'], '')
         (self.root / 'usr/bin').mkdir(parents=True)
-        (self.root / 'usr/bin/yay').write_text('')
-        result = packages.catalog(self.root, self.cache)
-        self.assertTrue(result['yay'])
+        (self.root / 'usr/bin/paru').write_text('')
+        result = packages.catalog(self.root, self.cache, config=config)
+        self.assertEqual((result['aurHelper'], result['aurHelpers']), ('paru', ['paru']))
         self.assertIn('aurthing', [p['name'] for p in result['packages']])
+
+    def test_the_chosen_helper_is_used_when_both_are_installed(self):
+        config = self.root / 'config'
+        # Neither chosen: yay, the App Store's first.
+        self.assertEqual(self.catalog(yay=True, paru=True)['aurHelper'], 'yay')
+        self.assertEqual(self.catalog(yay=True, paru=True)['aurHelpers'], ['yay', 'paru'])
+        packages.choose_helper('paru', config)
+        self.assertEqual((config / 'aur-helper').read_text(), 'paru\n')
+        self.assertEqual(self.catalog(yay=True, paru=True)['aurHelper'], 'paru')
+        # Chosen but since removed: the one still installed.
+        (self.root / 'paru').unlink()
+        self.assertEqual(self.catalog(yay=True)['aurHelper'], 'yay')
+        with self.assertRaises(packages.PackageError):
+            packages.choose_helper('pikaur', config)
+        (config / 'aur-helper').write_text('../../bin/sh\n')
+        self.assertEqual(packages.chosen_helper(config), '')
 
     def test_a_damaged_aur_list_lists_nothing_from_the_aur(self):
         self.cache.mkdir()
@@ -293,31 +312,38 @@ class ChangeTests(unittest.TestCase):
                 packages.install_file(bad, self.reports.append, str(self.pacman))
         self.assertEqual(len(self.calls()), 2)
 
-    def test_install_yay_builds_yay_bin_and_hands_only_its_package_to_the_administrator(self):
+    def test_installing_a_helper_builds_its_bin_package_and_hands_only_that_to_the_administrator(self):
         bin_folder = self.root / 'bin'
         bin_folder.mkdir()
         (bin_folder / 'git').write_text('#!/bin/sh\nmkdir -p "$5"\necho cloned "$4"\n')
-        (bin_folder / 'makepkg').write_text('#!/bin/sh\ntouch yay-bin-13.0.1-1-x86_64.pkg.tar.zst '
-                                            'yay-bin-debug-13.0.1-1-x86_64.pkg.tar.zst\necho built\n')
+        (bin_folder / 'makepkg').write_text('#!/bin/sh\nfor p in yay-bin paru-bin; do touch $p-13.0.1-1-x86_64.pkg.tar.zst '
+                                            '$p-debug-13.0.1-1-x86_64.pkg.tar.zst; done\necho built\n')
         for tool in bin_folder.iterdir():
             tool.chmod(0o755)
-        asked, held = [], []
+        config = self.root / 'config'
+        for name in ('yay', 'paru'):
+            asked, held = [], []
 
-        def admin(arguments):
-            asked.append(arguments)
-            if arguments[0] == 'install-file':
-                held.append(Path(arguments[1]).exists())
-        packages.install_yay(self.reports.append, admin, self.root / 'cache', str(bin_folder / 'git'),
-                             str(bin_folder / 'makepkg'))
-        self.assertEqual(asked[0], ['install', 'git', 'base-devel'])
-        self.assertEqual(asked[1][0], 'install-file')
-        self.assertTrue(asked[1][1].endswith('/yay-bin/yay-bin-13.0.1-1-x86_64.pkg.tar.zst'))
-        self.assertEqual(held, [True])
-        self.assertIn({'progress': f'cloned {packages.YAY_GIT}'}, self.reports)
-        self.assertEqual(list((self.root / 'cache').iterdir()), [])  # The build folder is gone.
+            def admin(arguments):
+                asked.append(arguments)
+                if arguments[0] == 'install-file':
+                    held.append(Path(arguments[1]).exists())
+            packages.install_helper(name, self.reports.append, admin, self.root / 'cache', str(bin_folder / 'git'),
+                                    str(bin_folder / 'makepkg'), config)
+            self.assertEqual(asked[0], ['install', 'git', 'base-devel'])
+            self.assertEqual(asked[1][0], 'install-file')
+            self.assertTrue(asked[1][1].endswith(f'/{name}-bin/{name}-bin-13.0.1-1-x86_64.pkg.tar.zst'))
+            self.assertEqual(held, [True])
+            self.assertIn({'progress': f'cloned {packages.AUR_HELPERS[name]}'}, self.reports)
+            self.assertEqual(list((self.root / 'cache').iterdir()), [])  # The build folder is gone.
+            self.assertEqual(packages.chosen_helper(config), name)  # The one just installed is used.
+        self.assertEqual(packages.AUR_HELPERS['paru'], 'https://aur.archlinux.org/paru-bin.git')
+        with self.assertRaises(packages.PackageError):
+            packages.install_helper('pikaur', self.reports.append, admin)
 
     def test_yay_answers_its_own_questions_and_uses_pkexec(self):
-        command = packages.yay_command(['aurthing'])
+        command = packages.helper_command(['aurthing'], 'yay')
+        self.assertEqual(command[0], 'yay')
         for flag in ('--noconfirm', '--needed', '--removemake'):
             self.assertIn(flag, command)
         self.assertEqual(command[command.index('--sudo') + 1], 'pkexec')
@@ -325,7 +351,26 @@ class ChangeTests(unittest.TestCase):
             self.assertEqual(command[command.index(menu) + 1], 'None')
         self.assertEqual(command[-1], 'aur/aurthing')  # Never an official package providing it.
         with self.assertRaises(packages.PackageError):
-            packages.yay_command(['--sudo=sh'])
+            packages.helper_command(['--sudo=sh'], 'yay')
+
+    def test_paru_answers_its_own_questions_and_uses_pkexec(self):
+        command = packages.helper_command(['aurthing', 'other'], 'paru')
+        self.assertEqual(command[0], 'paru')
+        for flag in ('--noconfirm', '--needed', '--removemake', '--skipreview'):
+            self.assertIn(flag, command)
+        self.assertEqual(command[command.index('--sudo') + 1], 'pkexec')
+        self.assertEqual(command[-2:], ['aur/aurthing', 'aur/other'])
+        with self.assertRaises(packages.PackageError):
+            packages.helper_command(['--sudo=sh'], 'paru')
+        with self.assertRaisesRegex(packages.PackageError, 'Install yay or paru'):
+            packages.helper_command(['aurthing'], '')
+
+    def test_a_failed_aur_install_names_the_helper_in_use(self):
+        tool = self.root / 'paru'
+        tool.write_text('#!/bin/sh\necho "==> ERROR: One or more PGP signatures could not be verified!"\nexit 1\n')
+        tool.chmod(0o755)
+        with self.assertRaisesRegex(packages.PackageError, 'In Terminal: paru -S aurthing'):
+            packages.install_aur(['aurthing'], self.reports.append, 'paru', str(tool))
 
 
 class HelperTests(unittest.TestCase):
@@ -334,7 +379,8 @@ class HelperTests(unittest.TestCase):
         self.folder = tempfile.TemporaryDirectory()
         self.root = Path(self.folder.name)
         self.env = dict(os.environ, PLATINUM_PACKAGES_ELEVATE='',
-                        PLATINUM_PACKAGES_ADMIN=str(SCRIPTS / 'platinum-packages-admin'))
+                        PLATINUM_PACKAGES_ADMIN=str(SCRIPTS / 'platinum-packages-admin'),
+                        XDG_CONFIG_HOME=str(self.root / 'config'))
 
     def tearDown(self):
         self.folder.cleanup()
@@ -366,7 +412,13 @@ class HelperTests(unittest.TestCase):
         code, lines = self.run_helper('catalog')
         self.assertEqual(code, 0)
         self.assertEqual(len(lines), 1)
-        self.assertEqual(sorted(lines[0]), ['apps', 'aurUpdated', 'packages', 'yay'])
+        self.assertEqual(sorted(lines[0]), ['apps', 'aurHelper', 'aurHelpers', 'aurUpdated', 'packages'])
+
+    def test_using_a_helper_needs_it_installed(self):
+        code, lines = self.run_helper('use-helper', 'pikaur')
+        self.assertEqual(code, 1)
+        self.assertIn('isn’t installed', lines[-1]['error'])
+        self.assertFalse((self.root / 'config/platinum-reality/aur-helper').exists())
 
 
 if __name__ == '__main__':

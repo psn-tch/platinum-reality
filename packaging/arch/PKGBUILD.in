@@ -20,7 +20,7 @@ depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'qt6-svg' 'glib2' 'wayland' 
          # udisks2 mounts flash drives as they are plugged in, and ejects them;
          # Software Update asks for the administrator password through KDE's polkit agent.
          'sway' 'swayidle' 'swaylock' 'xorg-xwayland' 'polkit' 'polkit-kde-agent' 'udisks2')
-makedepends=('cmake' 'ninja' 'pkgconf' 'gcc' 'vulkan-headers' 'vulkan-icd-loader' 'wayland-protocols'
+makedepends=('cmake' 'ninja' 'pkgconf' 'gcc' 'vulkan-headers' 'vulkan-icd-loader' 'wayland-protocols' 'qt6-multimedia'
              # The X11 bridge (patched xwayland-satellite) is built from its pinned source.
              'cargo' 'clang' 'patch'
              # A test-only game-like client for pointer capture.
@@ -30,6 +30,8 @@ makedepends=('cmake' 'ninja' 'pkgconf' 'gcc' 'vulkan-headers' 'vulkan-icd-loader
 # by launched apps. Missing plugin/fallback is a failure, not a passing test.
 checkdepends=('gtk3' 'gtk4' 'python-gobject' 'imagemagick' 'plasma-integration')
 optdepends=('archlinux-appstream-data: application names, pictures and categories in the App Store (it offers to install it)'
+            'qt6-multimedia-ffmpeg: Snapshot, pictures with the camera (it says so when missing)'
+            'v4l-utils: Snapshot with older webcams such as the PS2 EyeToy'
             'pipewire-audio: interface and alert sounds, the startup chime'
             'wireplumber: the startup chime waits for your speakers'
             'libpulse: the Sound control panel'

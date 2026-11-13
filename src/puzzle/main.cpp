@@ -18,6 +18,7 @@ int main(int argc, char **argv)
     SlidingPuzzle puzzle;
     puzzle.shuffle(QRandomGenerator::global()->generate());
     PuzzleWindow window(std::move(puzzle));
+    window.setPicture(PuzzleWindow::personalApple());
     window.show();
     return app.exec();
 }

@@ -5,6 +5,8 @@ import QtQuick
 // and the contents follow, as in the 9.2.2 Finder and SimpleText. It updates as the
 // clipboard changes. The title bar moves it; the close box or Escape closes it. Its
 // zoom and collapse boxes are not drawn: they would be controls that do nothing.
+// Recent Clippings (Lily Hewitt, 2026-11-12: "copy multiple things and be able to switch between
+// them") lists the last copies on the left, newest first; clicking one makes it the clipboard again.
 FocusScope {
     id: window
     property var moveManager: typeof manager === "undefined" ? null : manager
@@ -18,8 +20,9 @@ FocusScope {
     signal closeRequested()
     signal raised()
     objectName: "clipboard-window"
-    width: 560
-    height: 240
+    width: 740
+    height: 260
+    readonly property int listWidth: 200
     Keys.onEscapePressed: window.closeRequested()
     Rectangle {
         anchors.fill: parent
@@ -70,8 +73,62 @@ FocusScope {
     // As in 9.2.2 (checked in Lily Hewitt's VM): the description sits in a grey strip with an inset
     // edge, above a white pane where the contents are indented.
     Rectangle {
+        id: listStrip
+        x: 3; y: titleBar.y + titleBar.height + 2; width: window.listWidth; height: 20
+        color: "#ddd"; border.color: "#222"
+        Rectangle {x: 1; y: 1; width: parent.width - 2; height: 1; color: "white"}
+        Text {
+            x: 8; anchors.verticalCenter: parent.verticalCenter
+            text: "Recent Clippings"; textFormat: Text.PlainText; font.pixelSize: 11; font.bold: true
+        }
+    }
+    Rectangle {
+        id: listWell
+        x: 3; y: listStrip.y + listStrip.height - 1; width: window.listWidth; height: parent.height - y - 3
+        color: "white"; border.color: "#222"
+        ListView {
+            id: clippings
+            objectName: "clipboard-history"
+            x: 1; y: 1; width: parent.width - 2; height: parent.height - 2
+            clip: true; boundsBehavior: Flickable.StopAtBounds
+            model: window.clipboard.history || []
+            delegate: Rectangle {
+                id: row
+                required property var modelData
+                required property int index
+                objectName: "clipboard-history-" + index
+                width: clippings.width; height: 26
+                color: modelData.current ? "#ccccff" : rowMouse.pressed ? "#e5e5ef" : "white"
+                Image {
+                    id: thumbnail
+                    x: 6; anchors.verticalCenter: parent.verticalCenter
+                    width: 20; height: 20; fillMode: Image.PreserveAspectFit
+                    visible: row.modelData.kind === "picture" && source !== ""
+                    source: row.modelData.thumbnail || ""
+                }
+                Text {
+                    x: thumbnail.visible ? 32 : 8; width: parent.width - x - 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: row.modelData.label; textFormat: Text.PlainText; elide: Text.ElideRight
+                    font.pixelSize: 11; font.bold: row.modelData.current
+                }
+                Rectangle {x: 0; y: parent.height - 1; width: parent.width; height: 1; color: "#eee"}
+                MouseArea {
+                    id: rowMouse; anchors.fill: parent
+                    onPressed: function(mouse) { window.raised(); window.forceActiveFocus(); }
+                    onClicked: window.clipboard.restore(row.index)
+                }
+            }
+            Text {
+                visible: clippings.count === 0
+                x: 8; y: 8; width: parent.width - 16; wrapMode: Text.Wrap
+                text: "Nothing copied yet."; color: "#666"; font.pixelSize: 11; textFormat: Text.PlainText
+            }
+        }
+    }
+    Rectangle {
         id: strip
-        x: 3; y: titleBar.y + titleBar.height + 2; width: parent.width - 6; height: 20
+        x: listStrip.x + listStrip.width + 4; y: titleBar.y + titleBar.height + 2; width: parent.width - x - 3; height: 20
         color: "#ddd"; border.color: "#222"
         Rectangle {x: 1; y: 1; width: parent.width - 2; height: 1; color: "white"}
         Text {
@@ -84,7 +141,7 @@ FocusScope {
     }
     Rectangle {
         id: well
-        x: 3; y: strip.y + strip.height - 1; width: parent.width - 6; height: parent.height - y - 3
+        x: strip.x; y: strip.y + strip.height - 1; width: strip.width; height: parent.height - y - 3
         color: "white"; border.color: "#222"
         Rectangle {x: 1; y: 1; width: parent.width - 2; height: 1; color: "#222"}
         Flickable {

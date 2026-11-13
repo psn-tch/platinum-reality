@@ -47,6 +47,8 @@ input type:touch {
 HEADER = struct.Struct("=6sII")
 # --start-locked: the user chose KDE at Log In (login-session.py then starts it).
 KDE_SESSION_EXIT = 10
+# The desktop asks for a new desktop in the same session (Restart Desktop after an update).
+RESTART_DESKTOP_EXIT = 75
 MAX_IPC = 1024 * 1024
 
 
@@ -1126,6 +1128,9 @@ def run(options):
             child_environment["WAYLAND_DISPLAY"] = str(displays[0])
             child_environment["QT_QPA_PLATFORM"] = "wayland"
             child_environment["PLATINUM_LOGIN_SESSION"] = "1"
+            # This supervisor starts a new desktop when one exits with RESTART_DESKTOP_EXIT; an older
+            # one would end the session instead, so the desktop offers Restart Desktop only with this.
+            child_environment["PLATINUM_DESKTOP_RESTART"] = str(RESTART_DESKTOP_EXIT)
             child_environment.pop("PLATINUM_WALLET_LOGIN", None)
             # --nested-check must never activate the user's wallet, even though it tests
             # login-only Bluetooth behavior. Only a physical session grants this allowance.
@@ -1919,147 +1924,162 @@ def run(options):
                 idle = start_idle()
             deadline = time.monotonic() + 15
             next_display_poll = 0
-            while not stopping and backend.poll() is None and desktop.poll() is None:
-                inspect_displays = options.experimental_extended and time.monotonic() >= next_display_poll
-                if inspect_displays:
-                    if display_pending is not None and time.monotonic() >= display_pending["deadline"]:
-                        revert_display_change("not kept; reverted")
-                    update_displays()
-                    next_display_poll = time.monotonic()+0.25
-                reconcile_lock()
-                if idle and idle.poll() is not None:
-                    raise RuntimeError("Idle/lock monitor stopped; see idle.txt")
-                if not state["ready"] or inspect_displays:
-                    tree = ipc(backend_ipc, 4)
-                    windows = [n for n in nodes(tree) if n.get("app_id") and n.get("visible")]
-                    if options.experimental_extended:
-                        for window in windows:
-                            if window.get("fullscreen_mode") != 2:
-                                identity = window.get("id")
-                                if type(identity) is not int or identity <= 0:
-                                    raise RuntimeError("Invalid owned desktop container")
-                                reply = ipc(backend_ipc, 0, f"[con_id={identity}] fullscreen enable global")
-                                if not reply or not all(r.get("success") for r in reply):
-                                    raise RuntimeError("Backend rejected extended desktop span")
-                    applied = not options.experimental_extended or state.get("display_applied_generation") == display_generation
-                    if not state["ready"] and windows and any(n.get("fullscreen_mode") for n in windows) and applied:
-                        state["ready"] = True
-                        state["was_ready"] = True  # Kept after logout, unlike "ready".
-                        state["outer_window_pids"] = [n.get("pid") for n in windows]
-                        record()
-                    elif not state["ready"] and time.monotonic() > deadline:
-                        raise RuntimeError("Desktop did not map full screen; see desktop.txt")
-                readable, _, _ = select.select([server, events], [], [], 0.1)
-                for peer in readable:
-                    if peer is events:
-                        _, event = receive_ipc(events)
-                        if event.get("binding", {}).get("command") == "nop platinum-lock":
-                            note("lock: Ctrl+Alt+L")
-                            # Also a recovery key for an unresponsive lock UI; a second
-                            # invocation must never require terminating the whole desktop.
-                            lock(refresh=state["locked"])
-                    else:
-                        connection, _ = server.accept()
-                        with connection:
-                            connection.settimeout(0.5)
-                            try:
-                                command = read_control(connection)
-                                ok = False
-                                if command == b"status\n":
-                                    ok = True
-                                elif command == b"lock\n":
-                                    note("lock: control request")
-                                    ok = lock()
-                                elif command == b"resume\n":
-                                    note("lock: after-resume refresh request")
-                                    ok = lock(refresh=True)
-                                elif command == b"energy apply\n" and not state["locked"] and idle is not None:
-                                    # Energy Saver saved energy.json: restart swayidle with its times.
-                                    stop_owned(idle, group=True)
-                                    idle = start_idle()
-                                    state["energy"] = saved_energy_settings(display_profile)
-                                    ok = True
-                                    record()
-                                elif command == b"input apply\n" and not state["locked"]:
-                                    # The desktop saved input.json; this rereads and applies it.
-                                    ok = apply_input_settings(backend_ipc, display_profile, state)
-                                    record()
-                                elif command == b"logout\n" and not state["locked"]:
-                                    # Normal xdg close: Save/Cancel remains the app's choice.
-                                    response = ipc(backend_ipc, 0, '[shell="xdg_shell"] kill')
-                                    ok = bool(response) and all(r.get("success") for r in response)
-                                elif (options.experimental_extended and not state["locked"] and
-                                      command.startswith(b"primary ") and command.endswith(b"\n")):
-                                    requested = command[len(b"primary "):-1].decode("ascii")
-                                    connected = {o["name"] for o in display_description["outputs"]}
-                                    if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", requested) and requested in connected:
-                                        previous_preference = preferred_primary
-                                        previous_identity = main_preference
-                                        try:
-                                            outputs = ipc(backend_ipc, 3)
-                                            chosen = next((o for o in outputs if o.get("name") == requested
-                                                           and o.get("active") is True
-                                                           and not o.get("non_desktop", False)), None)
-                                            if chosen is None:
-                                                raise ValueError("The requested main display is no longer active")
-                                            main_preference = main_display_identity(chosen)
-                                            preferred_primary = requested
-                                            update_displays()
-                                            if state.get("primary_output") != requested or state.get("display_error"):
-                                                raise ValueError("The main display could not be applied")
-                                            save_main_display(display_profile, main_preference)
-                                            ok = True
-                                        except (OSError, ValueError) as error:
-                                            state["main_display_save_error"] = str(error)
-                                            main_preference = previous_identity
-                                            preferred_primary = previous_preference
-                                            update_displays()
-                                            record()
-                                        if ok:
-                                            primary_chosen_here = True  # KDE's main display no longer applies.
-                                            state["requested_primary_output"] = requested
-                                            state.pop("main_display_save_error", None)
-                                            record()
-                                elif (managed and not state["locked"] and command.startswith(b"display ")
-                                      and command.endswith(b"\n")):
-                                    words = command[len(b"display "):-1].decode("ascii").split(" ")
-                                    if words == ["keep"]:
-                                        ok = keep_display_change()
-                                    elif words == ["revert"] and display_pending is not None:
-                                        revert_display_change("reverted")
+            while True:
+                while not stopping and backend.poll() is None and desktop.poll() is None:
+                    inspect_displays = options.experimental_extended and time.monotonic() >= next_display_poll
+                    if inspect_displays:
+                        if display_pending is not None and time.monotonic() >= display_pending["deadline"]:
+                            revert_display_change("not kept; reverted")
+                        update_displays()
+                        next_display_poll = time.monotonic()+0.25
+                    reconcile_lock()
+                    if idle and idle.poll() is not None:
+                        raise RuntimeError("Idle/lock monitor stopped; see idle.txt")
+                    if not state["ready"] or inspect_displays:
+                        tree = ipc(backend_ipc, 4)
+                        windows = [n for n in nodes(tree) if n.get("app_id") and n.get("visible")]
+                        if options.experimental_extended:
+                            for window in windows:
+                                if window.get("fullscreen_mode") != 2:
+                                    identity = window.get("id")
+                                    if type(identity) is not int or identity <= 0:
+                                        raise RuntimeError("Invalid owned desktop container")
+                                    reply = ipc(backend_ipc, 0, f"[con_id={identity}] fullscreen enable global")
+                                    if not reply or not all(r.get("success") for r in reply):
+                                        raise RuntimeError("Backend rejected extended desktop span")
+                        applied = not options.experimental_extended or state.get("display_applied_generation") == display_generation
+                        if not state["ready"] and windows and any(n.get("fullscreen_mode") for n in windows) and applied:
+                            state["ready"] = True
+                            state["was_ready"] = True  # Kept after logout, unlike "ready".
+                            state["outer_window_pids"] = [n.get("pid") for n in windows]
+                            record()
+                        elif not state["ready"] and time.monotonic() > deadline:
+                            raise RuntimeError("Desktop did not map full screen; see desktop.txt")
+                    readable, _, _ = select.select([server, events], [], [], 0.1)
+                    for peer in readable:
+                        if peer is events:
+                            _, event = receive_ipc(events)
+                            if event.get("binding", {}).get("command") == "nop platinum-lock":
+                                note("lock: Ctrl+Alt+L")
+                                # Also a recovery key for an unresponsive lock UI; a second
+                                # invocation must never require terminating the whole desktop.
+                                lock(refresh=state["locked"])
+                        else:
+                            connection, _ = server.accept()
+                            with connection:
+                                connection.settimeout(0.5)
+                                try:
+                                    command = read_control(connection)
+                                    ok = False
+                                    if command == b"status\n":
                                         ok = True
-                                    elif len(words) == 2 and words[0] == "mirror" and words[1] in ("on", "off"):
-                                        try:
-                                            ok = request_display_mirror(words[1] == "on")
-                                        except (OSError, ValueError, StopIteration) as error:
-                                            state["display_change"] = "failed: " + str(error)[:200]
-                                            ok = False
-                                    elif len(words) == 2 and words[1] in ("on", "off"):
-                                        try:
-                                            ok = request_display_switch(words[0], words[1] == "on")
-                                        except (OSError, ValueError, StopIteration) as error:
-                                            state["display_change"] = "failed: " + str(error)[:200]
-                                            ok = False
-                                    elif len(words) == 3 and words[1] == "position":
-                                        try:
-                                            value = parse_display_setting("position", words[2])
-                                            ok = value is not None and request_display_position(words[0], value)
-                                        except (OSError, ValueError, StopIteration) as error:
-                                            state["display_change"] = "failed: " + str(error)[:200]
-                                            ok = False
-                                    elif len(words) == 3 and words[1] in ("mode", "scale", "rotate"):
-                                        try:
-                                            value = parse_display_setting(words[1], words[2])
-                                            ok = value is not None and request_display_setting(
-                                                words[0], "transform" if words[1] == "rotate" else words[1], value)
-                                        except (OSError, ValueError, StopIteration) as error:
-                                            state["display_change"] = "failed: " + str(error)[:200]
-                                            ok = False
-                                    record()
-                                connection.sendall(json.dumps({"ok": ok, **state}).encode())
-                            except (OSError, ConnectionError, UnicodeError):
-                                # An interrupted/malformed control client cannot end the session.
-                                pass
+                                    elif command == b"lock\n":
+                                        note("lock: control request")
+                                        ok = lock()
+                                    elif command == b"resume\n":
+                                        note("lock: after-resume refresh request")
+                                        ok = lock(refresh=True)
+                                    elif command == b"energy apply\n" and not state["locked"] and idle is not None:
+                                        # Energy Saver saved energy.json: restart swayidle with its times.
+                                        stop_owned(idle, group=True)
+                                        idle = start_idle()
+                                        state["energy"] = saved_energy_settings(display_profile)
+                                        ok = True
+                                        record()
+                                    elif command == b"input apply\n" and not state["locked"]:
+                                        # The desktop saved input.json; this rereads and applies it.
+                                        ok = apply_input_settings(backend_ipc, display_profile, state)
+                                        record()
+                                    elif command == b"logout\n" and not state["locked"]:
+                                        # Normal xdg close: Save/Cancel remains the app's choice.
+                                        response = ipc(backend_ipc, 0, '[shell="xdg_shell"] kill')
+                                        ok = bool(response) and all(r.get("success") for r in response)
+                                    elif (options.experimental_extended and not state["locked"] and
+                                          command.startswith(b"primary ") and command.endswith(b"\n")):
+                                        requested = command[len(b"primary "):-1].decode("ascii")
+                                        connected = {o["name"] for o in display_description["outputs"]}
+                                        if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", requested) and requested in connected:
+                                            previous_preference = preferred_primary
+                                            previous_identity = main_preference
+                                            try:
+                                                outputs = ipc(backend_ipc, 3)
+                                                chosen = next((o for o in outputs if o.get("name") == requested
+                                                               and o.get("active") is True
+                                                               and not o.get("non_desktop", False)), None)
+                                                if chosen is None:
+                                                    raise ValueError("The requested main display is no longer active")
+                                                main_preference = main_display_identity(chosen)
+                                                preferred_primary = requested
+                                                update_displays()
+                                                if state.get("primary_output") != requested or state.get("display_error"):
+                                                    raise ValueError("The main display could not be applied")
+                                                save_main_display(display_profile, main_preference)
+                                                ok = True
+                                            except (OSError, ValueError) as error:
+                                                state["main_display_save_error"] = str(error)
+                                                main_preference = previous_identity
+                                                preferred_primary = previous_preference
+                                                update_displays()
+                                                record()
+                                            if ok:
+                                                primary_chosen_here = True  # KDE's main display no longer applies.
+                                                state["requested_primary_output"] = requested
+                                                state.pop("main_display_save_error", None)
+                                                record()
+                                    elif (managed and not state["locked"] and command.startswith(b"display ")
+                                          and command.endswith(b"\n")):
+                                        words = command[len(b"display "):-1].decode("ascii").split(" ")
+                                        if words == ["keep"]:
+                                            ok = keep_display_change()
+                                        elif words == ["revert"] and display_pending is not None:
+                                            revert_display_change("reverted")
+                                            ok = True
+                                        elif len(words) == 2 and words[0] == "mirror" and words[1] in ("on", "off"):
+                                            try:
+                                                ok = request_display_mirror(words[1] == "on")
+                                            except (OSError, ValueError, StopIteration) as error:
+                                                state["display_change"] = "failed: " + str(error)[:200]
+                                                ok = False
+                                        elif len(words) == 2 and words[1] in ("on", "off"):
+                                            try:
+                                                ok = request_display_switch(words[0], words[1] == "on")
+                                            except (OSError, ValueError, StopIteration) as error:
+                                                state["display_change"] = "failed: " + str(error)[:200]
+                                                ok = False
+                                        elif len(words) == 3 and words[1] == "position":
+                                            try:
+                                                value = parse_display_setting("position", words[2])
+                                                ok = value is not None and request_display_position(words[0], value)
+                                            except (OSError, ValueError, StopIteration) as error:
+                                                state["display_change"] = "failed: " + str(error)[:200]
+                                                ok = False
+                                        elif len(words) == 3 and words[1] in ("mode", "scale", "rotate"):
+                                            try:
+                                                value = parse_display_setting(words[1], words[2])
+                                                ok = value is not None and request_display_setting(
+                                                    words[0], "transform" if words[1] == "rotate" else words[1], value)
+                                            except (OSError, ValueError, StopIteration) as error:
+                                                state["display_change"] = "failed: " + str(error)[:200]
+                                                ok = False
+                                        record()
+                                    connection.sendall(json.dumps({"ok": ok, **state}).encode())
+                                except (OSError, ConnectionError, UnicodeError):
+                                    # An interrupted/malformed control client cannot end the session.
+                                    pass
+                # Restart Desktop (Lily Hewitt, 2026-11-12): after an update the desktop closes its
+                # applications as Log Out does and exits with RESTART_DESKTOP_EXIT; a new desktop
+                # starts in this session, without Log In, and reopens them.
+                if stopping or backend.poll() is not None or desktop.poll() != RESTART_DESKTOP_EXIT:
+                    break
+                state["desktop_restarts"] = state.get("desktop_restarts", 0) + 1
+                note(f"desktop: restart {state['desktop_restarts']} requested; starting a new desktop")
+                desktop = subprocess.Popen(arguments, env=child_environment, stdin=subprocess.DEVNULL,
+                                           stdout=desktop_log, stderr=subprocess.STDOUT,
+                                           start_new_session=True)
+                state.update(launcher_pid=desktop.pid, ready=False)
+                record()
+                deadline = time.monotonic() + 15
+                next_display_poll = 0
             result = desktop.returncode if desktop.poll() is not None else 1
             state["desktop_exit"] = result
         finally:

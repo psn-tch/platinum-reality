@@ -35,8 +35,11 @@ elif command == 'update-all':
         if p.get('update'):
             say(step=1, steps=1, doing='upgrading', package=p['name'])
             p['installed'] = p['version'] = p.pop('update')
-elif command == 'install-yay':
-    say(progress='Building yay…'); state['yay'] = True
+elif command == 'install-helper':
+    say(progress=f'Building {names[0]}…')
+    state['aurHelper'] = names[0]; state['aurHelpers'] = sorted(set(state['aurHelpers']) | {names[0]}, key=['yay', 'paru'].index)
+elif command == 'use-helper':
+    state['aurHelper'] = names[0]
 elif command == 'refresh-aur':
     state['packages'].append({'name': 'aurthing', 'version': '3-1', 'description': 'Something from the AUR',
                               'repo': 'aur', 'installed': '', 'votes': 7, 'orphan': True})

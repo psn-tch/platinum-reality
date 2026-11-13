@@ -46,7 +46,10 @@ SoftwareUpdate::SoftwareUpdate(QString client, QString keyring, QString settings
         if (m_silent) { m_error.clear(); m_silent = false; }
         if ((finished == "installing" || finished == "restoring") && m_error.isEmpty()) {
             m_ready.clear(); m_readyRelease.clear(); m_available.clear();
+            // Reading the new status must not wipe what the install said (it did before update 48).
+            const auto said = m_message;
             refresh();
+            m_message = said;
         }
         emit changed();
     });
@@ -115,10 +118,19 @@ void SoftwareUpdate::handle(const QJsonObject &message)
     }
     if (message.value("step").toString() == "verify") m_message = "Checking the update…";
     if (message.value("step").toString() == "install") m_message = "Installing…";
-    if (message.value("done").toBool())
-        m_message = "Platinum Reality " + message.value("version").toString() +
-                    " is installed. Log out and back in to use it.";
+    const bool done = message.value("done").toBool() && !message.value("version").toString().isEmpty();
+    if (done)
+    {
+        m_restartNeeded = true;
+        // Restart Desktop needs a session supervisor that knows it (update 48 and later).
+        m_message = "Platinum Reality " + message.value("version").toString() + " is installed. " +
+                    (qEnvironmentVariable("PLATINUM_DESKTOP_RESTART") == "75"
+                         ? "Restart Desktop to use it: your applications close and open again."
+                         : "Log out and back in to use it.");
+    }
     emit changed();
+    if (done)
+        emit installFinished(message.value("version").toString());
 }
 
 void SoftwareUpdate::save() const

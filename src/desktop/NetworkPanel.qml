@@ -29,8 +29,16 @@ Item {
     property string selected: ""
     readonly property var current: networks.find(function(n) { return n.path === panel.selected }) || null
     property var connections: []
+    property var dns: ({servers: [], domains: []})
+    // TCP/IP's Connect via: the connection shown, by interface name; the one with a router first.
+    property string via: ""
+    readonly property var shownConnection: connections.find(function(c) { return c.name === panel.via })
+                                           || connections.find(function(c) { return c.router }) || connections[0] || null
     function edit() { if (host) host.show(panelId) }
-    function refreshConnections() { connections = service && service.connections ? service.connections() : [] }
+    function refreshConnections() {
+        connections = service && service.connections ? service.connections() : []
+        dns = service && service.nameServers ? service.nameServers() : ({servers: [], domains: []})
+    }
     function join(network) { if (network && !network.connected && network.busy === "") service.connectNetwork(network.path) }
     onShownChanged: if (shown) {
         if (controls) controls.refresh()
@@ -169,32 +177,82 @@ Item {
                   : panel.radio.enabled === true ? "Double-click a network to join it. Networks you have joined are saved and joined again by themselves."
                   : ""
         }
-        Rectangle { width: parent.width; height: 1; color: "#999" }
-        Text { text: "This Computer"; font.pixelSize: 12; font.bold: true }
-        Column {
-            objectName: "network-connections"
-            width: parent.width; spacing: 6
-            Repeater {
-                model: panel.connections
-                delegate: Row {
-                    required property var modelData
-                    objectName: "network-connection-" + modelData.name
+        // TCP/IP, laid out as 9.2.2's (captured 2026-11-12): Connect via, then the connection's
+        // addresses and router, and the name servers and search domains in their boxes. Read-only:
+        // the connection is set up by Wi-Fi above (or by the system for a cable).
+        PlatinumGroup {
+            title: "TCP/IP"
+            width: parent.width
+            Column {
+                objectName: "network-connections"
+                width: parent.width; spacing: 8
+                Row {
                     spacing: 10
-                    Text {
-                        width: 150; font.pixelSize: 12; textFormat: Text.PlainText; elide: Text.ElideRight
-                        text: modelData.kind + " (" + modelData.name + ")"
-                    }
-                    Text {
-                        width: 340; font.pixelSize: 12; textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; color: "#333"
-                        text: modelData.addresses.map(function(a) { return a.address }).join("\n")
-                              + (modelData.hardware ? "\nHardware address " + modelData.hardware : "")
+                    visible: panel.connections.length > 0
+                    Text { width: 120; horizontalAlignment: Text.AlignRight; anchors.verticalCenter: parent.verticalCenter
+                           text: "Connect via:"; font.pixelSize: 12; textFormat: Text.PlainText }
+                    PlatinumPopup {
+                        objectName: "network-connect-via"
+                        implicitWidth: 220
+                        choices: panel.connections.map(function(c) { return {name: c.kind + " (" + c.name + ")", value: c.name} })
+                        current: panel.shownConnection ? panel.shownConnection.name : ""
+                        onChosen: function(value) { panel.via = value }
                     }
                 }
-            }
-            Text {
-                visible: panel.connections.length === 0
-                font.pixelSize: 12; color: "#555"; textFormat: Text.PlainText
-                text: "Not connected to a network."
+                Grid {
+                    visible: Boolean(panel.shownConnection)
+                    columns: 2; columnSpacing: 10; rowSpacing: 6
+                    Repeater {
+                        model: {
+                            const c = panel.shownConnection
+                            if (!c) return []
+                            const v4 = c.addresses.filter(function(a) { return a.version === 4 })
+                            const v6 = c.addresses.filter(function(a) { return a.version === 6 })
+                            let rows = [["IP Address:", v4.length ? v4[0].address : "None"],
+                                        ["Subnet mask:", v4.length && v4[0].netmask ? v4[0].netmask : "None"],
+                                        ["Router address:", c.router || "None"]]
+                            for (const a of v6) rows.push(["IPv6 address:", a.address])
+                            if (c.hardware) rows.push(["Hardware address:", c.hardware])
+                            return rows.reduce(function(all, r) { return all.concat(r) }, [])
+                        }
+                        Text {
+                            required property var modelData
+                            required property int index
+                            objectName: index % 2 === 1 ? "network-tcpip-value-" + Math.floor(index / 2) : ""
+                            width: index % 2 === 0 ? 120 : 330
+                            horizontalAlignment: index % 2 === 0 ? Text.AlignRight : Text.AlignLeft
+                            text: modelData; font.pixelSize: 12; textFormat: Text.PlainText
+                            color: index % 2 === 0 ? "#111" : "#333"; wrapMode: Text.WrapAnywhere
+                        }
+                    }
+                }
+                Row {
+                    visible: Boolean(panel.shownConnection)
+                    spacing: 14
+                    Repeater {
+                        model: [["Name server addr.:", panel.dns.servers, "network-name-servers"],
+                                ["Search domains:", panel.dns.domains, "network-search-domains"]]
+                        Column {
+                            required property var modelData
+                            spacing: 3
+                            Text { text: modelData[0]; font.pixelSize: 12; textFormat: Text.PlainText }
+                            Rectangle {
+                                width: 210; height: 70; color: "white"; border.color: "#555"
+                                Text {
+                                    objectName: modelData[2]
+                                    x: 6; y: 4; width: parent.width - 12
+                                    text: modelData[1].join("\n"); font.pixelSize: 12; textFormat: Text.PlainText
+                                    elide: Text.ElideRight; maximumLineCount: 4
+                                }
+                            }
+                        }
+                    }
+                }
+                Text {
+                    visible: panel.connections.length === 0
+                    font.pixelSize: 12; color: "#555"; textFormat: Text.PlainText
+                    text: "Not connected to a network."
+                }
             }
         }
     }

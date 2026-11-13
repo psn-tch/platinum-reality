@@ -144,6 +144,7 @@ int main(int argc, char **argv)
         x11->start(compositor->socketName());
     }
     view.rootContext()->setContextProperty("manager", &manager);
+    QObject::connect(&manager, &NativeManager::sessionEnded, &app, [&app](int code) { app.exit(code); });
     view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
     if (view.status() == QQuickView::Error)
         return 3;
@@ -176,6 +177,8 @@ int main(int argc, char **argv)
                 topologyReady=true;
                 if(!preview && !parser.isSet("no-finder"))
                     QTimer::singleShot(150,&manager,[&]{manager.launchFinder();});
+                if(!preview)
+                    QTimer::singleShot(600,&manager,[&]{manager.reopenAfterRestart();});
             }
             qInfo()<<"Display topology applied"<<snapshot.generation<<snapshot.layout.primary()<<snapshot.layout.hostBounds();
         };
@@ -199,6 +202,8 @@ int main(int argc, char **argv)
         view.show();
     if (!topology && !preview && !parser.isSet("no-finder"))
         QTimer::singleShot(150, &manager, [&] { manager.launchFinder(); });
+    if (!topology && !preview)
+        QTimer::singleShot(600, &manager, [&] { manager.reopenAfterRestart(); });
     if (!preview)
         manager.initializeWallet();
     if (!preview && qEnvironmentVariable("FRANKENSTEIN_ISOLATED") == "1")

@@ -29,7 +29,11 @@ struct Catalog
 {
     QVector<Package> packages;
     QVector<Application> apps;
-    bool yay = false;
+    // The AUR helper in use ("yay" or "paru", the person's choice) and the ones installed; with none,
+    // the AUR can't be used.
+    QString aurHelper;
+    QStringList aurHelpers;
+    bool aur() const { return !aurHelper.isEmpty(); }
     QString aurUpdated;
     static Catalog fromJson(const QJsonObject &document);
     int indexOf(const QString &name) const { return m_byName.value(name, -1); }

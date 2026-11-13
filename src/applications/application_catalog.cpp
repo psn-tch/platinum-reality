@@ -260,6 +260,7 @@ void ApplicationCatalog::refresh()
         m_notice = std::move(result.notice);
         m_busy = false; m_ready = true;
         filter(); emit stateChanged(); emit refreshed();
+        emit associationsChanged(); // Application names in File Exchange.
     });
     watcher->setFuture(QtConcurrent::run(scanApplications, m_directories,
         builtins(m_workspace, m_profile, m_binaryDirectory), QProcessEnvironment::systemEnvironment()));
@@ -314,6 +315,10 @@ bool ApplicationCatalog::rememberApplication(const QString &id, const QString &p
     }
     auto next = m_associations;
     next[QMimeDatabase().mimeTypeForFile(path).name()] = id;
+    return saveAssociations(std::move(next), error);
+}
+bool ApplicationCatalog::saveAssociations(QMap<QString, QString> next, QString &error)
+{
     QJsonObject types;
     for (auto it = next.begin(); it != next.end(); ++it) types[it.key()] = it.value();
     QSaveFile output(m_profile + "/associations.json");
@@ -324,7 +329,89 @@ bool ApplicationCatalog::rememberApplication(const QString &id, const QString &p
         return false;
     }
     m_associations = std::move(next);
+    emit associationsChanged();
     return true;
+}
+namespace
+{
+// The kinds File Exchange always lists, as 9.2.2's PC Exchange lists its common mappings.
+const QStringList commonTypes{"text/plain", "application/pdf", "image/png", "image/jpeg", "image/gif",
+                              "audio/mpeg", "audio/flac", "video/mp4", "text/html", "application/zip"};
+}
+QVariantList ApplicationCatalog::fileTypes() const
+{
+    QMimeDatabase mimes;
+    QStringList types = commonTypes;
+    for (auto it = m_associations.begin(); it != m_associations.end(); ++it)
+        if (!types.contains(it.key()))
+            types.append(it.key());
+    QVariantList result;
+    for (const auto &name : types)
+    {
+        const auto type = mimes.mimeTypeForName(name);
+        if (!type.isValid())
+            continue;
+        const auto id = m_associations.value(name);
+        const auto *entry = id.isEmpty() ? nullptr : find(id);
+        result.append(QVariantMap{{"type", name}, {"kind", type.comment()},
+                                  {"extension", type.preferredSuffix()},
+                                  {"application", entry ? id : QString()},
+                                  // Text with no choice opens in the editor, as preferredApplication() does.
+                                  {"applicationName", entry ? entry->name : name == "text/plain" ? applicationName(editorId) : QString()}});
+    }
+    std::sort(result.begin(), result.end(), [](const QVariant &a, const QVariant &b) {
+        return a.toMap().value("extension").toString() < b.toMap().value("extension").toString();
+    });
+    return result;
+}
+QVariantList ApplicationCatalog::applicationsFor(const QString &name) const
+{
+    const auto type = QMimeDatabase().mimeTypeForName(name);
+    QVariantList result;
+    if (!type.isValid())
+        return result;
+    for (const auto &entry : m_entries)
+    {
+        if (entry.hidden || !entry.showHere || !entry.documentCode || !entry.unavailable.isEmpty())
+            continue;
+        const bool opens = std::any_of(entry.mimeTypes.begin(), entry.mimeTypes.end(),
+                                       [&](const QString &mime) { return type.inherits(mime); });
+        if (opens)
+            result.append(QVariantMap{{"id", entry.id}, {"name", entry.name}, {"icon", entry.icon}});
+    }
+    std::sort(result.begin(), result.end(), [](const QVariant &a, const QVariant &b) {
+        return a.toMap().value("name").toString().localeAwareCompare(b.toMap().value("name").toString()) < 0;
+    });
+    return result;
+}
+bool ApplicationCatalog::setFileTypeApplication(const QString &name, const QString &id)
+{
+    if (!QMimeDatabase().mimeTypeForName(name).isValid() || name.size() > 256)
+        return false;
+    auto next = m_associations;
+    if (id.isEmpty())
+        next.remove(name);
+    else
+    {
+        const auto *entry = find(id);
+        if (!entry || !entry->documentCode || !entry->showHere || !entry->unavailable.isEmpty())
+            return false;
+        next[name] = id;
+    }
+    QString error;
+    return saveAssociations(std::move(next), error);
+}
+QVariantMap ApplicationCatalog::fileTypeFor(const QString &extension) const
+{
+    auto suffix = extension.trimmed();
+    if (suffix.startsWith('.'))
+        suffix.remove(0, 1);
+    if (suffix.isEmpty() || suffix.size() > 32 || suffix.contains('/'))
+        return {};
+    const auto type = QMimeDatabase().mimeTypeForFile("document." + suffix, QMimeDatabase::MatchExtension);
+    if (!type.isValid() || type.isDefault())
+        return {};
+    return {{"type", type.name()}, {"kind", type.comment()}, {"extension", suffix.toLower()}};
 }
 QString ApplicationCatalog::applicationName(const QString &waylandId) const
 {

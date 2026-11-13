@@ -173,6 +173,13 @@ AppearanceSettings::AppearanceSettings(QString profile, QObject *parent)
         m_caretBlink = caret;
     if (const auto size = general.value("barSize").toInt(-1); size >= 100 && size <= 150 && size % 5 == 0)
         m_barSize = size;
+    const auto apple = object.value("appleMenu").toObject();
+    if (apple.value("submenus").isBool())
+        m_appleSubmenus = apple.value("submenus").toBool();
+    if (apple.value("rememberRecent").isBool())
+        m_rememberRecent = apple.value("rememberRecent").toBool();
+    if (const auto count = apple.value("recentApplications").toInt(-1); count >= 1 && count <= 99)
+        m_recentApplications = count;
     const auto switcher = object.value("switcher").toObject();
     if (const auto x = switcher.value("x").toInt(-1), y = switcher.value("y").toInt(-1);
         switcher.value("visible").isBool() && x >= 0 && x <= 65536 && y >= 0 && y <= 65536)
@@ -221,6 +228,9 @@ bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x,
                                                                          {"menuBlinks", m_menuBlinks},
                                                                          {"caretBlink", m_caretBlink},
                                                                          {"barSize", m_barSize}}},
+                                                 {"appleMenu", QJsonObject{{"submenus", m_appleSubmenus},
+                                                                           {"rememberRecent", m_rememberRecent},
+                                                                           {"recentApplications", m_recentApplications}}},
                                                  {"switcher", QJsonObject{{"visible", m_switcherVisible},
                                                                           {"x", m_switcherX},
                                                                           {"y", m_switcherY}}}})
@@ -370,6 +380,34 @@ void AppearanceSettings::applyCaretFlash() const
     // Every text field of the desktop's own windows; applications keep their toolkit's setting.
     if (auto *application = qobject_cast<QGuiApplication *>(QCoreApplication::instance()))
         application->styleHints()->setCursorFlashTime(caretFlashTime());
+}
+QVariantMap AppearanceSettings::appleMenu() const
+{
+    return {{"submenus", m_appleSubmenus}, {"rememberRecent", m_rememberRecent},
+            {"recentApplications", m_recentApplications}};
+}
+bool AppearanceSettings::setAppleMenuOption(QString key, QVariant value)
+{
+    const auto number = value.toInt();
+    const bool whole = value.typeId() != QMetaType::Bool && value.canConvert<int>() && value.toDouble() == number;
+    const bool valid = key == "submenus" || key == "rememberRecent" ? value.typeId() == QMetaType::Bool
+                     : key == "recentApplications" && whole && number >= 1 && number <= 99;
+    if (!valid)
+    {
+        emit errorOccurred("That Apple Menu Options setting is not available.");
+        return false;
+    }
+    const auto previous = std::tuple{m_appleSubmenus, m_rememberRecent, m_recentApplications};
+    if (key == "submenus")
+        m_appleSubmenus = value.toBool();
+    else if (key == "rememberRecent")
+        m_rememberRecent = value.toBool();
+    else
+        m_recentApplications = number;
+    if (save(m_duration, m_stripVisible, m_stripCollapsed, m_stripX, m_stripY, m_wallpaperPath, m_wallpaperLayout))
+        return true;
+    std::tie(m_appleSubmenus, m_rememberRecent, m_recentApplications) = previous;
+    return false;
 }
 bool AppearanceSettings::setGeneralOption(QString key, QVariant value)
 {

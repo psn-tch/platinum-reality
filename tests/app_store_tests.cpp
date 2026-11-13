@@ -11,6 +11,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QTemporaryDir>
@@ -235,7 +236,7 @@ class AppStoreTests final : public QObject
         QVERIFY(!window.lastAlert().contains("cancel"));
     }
 
-    void aurNeedsYayAndAWarningBeforeInstalling()
+    void aurNeedsAHelperAndAWarningBeforeInstalling()
     {
         PackageClient client(path("platinum-packages"));
         AppStoreWindow window(&client);
@@ -243,16 +244,24 @@ class AppStoreTests final : public QObject
         QTRY_VERIFY(window.m_count->text().contains("applications"));
         show(window, "AUR Packages");
         QCOMPARE(window.m_list->model()->rowCount(), 0);
-        QCOMPARE(window.m_primary->text(), QString("Install yay…"));
+        QCOMPARE(window.m_primary->text(), QString("Install yay or paru…"));
         QVERIFY(window.m_primary->isVisible());
         snap(&window, "4-aur-needs-yay");
-        window.setTestAnswers({true});
+        // Cancelling the choice installs nothing.
+        window.setTestChoices({""});
         window.m_primary->click();
-        QCOMPARE(window.lastQuestion(), QString("Install yay?"));
-        // yay, then its list straight away.
+        QCOMPARE(window.lastQuestion(), QString("Which AUR helper should the App Store install?"));
+        QVERIFY(!client.busy());
+        QVERIFY(!log().contains("install-helper"));
+        // Lily Hewitt, 2026-11-12: people choose paru or yay. paru, then its list straight away.
+        window.setTestChoices({"paru"});
+        window.m_primary->click();
         QTRY_VERIFY(log().contains("refresh-aur"));
         QTRY_COMPARE(window.m_list->model()->rowCount(), 1);
-        QVERIFY(log().indexOf("install-yay") < log().indexOf("refresh-aur"));
+        QVERIFY(log().indexOf("install-helper paru") < log().indexOf("refresh-aur"));
+        QTRY_COMPARE(window.m_model->catalog().aurHelper, QString("paru"));
+        QVERIFY(window.m_helperActions.value("paru")->isChecked());
+        QCOMPARE(window.m_helperActions.value("yay")->text(), QString("Install yay…"));
 
         QVERIFY(choose(window, "aurthing"));
         QVERIFY(window.m_facts->text().contains("AUR"));
@@ -269,11 +278,53 @@ class AppStoreTests final : public QObject
         snap(&window, "5-aur-installed");
     }
 
+    // Software ▸ AUR Helper: the one in use checked; another installed one is switched to at once,
+    // one that isn't installed is offered (Lily Hewitt, 2026-11-12: let people choose paru or yay).
+    void theAurHelperMenuSwitchesAndInstallsHelpers()
+    {
+        write(path("catalog.json"),
+              fixture("catalog.json").replace(R"("aurHelper": "", "aurHelpers": [], "aurUpdated": "")",
+                                              R"("aurHelper": "yay", "aurHelpers": ["yay"], "aurUpdated": "2026-11-12T13:39:05Z")"));
+        PackageClient client(path("platinum-packages"));
+        AppStoreWindow window(&client);
+        window.show();
+        QTRY_VERIFY(window.m_count->text().contains("applications"));
+        auto *yay = window.m_helperActions.value("yay"), *paru = window.m_helperActions.value("paru");
+        QVERIFY(window.m_helperMenu->isEnabled());
+        QVERIFY(yay->isChecked());
+        QCOMPARE(paru->text(), QString("Install paru…"));
+        QVERIFY(!paru->isChecked());
+        // Choosing yay again changes nothing and leaves it checked.
+        yay->trigger();
+        QVERIFY(!client.busy());
+        QVERIFY(yay->isChecked());
+        // paru isn't installed: asked first; declined, nothing happens.
+        window.setTestAnswers({false});
+        paru->trigger();
+        QCOMPARE(window.lastQuestion(), QString("Install paru?"));
+        QVERIFY(!log().contains("install-helper"));
+        window.setTestAnswers({true});
+        paru->trigger();
+        QTRY_VERIFY(log().contains("install-helper paru"));
+        QTRY_VERIFY(!client.busy() && paru->isChecked());
+        QVERIFY(!yay->isChecked());
+        QCOMPARE(paru->text(), QString("paru"));
+        QCOMPARE(yay->text(), QString("yay"));
+        QVERIFY(!log().contains("refresh-aur")); // The AUR list is already here from yay.
+        // Both installed: back to yay without a question.
+        window.setTestAnswers({});
+        yay->trigger();
+        QTRY_VERIFY(log().contains("use-helper yay"));
+        QTRY_VERIFY(!client.busy() && yay->isChecked());
+        QVERIFY(!paru->isChecked());
+    }
+
     void searchesThatFindNothingLeadToTheAur()
     {
         // Lily Hewitt, 2026-11-12: she downloaded the AUR list every time she looked for software,
         // because a search only looks in the list showing and never in the AUR's.
-        write(path("catalog.json"), fixture("catalog.json").replace(R"("yay": false)", R"("yay": true)"));
+        write(path("catalog.json"), fixture("catalog.json").replace(R"("aurHelper": "", "aurHelpers": [])",
+                                                                    R"("aurHelper": "yay", "aurHelpers": ["yay"])"));
         PackageClient client(path("platinum-packages"));
         AppStoreWindow window(&client);
         window.show();
@@ -396,7 +447,7 @@ class AppStoreTests final : public QObject
         QVERIFY(window.m_list->model()->rowCount() > 10000);
         snap(&window, "real-packages");
         // With yay and a downloaded AUR list, the AUR packages are listed without downloading again.
-        if (window.m_model->catalog().yay && !window.m_model->catalog().aurUpdated.isEmpty())
+        if (window.m_model->catalog().aur() && !window.m_model->catalog().aurUpdated.isEmpty())
         {
             show(window, "AUR Packages");
             QVERIFY(window.m_list->model()->rowCount() > 1000);

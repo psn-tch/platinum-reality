@@ -2,6 +2,8 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QClipboard>
+#include <QDrag>
+#include <QUrl>
 #include <QDBusConnection>
 #include <QMainWindow>
 #include <QKeyEvent>
@@ -47,6 +49,40 @@ class ProbeText final : public QPlainTextEdit
         last = event->position().toPoint();
         QPlainTextEdit::mousePressEvent(event);
     }
+    // --tab-drag: a press and a move drag a browser tab, offering the types Firefox's tab drags do.
+    // Let go over nothing, the tab "detaches" into a window of its own, as Firefox's does.
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        if (!qApp->arguments().contains("--tab-drag") || !(event->buttons() & Qt::LeftButton) ||
+            (event->position().toPoint() - last).manhattanLength() < 12 || dragging)
+        {
+            QPlainTextEdit::mouseMoveEvent(event);
+            return;
+        }
+        dragging = true;
+        auto *data = new QMimeData;
+        data->setData("application/x-moz-tabbrowser-tab", "tab");
+        data->setData("text/x-moz-url", "https://example.org/\nExample");
+        data->setUrls({QUrl("https://example.org/")});
+        auto *drag = new QDrag(this);
+        drag->setMimeData(data);
+        dragResult = int(drag->exec(Qt::CopyAction | Qt::MoveAction | Qt::LinkAction));
+        dragging = false;
+        if (dragResult == int(Qt::IgnoreAction))
+        {
+            auto *detached = new QMainWindow;
+            detached->setAttribute(Qt::WA_DeleteOnClose);
+            detached->setWindowTitle("Detached Tab");
+            detached->resize(320, 200);
+            detached->show();
+        }
+    }
+
+  public:
+    int dragResult = -1;
+
+  private:
+    bool dragging = false;
 };
 class NativeProbe final : public QMainWindow
 {
@@ -124,6 +160,14 @@ class NativeProbe final : public QMainWindow
         QApplication::clipboard()->setMimeData(data);
     }
     void ClearClipboard() { QApplication::clipboard()->clear(); }
+    // As a password manager copies (KeePassXC): marked secret, so no history keeps it.
+    void SetSecretClipboard(QString value)
+    {
+        auto *data = new QMimeData;
+        data->setText(value);
+        data->setData("x-kde-passwordManagerHint", "secret");
+        QApplication::clipboard()->setMimeData(data);
+    }
     // The primary selection: what middle-click pastes.
     void SetSelection(QString value) { QApplication::clipboard()->setText(value, QClipboard::Selection); }
     QString Selection() const { return QApplication::clipboard()->text(QClipboard::Selection); }
@@ -133,6 +177,8 @@ class NativeProbe final : public QMainWindow
     void RequestActivateWithToken(QString token) { qputenv("XDG_ACTIVATION_TOKEN", token.toLatin1()); activateWindow(); }
     void Beep() { QApplication::beep(); }
     QString Clipboard() const { return QApplication::clipboard()->text(); }
+    // --tab-drag: the last drag's ending (Qt::DropAction; 0 = let go over nothing), -1 before one.
+    int LastDragResult() const { return text->dragResult; }
     QStringList Arguments() const { return qApp->arguments().mid(1); }
     int Counter() const
     {

@@ -11,7 +11,10 @@
 #include "power_control.hpp"
 #include "removable_media.hpp"
 #include "fingerprints.hpp"
+#include "camera_switch.hpp"
+#include "system_sounds.hpp"
 #include "handheld.hpp"
+#include <QElapsedTimer>
 #include <QAbstractListModel>
 #include <QPointer>
 #include <QProcess>
@@ -201,6 +204,7 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(QVariantList applications READ applications NOTIFY contextChanged)
     // Workspaces, as in Sway/i3 (Lily Hewitt, 2026-11-12): the one showing on the current screen.
     Q_PROPERTY(int shownWorkspace READ shownWorkspace NOTIFY contextChanged)
+    Q_PROPERTY(bool restartDesktopAvailable READ restartDesktopAvailable CONSTANT)
     // Each screen's connector name and the workspace it shows, for the desktop's own windows.
     Q_PROPERTY(QVariantMap screenWorkspaces READ screenWorkspaces NOTIFY contextChanged)
     Q_PROPERTY(QString workspace READ workspace CONSTANT)
@@ -260,6 +264,10 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(QObject *handheld READ handheld CONSTANT)
     // fprintd and fingerprint login (docs/fingerprints.md); host fprintd only in a real session.
     Q_PROPERTY(QObject *fingerprints READ fingerprints CONSTANT)
+    // The Control Strip's Camera switch (docs/camera-switch.md).
+    Q_PROPERTY(QObject *camera READ camera CONSTANT)
+    // Sound ▸ Alert Sounds ▸ Mac sounds only (docs/alert-sounds.md).
+    Q_PROPERTY(QObject *systemSounds READ systemSounds CONSTANT)
     // Special ▸ Sleep, Restart and Shut Down: only in the whole session (power_control.hpp).
     Q_PROPERTY(bool powerAvailable READ powerAvailable CONSTANT)
     // Alert sounds (docs/alert-sounds.md); silent outside a real session.
@@ -355,6 +363,8 @@ class NativeManager final : public QAbstractListModel
     QObject *removableMedia() const { return m_removableMedia; }
     QObject *handheld() const { return m_handheld; }
     QObject *fingerprints() const { return m_fingerprints; }
+    QObject *camera() const { return m_camera; }
+    QObject *systemSounds() const { return m_systemSounds; }
     QObject *alertSounds() const { return m_alertSounds; }
     QObject *interfaceSounds() const { return m_interfaceSounds; }
     QObject *startupSound() const { return m_startupSound; }
@@ -381,6 +391,9 @@ class NativeManager final : public QAbstractListModel
     }
     void setMenuEndpoint(QWaylandSurface *, QString service, QString path);
     Q_INVOKABLE void activate(qulonglong id, bool expand = false);
+    // The keyboard back to whatever is in front: the front application window, else the desktop
+    // (after a desktop-owned window such as the Clipboard closes).
+    Q_INVOKABLE void refocus();
     Q_INVOKABLE void contextClickWindow(qulonglong id, QPointF scenePoint);
     Q_INVOKABLE void activateApplication(qulonglong id);
     Q_INVOKABLE void shade(qulonglong id);
@@ -440,11 +453,26 @@ class NativeManager final : public QAbstractListModel
     Q_INVOKABLE void showFinder();
     Q_INVOKABLE void launchTerminal();
     Q_INVOKABLE void launchPuzzle();
+    Q_INVOKABLE void launchSnapshot();
     Q_INVOKABLE void launchAppStore();
     Q_INVOKABLE void launchTrash();
     // A trusted .desktop launcher on the desktop (the user's own and executable).
     void launchDesktopFile(const QString &path);
     Q_INVOKABLE void quitSession();
+    // Restart Desktop (Lily Hewitt, 2026-11-12): an update takes effect without Log Out. The
+    // applications are asked to close as at Log Out; the desktop then exits with
+    // RestartDesktopExit, the session supervisor starts a new one without Log In, and it reopens
+    // the applications (and `shellWindows`, the desktop's own open windows by action name).
+    Q_INVOKABLE void restartDesktop(const QStringList &shellWindows = {});
+    static constexpr int RestartDesktopExit = 75;
+    // Whether the session supervisor starts a new desktop (an older one, still running from before
+    // the update, would end the session): it says so in PLATINUM_DESKTOP_RESTART.
+    static bool restartDesktopAvailable();
+    // Called once the new desktop is up: reopens what restartDesktop() wrote down.
+    void reopenAfterRestart();
+    // After an update the App Store, a program of its own, closes and opens on the new version,
+    // unless it is working (it refuses to close then, and is new the next time it opens).
+    void reopenUpdatedPrograms();
     // Restart and Shut Down end the session as Log Out does, then ask logind.
     Q_INVOKABLE void sleepComputer();
     Q_INVOKABLE void lockScreen();
@@ -520,6 +548,11 @@ class NativeManager final : public QAbstractListModel
         return m_state;
     }
   signals:
+    // The desktop's own windows to open again after Restart Desktop, by action name.
+    void reopenShellWindows(const QStringList &actions);
+    // Log Out, or Restart Desktop (RestartDesktopExit) once the applications have closed: the
+    // program ends with this status (main.cpp).
+    void sessionEnded(int exitCode);
     void hostScaleChanged();
     void displayLayoutChanged();
     void menuBarHeightChanged();
@@ -568,6 +601,10 @@ class NativeManager final : public QAbstractListModel
     void queueClientFlush();
     void startDropReceiver();
     bool routeNativeDrag(QPointF position, Qt::KeyboardModifiers modifiers);
+    // A browser tab being dragged out of its window: the desktop is no target for it.
+    static bool browserTabDrag(const QStringList &types);
+    // A tab let go over nothing: its browser's next new window opens there (on that display).
+    void rememberTabDetach(QPointF point);
     // A drag released (mouse button or finger lifted) at position; desktop: over the desktop.
     void beginNativeDrop(QPoint position, bool desktop);
     ManagedWindow *desktopDropWindowAt(QPointF point, QPointF *local = nullptr) const;
@@ -584,6 +621,8 @@ class NativeManager final : public QAbstractListModel
     RemovableMedia *m_removableMedia = nullptr;
     HandheldDaemon *m_handheld = nullptr;
     FingerprintService *m_fingerprints = nullptr;
+    CameraSwitch *m_camera = nullptr;
+    SystemSounds *m_systemSounds = nullptr;
     std::optional<PowerControl::Action> m_pendingPower;
     void endSession();
     bool m_normalApplicationSettings = false;
@@ -655,7 +694,7 @@ class NativeManager final : public QAbstractListModel
     bool m_documentsQueued = false;
     frankenstein::policy::ApplicationId m_desktopApplication;
     qulonglong m_nextApp = 0, m_nextWindow = 0, m_nextTracking = 0;
-    bool m_quitting = false, m_allowExit = false;
+    bool m_quitting = false, m_allowExit = false, m_restartingDesktop = false;
     bool m_flushQueued = false;
     bool m_synchronizationDeferred = false;
     QSet<qulonglong> m_shellModals;
@@ -666,6 +705,7 @@ class NativeManager final : public QAbstractListModel
                                        "/usr/bin/lxqt-policykit-agent",
                                        "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1"};
     int m_authenticationLayer = 0;
+    bool m_passwordBoxShowing = false;
     QSet<quint64> m_authenticationApplications;
     qulonglong m_authenticationApplication = 0;
     bool authenticationAgentClient(qint64 pid) const;
@@ -688,6 +728,14 @@ class NativeManager final : public QAbstractListModel
     int m_dropTraceMessages = 0;
     bool m_retiringDropReceiver = false;
     QPointer<QWaylandSurface> m_dropSurface;
+    // The drag in progress has a client or the desktop under it.
+    bool m_nativeDragHasTarget = false;
+    struct TabDetach
+    {
+        qint64 pid = 0;
+        QPoint at;
+        QElapsedTimer since;
+    } m_tabDetach;
     QPointer<QWaylandSurface> m_dragOrigin;
     QPoint m_nativeDragPosition, m_pendingDropPosition;
     bool m_nativeDragging = false, m_nativeDragCopy = false;

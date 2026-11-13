@@ -71,6 +71,31 @@ Platinum Reality' own Qt applications had Meta shortcuts.
   - A newer application selection discards an older deferred shell copy. Translated
     Command keys retire when their item loses focus, even if key-up reaches another window.
 
+## Recent Clippings
+
+Lily Hewitt, 2026-11-12: "can the clipboard have a history? it would be rad to be able to copy multiple
+things and be able to switch between them". Mac OS 9 kept one clipping, so this is Platinum Reality's own.
+
+- **What is kept:** each new copy, text or picture, from any application, the desktop or a clipboard
+  tool. The newest 12 distinct clippings are kept, within 96 MB in all. A clipping copied again moves
+  to the top instead of repeating; text copies compare by their text, pictures by their image data.
+  A password manager's copies (marked `x-kde-passwordManagerHint: secret`, as KeePassXC and KDE do)
+  are never kept. Clippings live in the desktop's memory only: nothing is written to disk, and they
+  are gone after logging out.
+- **Switching:** choose one in the **Clipboard** Control Strip module (a clipboard icon), or click it in
+  the Clipboard window's **Recent Clippings** list (Edit ▸ Show Clipboard). It becomes the clipboard
+  again, offered like a clipboard tool's copy (`Clipboard::restore` → `setSelectionFromTool`), so the
+  next paste anywhere gets it and it moves to the top. The clipboard's own clipping is checked in the
+  menu and highlighted in the list. When an application clears the clipboard, none is checked.
+- **Clear Clipboard History** (the strip menu) forgets every clipping but the clipboard's own.
+- **The Clipboard window** keeps 9.2.2's description strip and contents pane on the right; the list is
+  on its left.
+
+Found on the way: closing a desktop window (the Clipboard, Help, Get Info) gave the keyboard to the
+desktop even with an application in front, so the next Command-V pasted on the desktop, and clicking
+the application didn't take it back (already active, nothing changed). Closing now gives the keyboard to
+what is in front (`NativeManager::refocus`), and a click on an already active window always does.
+
 ## Clipboard tools (wl-copy, wl-paste)
 
 `src/desktop/data_control.*` implements `ext_data_control_v1`, which wl-clipboard 2.3 uses, as do
@@ -98,6 +123,12 @@ protocol is offered.
 - It is not kept after the selecting application quits, as on other desktops.
 
 ## Tests
+
+- `recentClippingsSwitchWhatThePasteGets` (native): the history's order, repeats and secret copies;
+  restoring from the strip menu (pasted in the application in front) and from the Clipboard window
+  (pasted in another application after the window closes). Mutation-checked: without the refocus on
+  close, the second paste is empty. Note for these tests: never make a blocking D-Bus call into a probe
+  that may be pasting (use `asyncCall`): it waits on the compositor, which is the test process.
 
 - `desktop-tests commandChordsBecomeTheApplicationsOwnShortcuts`: the translation table.
 - `native-tests copyAndPasteTravelBetweenRealBrowsers`: real Chromium and Firefox, both

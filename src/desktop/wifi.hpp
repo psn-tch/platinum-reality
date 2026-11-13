@@ -76,6 +76,12 @@ class WifiService final : public QObject
     // interface that is up (loopback left out), {name, kind ("Wi-Fi", "Ethernet", "Other"),
     // hardware, addresses: [{address, version}]}. Read from the kernel, not from iwd.
     Q_INVOKABLE QVariantList connections() const;
+    // TCP/IP's name servers and search domains: {servers, domains}. With systemd-resolved, its
+    // upstream servers, not its local stub. The files are injectable for tests.
+    Q_INVOKABLE QVariantMap nameServers() const;
+    // The default route's router per interface, from the kernel's IPv4 routing table.
+    static QHash<QString, QString> routers(const QString &routeFile = "/proc/net/route");
+    static QVariantMap readResolvConf(const QStringList &files);
 
   signals:
     void changed();

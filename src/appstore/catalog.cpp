@@ -10,7 +10,9 @@
 Catalog Catalog::fromJson(const QJsonObject &document)
 {
     Catalog catalog;
-    catalog.yay = document.value("yay").toBool();
+    catalog.aurHelper = document.value("aurHelper").toString();
+    for (const auto &name : document.value("aurHelpers").toArray())
+        catalog.aurHelpers.append(name.toString());
     catalog.aurUpdated = document.value("aurUpdated").toString();
     const auto packages = document.value("packages").toArray();
     catalog.packages.reserve(packages.size());

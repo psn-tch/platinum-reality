@@ -203,7 +203,7 @@ AppStoreWindow::AppStoreWindow(PackageClient *client, QWidget *parent)
         if (!p && m_offerAur)
             m_model->catalog().aurUpdated.isEmpty() ? refreshAur() : showAurPackages();
         else if (!p && m_model->view() == CatalogModel::AurPackages)
-            m_model->catalog().yay ? refreshAur() : installYay();
+            m_model->catalog().aur() ? refreshAur() : installHelper();
         else if (!p && m_model->view() == CatalogModel::Applications)
             installAppCatalog();
         else if (p && p->isInstalled() && !p->update.isEmpty())
@@ -267,7 +267,15 @@ void AppStoreWindow::buildMenus()
     software->addSeparator();
     m_updateAllAction = software->addAction("Update All Software…", this, &AppStoreWindow::updateAll);
     software->addSeparator();
-    m_yayAction = software->addAction("Install yay…", this, &AppStoreWindow::installYay);
+    m_helperMenu = software->addMenu("AUR Helper");
+    for (const auto &name : {QStringLiteral("yay"), QStringLiteral("paru")})
+    {
+        auto *action = m_helperMenu->addAction(name, this, [this, name] {
+            m_model->catalog().aurHelpers.contains(name) ? useHelper(name) : installHelper(name);
+        });
+        action->setCheckable(true);
+        m_helperActions.insert(name, action);
+    }
     m_aurAction = software->addAction("Download the AUR List", this, &AppStoreWindow::refreshAur);
     software->addSeparator();
     m_activityAction = software->addAction("Show Activity", this, &AppStoreWindow::showActivity);
@@ -366,17 +374,17 @@ void AppStoreWindow::describe()
         m_extra->hide();
         m_primary->hide();
         m_offerAur = false;
-        const bool nothingFound = m_loaded && m_model->view() != CatalogModel::AurPackages && catalog.yay &&
+        const bool nothingFound = m_loaded && m_model->view() != CatalogModel::AurPackages && catalog.aur() &&
                                   !m_filter->words().isEmpty() && m_filter->rowCount() == 0;
         const int aurMatches = nothingFound ? m_model->aurMatches(m_filter->words()) : 0;
-        if (m_loaded && m_model->view() == CatalogModel::AurPackages && !catalog.yay)
+        if (m_loaded && m_model->view() == CatalogModel::AurPackages && !catalog.aur())
         {
             m_title->setText("AUR Packages");
             m_summary->setText("The Arch User Repository has thousands more programs. The App Store installs "
-                               "them with yay, which isn't installed yet.");
+                               "them with an AUR helper, yay or paru. Neither is installed yet.");
             m_about->setPlainText("Anyone can upload to the AUR, and nobody checks what is uploaded. Install "
                                   "only software you trust.");
-            m_primary->setText("Install yay…");
+            m_primary->setText("Install yay or paru…");
             m_primary->show();
         }
         else if (m_loaded && m_model->view() == CatalogModel::AurPackages && m_model->rowCount() == 0)
@@ -474,8 +482,17 @@ void AppStoreWindow::updateActions()
     m_removeAction->setEnabled(idle && p && p->isInstalled());
     m_openAction->setEnabled(idle && m_open->isVisible());
     m_updateAllAction->setEnabled(idle && m_loaded);
-    m_yayAction->setEnabled(idle && m_loaded && !m_model->catalog().yay);
-    m_aurAction->setEnabled(idle && m_loaded && m_model->catalog().yay);
+    const auto &catalog = m_model->catalog();
+    m_helperMenu->setEnabled(idle && m_loaded);
+    for (auto it = m_helperActions.cbegin(); it != m_helperActions.cend(); ++it)
+    {
+        // "yay" when it is installed (checked while in use), "Install paru…" when it isn't.
+        const bool installed = catalog.aurHelpers.contains(it.key());
+        it.value()->setText(installed ? it.key() : "Install " + it.key() + "…");
+        it.value()->setCheckable(installed);
+        it.value()->setChecked(it.key() == catalog.aurHelper);
+    }
+    m_aurAction->setEnabled(idle && m_loaded && m_model->catalog().aur());
     m_aurAction->setText(m_model->catalog().aurUpdated.isEmpty() ? "Download the AUR List" : "Update the AUR List");
 }
 
@@ -497,6 +514,26 @@ bool AppStoreWindow::ask(const QString &text, const QString &detail, const QStri
     keepReturnOnTheDefault(box);
     box.exec();
     return box.clickedButton() == yes;
+}
+
+QString AppStoreWindow::choose(const QString &text, const QString &detail, const QStringList &actions)
+{
+    m_lastQuestion = text;
+    if (!m_testChoices.isEmpty())
+        return m_testChoices.takeFirst();
+    QMessageBox box(QMessageBox::Question, "App Store", text, QMessageBox::NoButton, this);
+    box.setTextFormat(Qt::PlainText);
+    box.setInformativeText(detail);
+    auto *cancel = box.addButton("Cancel", QMessageBox::RejectRole);
+    QHash<QAbstractButton *, QString> buttons;
+    QAbstractButton *last = nullptr;
+    for (const auto &action : actions)
+        buttons.insert(last = box.addButton(action, QMessageBox::AcceptRole), action);
+    box.setDefaultButton(qobject_cast<QPushButton *>(last));
+    box.setEscapeButton(cancel);
+    keepReturnOnTheDefault(box);
+    box.exec();
+    return buttons.value(box.clickedButton());
 }
 
 void AppStoreWindow::alert(const QString &text, const QString &detail)
@@ -603,16 +640,38 @@ void AppStoreWindow::updateAll()
     start({"update-all"}, "Updating all software");
 }
 
-void AppStoreWindow::installYay()
+void AppStoreWindow::installHelper(const QString &name)
 {
-    if (m_client->busy() || m_model->catalog().yay)
+    if (m_client->busy() || (!name.isEmpty() && m_model->catalog().aurHelpers.contains(name)))
         return;
-    if (!ask("Install yay?",
-             "yay installs software from the AUR, the Arch User Repository. The App Store installs git and "
-             "base-devel, then builds yay from the AUR.",
-             "Install", false))
+    QString helper = name;
+    if (helper.isEmpty())
+    {
+        // Both do the same job here; which one is the person's taste.
+        helper = choose("Which AUR helper should the App Store install?",
+                        "yay and paru both install software from the AUR, the Arch User Repository, and the "
+                        "App Store works the same with either. It installs git and base-devel, then builds "
+                        "the one you choose from the AUR. You can switch later in Software ▸ AUR Helper.",
+                        {"paru", "yay"});
+        if (helper.isEmpty())
+            return;
+    }
+    else if (!ask("Install " + helper + "?",
+                  helper + " installs software from the AUR, the Arch User Repository. The App Store installs git "
+                  "and base-devel, then builds " + helper + " from the AUR and uses it from then on.",
+                  "Install", false))
         return;
-    start({"install-yay"}, "Installing yay");
+    start({"install-helper", helper}, "Installing " + helper);
+}
+
+void AppStoreWindow::useHelper(const QString &name)
+{
+    if (m_client->busy() || name == m_model->catalog().aurHelper)
+    {
+        updateActions(); // Choosing the checked one again leaves it checked.
+        return;
+    }
+    start({"use-helper", name}, "Switching to " + name);
 }
 
 void AppStoreWindow::showAurPackages()
@@ -628,7 +687,7 @@ void AppStoreWindow::showAurPackages()
 
 void AppStoreWindow::refreshAur()
 {
-    if (m_client->busy() || !m_model->catalog().yay)
+    if (m_client->busy() || !m_model->catalog().aur())
         return;
     start({"refresh-aur"}, "Downloading the AUR list");
 }
@@ -657,8 +716,9 @@ void AppStoreWindow::changeFinished(bool ok, const QString &error, bool cancelle
     updateActions();
     if (ok)
     {
-        // yay is new: its list of AUR packages comes next, as part of the same request.
-        if (doing == "Installing yay")
+        // The first AUR helper is new: its list of AUR packages comes next, as part of the same
+        // request. (Another helper uses the list already here.)
+        if ((doing == "Installing yay" || doing == "Installing paru") && m_model->catalog().aurUpdated.isEmpty())
         {
             m_client->loadCatalog();
             QTimer::singleShot(0, this, [this] { start({"refresh-aur"}, "Downloading the AUR list"); });

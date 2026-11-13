@@ -79,6 +79,30 @@ class WifiTests final : public QObject
     };
 
   private slots:
+    // TCP/IP (the Network panel, as 9.2.2's): the router from the kernel's routing table, least
+    // significant byte first, and systemd-resolved's real name servers rather than its stub.
+    void tcpIpReadsTheRouterAndNameServers()
+    {
+        QTemporaryDir root;
+        const auto write = [&](const QString &name, const QByteArray &text) {
+            QFile f(root.filePath(name)); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(text);
+        };
+        write("route", "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
+                       "wlan0\t00000000\t01160B0A\t0003\t0\t0\t304\t00000000\t0\t0\t0\n"
+                       "wlan0\t00160B0A\t00000000\t0001\t0\t0\t304\t00FFFFFF\t0\t0\t0\n"
+                       "enp3s0\t0000A8C0\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0\n");
+        const auto routers = WifiService::routers(root.filePath("route"));
+        QCOMPARE(routers.value("wlan0"), QString("10.11.22.1"));
+        QVERIFY(!routers.contains("enp3s0")); // No default route there.
+        QVERIFY(WifiService::routers(root.filePath("missing")).isEmpty());
+        write("stub", "nameserver 127.0.0.53\nsearch home.example\n");
+        write("resolved", "# managed\nnameserver 8.8.8.8\nnameserver 1.1.1.1\nnameserver 8.8.8.8\nsearch home.example office.example\n");
+        auto dns = WifiService::readResolvConf({root.filePath("resolved"), root.filePath("stub")});
+        QCOMPARE(dns.value("servers").toStringList(), (QStringList{"8.8.8.8", "1.1.1.1"}));
+        QCOMPARE(dns.value("domains").toStringList(), (QStringList{"home.example", "office.example"}));
+        dns = WifiService::readResolvConf({root.filePath("no-resolved"), root.filePath("stub")});
+        QCOMPARE(dns.value("servers").toStringList(), (QStringList{"127.0.0.53"}));
+    }
     void initTestCase()
     {
         QGuiApplication::setFont(classicInterfaceFont());

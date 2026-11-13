@@ -8,6 +8,15 @@ and the shared Platinum controls, without original Apple executable or artwork
 files. It recalls the classic Puzzle desk accessory; exact IIsi-era geometry and
 version-specific rules have not been historically authenticated.
 
+**The picture** (Lily Hewitt, 2026-11-12: on her grandma's Mac IIsi, System 7's Puzzle showed the Apple
+logo, not numbers): when Asset Importer has taken the rainbow Apple from your own Mac OS 9 System file
+(`<assets>/icons/apple-menu.png`), the tiles are pieces of it. The Apple's visible part is enlarged by a
+whole number, so its pixels stay square, and centred on white. **Edit ▸ Clear** switches between the
+picture and numbers, as in System 7. Undo, Cut, Copy and Paste are there, dimmed, as in a desk
+accessory. Without an imported Apple the tiles are numbered and Clear is dimmed. The picture is
+never part of Platinum Reality; it is read from your assets when Puzzle opens. Asset Importer only
+began saving the Apple on 2026-11-11, so assets imported before then need importing again.
+
 **Command-Shift-3** puts a picture of the whole desktop on the clipboard.
 **Command-Shift-4** or **Command-Shift-P** shows a crosshair: drag across an
 area and a picture of just that goes on the clipboard (Escape cancels). The

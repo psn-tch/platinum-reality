@@ -1,0 +1,43 @@
+#!/usr/bin/python3 -I
+"""Mac sounds only (docs/alert-sounds.md): the Arch and KDE desktop sounds, removed or back. JSON lines out.
+Usage: platinum-system-sounds status
+       platinum-system-sounds remove     (through pkexec)
+       platinum-system-sounds restore    (through pkexec; downloads the sound packages again)"""
+import json
+import os
+import sys
+
+sys.path.insert(0, '/usr/lib/platinum-reality')
+import platinum_system_sounds  # noqa: E402
+
+
+def report(message):
+    print(json.dumps(message), flush=True)
+
+
+def main(arguments):
+    os.umask(0o022)
+    if arguments == ['status']:
+        report(platinum_system_sounds.status())
+        return 0
+    if arguments not in (['remove'], ['restore']):
+        report({'error': __doc__.split('\n', 1)[1]})
+        return 2
+    if os.geteuid() != 0:
+        report({'error': 'Changing the system sounds needs an administrator.'})
+        return 1
+    try:
+        if arguments == ['remove']:
+            platinum_system_sounds.remove()
+        else:
+            report({'progress': 'Downloading the desktop sounds…'})
+            platinum_system_sounds.restore()
+    except (platinum_system_sounds.SoundsError, OSError) as problem:
+        report({'error': str(problem), **platinum_system_sounds.status()})
+        return 1
+    report({'done': True, **platinum_system_sounds.status()})
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

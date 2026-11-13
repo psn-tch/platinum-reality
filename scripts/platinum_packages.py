@@ -1,13 +1,14 @@
 """The App Store's package catalog and installs (docs/app-store.md).
 
 Shared by the App Store's helpers and their tests:
-- platinum-packages (runs as the user): reads the catalog, refreshes the AUR list, installs yay and
-  AUR packages with yay, and asks platinum-packages-admin (through pkexec) for everything else.
+- platinum-packages (runs as the user): reads the catalog, refreshes the AUR list, installs an AUR
+  helper (yay or paru, the person's choice) and AUR packages with it, and asks
+  platinum-packages-admin (through pkexec) for everything else.
 - platinum-packages-admin (root, through pkexec): installs, removes and updates official packages
-  with pacman, and installs the yay package built by the user helper.
+  with pacman, and installs the AUR helper's package built by the user helper.
 Everything is read from files already on the computer (pacman's package lists and the AppStream
 catalog), so nothing is downloaded until something is installed. The AUR list is downloaded only
-when yay is installed and the person asks for it.
+when an AUR helper is installed and the person asks for it.
 """
 from datetime import datetime, timezone
 import gzip
@@ -27,7 +28,9 @@ PACMAN_DB = 'var/lib/pacman'
 APPSTREAM = ['usr/share/swcatalog', 'usr/share/app-info']
 AUR_URL = 'https://aur.archlinux.org/packages-meta-v1.json.gz'
 AUR_PAGE = 'https://aur.archlinux.org/packages/{}'
-YAY_GIT = 'https://aur.archlinux.org/yay-bin.git'
+# The AUR helpers the App Store can install and use (Lily Hewitt, 2026-11-12: let people choose paru
+# or yay, "just the nice thing to do"), in the order used when the person hasn't chosen.
+AUR_HELPERS = {'yay': 'https://aur.archlinux.org/yay-bin.git', 'paru': 'https://aur.archlinux.org/paru-bin.git'}
 AUR_MAX = 256 * 1024 * 1024
 USER_AGENT = 'PlatinumReality-AppStore/1'
 NAME = re.compile(r'^[a-z0-9@_+][a-z0-9@._+-]*$')
@@ -241,15 +244,49 @@ def upgradable(pacman='pacman'):
     return updates
 
 
-def catalog(root=Path('/'), aur_folder=None, pacman='pacman', yay=None):
+def config_folder():
+    base = os.environ.get('XDG_CONFIG_HOME') or str(Path.home() / '.config')
+    return Path(base) / 'platinum-reality'
+
+
+def installed_helpers(root=Path('/'), programs=None):
+    """The AUR helpers installed, as programs (whichever package brought them: yay, yay-bin, yay-git)."""
+    programs = programs or {}
+    return [name for name in AUR_HELPERS if Path(programs.get(name) or Path(root) / 'usr/bin' / name).is_file()]
+
+
+def chosen_helper(config=None):
+    """The helper the person chose, or '' when they haven't."""
+    try:
+        name = (Path(config or config_folder()) / 'aur-helper').read_text().strip()
+    except OSError:
+        return ''
+    return name if name in AUR_HELPERS else ''
+
+
+def choose_helper(name, config=None):
+    if name not in AUR_HELPERS:
+        raise PackageError(f'“{name}” is not an AUR helper the App Store knows.')
+    folder = Path(config or config_folder())
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'aur-helper').write_text(name + '\n')
+
+
+def aur_helper(root=Path('/'), config=None, programs=None):
+    """The helper in use: the chosen one if it is installed, else the first one installed; '' for none."""
+    installed = installed_helpers(root, programs)
+    chosen = chosen_helper(config)
+    return chosen if chosen in installed else (installed[0] if installed else '')
+
+
+def catalog(root=Path('/'), aur_folder=None, pacman='pacman', config=None, programs=None):
     """Everything the App Store lists: packages (official, AUR and installed-only) and applications."""
     sync = read_sync(root)
     local = read_local(root)
     updates = upgradable(pacman) if Path(root) == Path('/') else {}
     packages = dict(sync)
-    # The program, whichever package brought it (yay, yay-bin, yay-git).
-    yay_installed = Path(yay or Path(root) / 'usr/bin/yay').is_file()
-    aur = read_aur(aur_folder) if yay_installed else []
+    helper = aur_helper(root, config, programs)
+    aur = read_aur(aur_folder) if helper else []
     for entry in aur:
         packages.setdefault(entry['name'], entry)
     for name, mine in local.items():
@@ -268,7 +305,8 @@ def catalog(root=Path('/'), aur_folder=None, pacman='pacman', yay=None):
             entry['size'] = mine['size']
     apps = [app for app in read_appstream(root) if app['package'] in packages]
     return {'packages': sorted(packages.values(), key=lambda p: p['name']), 'apps': apps,
-            'yay': yay_installed, 'aurUpdated': aur_updated(aur_folder) if yay_installed else ''}
+            'aurHelper': helper, 'aurHelpers': installed_helpers(root, programs),
+            'aurUpdated': aur_updated(aur_folder) if helper else ''}
 
 
 # AUR list --------------------------------------------------------------------------------------
@@ -413,45 +451,55 @@ def stream(command, report, env=None, cwd=None):
     return process.wait(), '\n'.join(lines)
 
 
-def install_yay(report, admin, folder=None, git='git', makepkg='makepkg'):
-    """Install yay: git and base-devel (official), then yay-bin built here from the AUR."""
+def install_helper(name, report, admin, folder=None, git='git', makepkg='makepkg', config=None):
+    """Install yay or paru: git and base-devel (official), then its -bin package built here from the
+    AUR. It becomes the helper in use."""
+    if name not in AUR_HELPERS:
+        raise PackageError(f'“{name}” is not an AUR helper the App Store knows.')
+    package = name + '-bin'
     report({'progress': 'Installing git and base-devel…'})
     admin(['install', 'git', 'base-devel'])
     folder = Path(folder or cache_folder())
     folder.mkdir(parents=True, exist_ok=True)
-    work = Path(tempfile.mkdtemp(prefix='yay-', dir=folder))
+    work = Path(tempfile.mkdtemp(prefix=name + '-', dir=folder))
     try:
-        report({'progress': 'Downloading yay from the AUR…'})
-        code, output = stream([git, 'clone', '--depth', '1', YAY_GIT, str(work / 'yay-bin')], report)
+        report({'progress': f'Downloading {name} from the AUR…'})
+        code, output = stream([git, 'clone', '--depth', '1', AUR_HELPERS[name], str(work / package)], report)
         if code != 0:
-            raise PackageError('yay could not be downloaded. Check the network connection.')
-        report({'progress': 'Building yay…'})
-        code, output = stream([makepkg, '--noconfirm', '--force'], report, cwd=work / 'yay-bin')
+            raise PackageError(f'{name} could not be downloaded. Check the network connection.')
+        report({'progress': f'Building {name}…'})
+        code, output = stream([makepkg, '--noconfirm', '--force'], report, cwd=work / package)
         if code != 0:
-            raise PackageError('yay could not be built: ' + (output.splitlines() or ['makepkg failed'])[-1])
-        built = sorted(p for p in (work / 'yay-bin').glob('yay-bin-*.pkg.tar.*') if '-debug-' not in p.name)
+            raise PackageError(f'{name} could not be built: ' + (output.splitlines() or ['makepkg failed'])[-1])
+        built = sorted(p for p in (work / package).glob(package + '-*.pkg.tar.*') if '-debug-' not in p.name)
         if len(built) != 1:
-            raise PackageError('yay was built, but its package could not be found.')
-        report({'progress': 'Installing yay…'})
+            raise PackageError(f'{name} was built, but its package could not be found.')
+        report({'progress': f'Installing {name}…'})
         admin(['install-file', str(built[0])])
     finally:
         shutil.rmtree(work, ignore_errors=True)
+    choose_helper(name, config)
 
 
-def yay_command(names, yay='yay'):
-    """yay, answering its questions itself; it asks for the administrator's password with pkexec."""
+def helper_command(names, helper='yay', program=None):
+    """The helper, answering its own questions; it asks for the administrator's password with pkexec."""
     # aur/<name>: the AUR package itself, never an official one that provides the same name (yay's
     # --aur alone still picks those, as pfetch-rs for pfetch showed).
-    return [yay, '-S', '--needed', '--noconfirm', '--answerclean', 'None', '--answerdiff', 'None',
-            '--answeredit', 'None', '--removemake', '--sudo', 'pkexec', '--color', 'never',
-            *('aur/' + name for name in check_names(names))]
+    targets = ['aur/' + name for name in check_names(names)]
+    if helper == 'paru':
+        return [program or 'paru', '-S', '--needed', '--noconfirm', '--skipreview', '--removemake',
+                '--sudo', 'pkexec', '--color', 'never', *targets]
+    if helper == 'yay':
+        return [program or 'yay', '-S', '--needed', '--noconfirm', '--answerclean', 'None', '--answerdiff', 'None',
+                '--answeredit', 'None', '--removemake', '--sudo', 'pkexec', '--color', 'never', *targets]
+    raise PackageError('No AUR helper is installed. Install yay or paru first.')
 
 
-def install_aur(names, report, yay='yay'):
-    code, output = stream(yay_command(names, yay), report)
+def install_aur(names, report, helper='yay', program=None):
+    code, output = stream(helper_command(names, helper, program), report)
     if code != 0:
-        if 'ERROR: One or more PGP signatures could not be verified' in output:
+        if 'One or more PGP signatures could not be verified' in output:
             raise PackageError('Its source code is signed with a key this computer doesn’t know. '
-                               'In Terminal: yay -S ' + ' '.join(names))
+                               f'In Terminal: {helper} -S ' + ' '.join(names))
         raise PackageError(explain(output) if 'error: ' in output else
-                           'yay stopped with an error: ' + (output.splitlines() or [''])[-1])
+                           f'{helper} stopped with an error: ' + (output.splitlines() or [''])[-1])

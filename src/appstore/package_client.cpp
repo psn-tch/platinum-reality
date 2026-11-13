@@ -13,7 +13,7 @@ PackageClient::PackageClient(QString helper, QObject *parent) : QObject(parent),
     for (auto *process : {&m_catalog, &m_change})
         process->setProcessEnvironment(environment);
     m_catalog.setStandardErrorFile(QProcess::nullDevice());
-    // makepkg and yay write some of their progress to stderr; it is part of the story.
+    // makepkg and the AUR helper write some of their progress to stderr; it is part of the story.
     m_change.setProcessChannelMode(QProcess::MergedChannels);
     connect(&m_catalog, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
         const auto output = m_catalog.readAllStandardOutput();
@@ -95,7 +95,7 @@ void PackageClient::readChange()
         const auto message = QJsonDocument::fromJson(line).object();
         if (message.isEmpty())
         {
-            // Not one of the helper's lines (yay and makepkg talk directly): show it as it is.
+            // Not one of the helper's lines (the AUR helper and makepkg talk directly): show it as it is.
             if (!line.isEmpty())
             {
                 emit output(QString::fromUtf8(line));

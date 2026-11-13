@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- The Sound control panel's "Mac sounds only" (docs/alert-sounds.md) removes the Arch and KDE desktop
+     sounds or downloads them again, through this one helper only. An administrator's password is asked. -->
+<policyconfig>
+  <vendor>Platinum Reality</vendor>
+  <vendor_url>https://github.com/psn-tch/platinum-reality</vendor_url>
+  <action id="org.platinumreality.sounds.manage">
+    <description>Remove or restore the desktop sounds</description>
+    <message>The Sound control panel needs an administrator's password to change the system's sounds.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/platinum-reality/platinum-system-sounds</annotate>
+  </action>
+</policyconfig>

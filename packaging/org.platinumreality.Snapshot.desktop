@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Snapshot
+Comment=Take pictures with the camera
+Exec=/usr/lib/platinum-reality/platinum-snapshot
+Icon=camera-photo
+Categories=AudioVideo;Video;Graphics;Photography;
+Keywords=camera;webcam;photo;picture;selfie;
+StartupWMClass=platinum-snapshot
