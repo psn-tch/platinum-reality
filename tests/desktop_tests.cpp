@@ -19,6 +19,7 @@
 #include "desktop/printer_selector.hpp"
 #include "desktop/camera_switch.hpp"
 #include "desktop/system_sounds.hpp"
+#include "desktop/startup_items.hpp"
 #include "desktop/keychain_service.hpp"
 #include "desktop/sticky_notes.hpp"
 #include "desktop/note_pad.hpp"
@@ -222,6 +223,38 @@ class DesktopTests : public QObject
         icon=visualItem(switcher,"application-switcher-icon-Paint");QVERIFY(icon);
         QTRY_VERIFY(icon->property("useFallback").toBool());
     }
+    // "Steam (2)" (Lily Hewitt, 2026-11-14): an application with no window on the workspace showing
+    // says where its windows wait, in the switcher and the Application menu; others keep their name.
+    void applicationLabelsSayWhichWorkspaceTheirWindowsWaitOn()
+    {
+        QTemporaryDir root;QQuickView view;view.resize(1120,760);
+        NativeManager manager(nullptr,&view,root.path(),root.filePath("profile"),{});
+        view.rootContext()->setContextProperty("manager",&manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status()!=QQuickView::Error);
+        const auto clear=qScopeGuard([&]{view.setSource({});});
+        view.show();QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto label=[&](const QVariantMap &application){
+            QVariant result;
+            QMetaObject::invokeMethod(view.rootObject(),"workspaceLabel",Q_RETURN_ARG(QVariant,result),Q_ARG(QVariant,application));
+            return result.toString();};
+        QCOMPARE(label({{"name","Steam"},{"workspaces",QVariantList{2}},{"onShownWorkspace",false}}),QString("Steam (2)"));
+        QCOMPARE(label({{"name","Steam"},{"workspaces",QVariantList{2,5}},{"onShownWorkspace",false}}),QString("Steam (2, 5)"));
+        QCOMPARE(label({{"name","Steam"},{"workspaces",QVariantList{1,2}},{"onShownWorkspace",true}}),QString("Steam"));
+        QCOMPARE(label({{"name","Steam"},{"workspaces",QVariantList{}},{"onShownWorkspace",false}}),QString("Steam"));
+        QCOMPARE(label({{"name","Finder"}}),QString("Finder"));
+        auto *switcher=visualItem(view.contentItem(),"application-switcher");QVERIFY(switcher);
+        QVERIFY(switcher->setProperty("applications",QVariantList{
+            QVariantMap{{"id",7},{"name","Steam"},{"label","Steam (2)"},{"active",false},{"hidden",false}}}));
+        auto *settings=qobject_cast<AppearanceSettings*>(manager.appearance());QVERIFY(settings);
+        QVERIFY(settings->setSwitcher(true,80,120));QTRY_VERIFY(switcher->isVisible());
+        auto *row=visualItem(switcher,"application-switcher-Steam");QVERIFY(row);
+        bool found=false;
+        for(auto *child:row->childItems())
+            if(child->property("text").toString()=="Steam (2)")found=true;
+        QVERIFY(found);
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath()+"/artifacts/application-switcher-workspace.png"));
+    }
     void menuBarUsesMeasuredHeightAndExplicitKeyboardAccess()
     {
         QTemporaryDir root;QQuickView view;view.resize(1120,760);
@@ -401,6 +434,173 @@ class DesktopTests : public QObject
         QVERIFY(!other.setAppleMenuOption("submenus", 1));
         QVERIFY(!other.setAppleMenuOption("servers", 5));
         QVERIFY(other.setAppleMenuOption("recentApplications", 99));
+    }
+    // Extensions Manager (Lily Hewitt, 2026-11-14): the freedesktop autostart items that apply to
+    // this session, each On or Off in a set; the user's folder overrides the system's by file name.
+    void startupItemsFollowTheAutostartRulesAndSets()
+    {
+        QTemporaryDir root;
+        const auto user = root.filePath("user"), system = root.filePath("system"), profile = root.filePath("profile");
+        QDir().mkpath(user); QDir().mkpath(system);
+        const auto entry = [&](const QString &folder, const QString &file, const QString &body) {
+            QFile f(folder + "/" + file); QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(("[Desktop Entry]\nType=Application\n" + body).toUtf8());
+        };
+        entry(user, "steam.desktop", "Name=Steam\nExec=/usr/bin/true -silent\n");
+        entry(system, "remapper.desktop", "Name=Input Remapper\nExec=/usr/bin/true\nNotShowIn=KDE;\n");
+        entry(system, "plasma.desktop", "Name=Plasma\nExec=/usr/bin/true\nOnlyShowIn=KDE;\n");
+        entry(system, "ours.desktop", "Name=Only Here\nExec=/usr/bin/true\nOnlyShowIn=GNOME;PlatinumReality;\n");
+        entry(system, "gnome-off.desktop", "Name=Turned Off\nExec=/usr/bin/true\nX-GNOME-Autostart-enabled=false\n");
+        entry(system, "missing.desktop", "Name=Missing\nExec=/usr/bin/true\nTryExec=/nonexistent/program\n");
+        entry(system, "applet.desktop", "Name=Applet\nExec=/usr/bin/true\n");
+        entry(user, "applet.desktop", "Name=Applet\nExec=/usr/bin/true\nHidden=true\n"); // The user turned it off.
+        QStringList launched;
+        const auto launcher = [&](const QString &file, const QString &id) { launched << id; return QFileInfo(file).isFile(); };
+        const auto ids = [](StartupItems &items) {
+            QStringList result;
+            for (const auto &item : items.items()) result << item.toMap().value("id").toString();
+            return result;
+        };
+        {
+            StartupItems items(profile, {user, system}, {"PlatinumReality", "Frankenstein"}, QProcessEnvironment::systemEnvironment());
+            // The user's own first, then the system's, each by name.
+            QCOMPARE(ids(items), (QStringList{"steam.desktop", "remapper.desktop", "ours.desktop"}));
+            QCOMPARE(items.items().first().toMap().value("user").toBool(), true);
+            QCOMPARE(items.items().first().toMap().value("program").toString(), QString("/usr/bin/true"));
+            QVERIFY(items.items().first().toMap().value("size").toLongLong() > 0);
+            QCOMPARE(items.sets(), (QStringList{"My Settings", "Platinum Reality All", "Platinum Reality Base"}));
+            // The first session: what was already installed begins Off, so nothing new starts.
+            for (const auto &id : ids(items))
+                QVERIFY2(!items.isOn(id), qPrintable(id));
+            QVERIFY(!items.changedSinceLogin());
+            QVERIFY(QFileInfo::exists(profile + "/extensions.json"));
+            QCOMPARE(items.startAll(launcher), QStringList());
+            QVERIFY(launched.isEmpty());
+            QVERIFY(items.setGroupOn(false, true));
+            QVERIFY(items.isOn("remapper.desktop") && items.isOn("ours.desktop") && !items.isOn("steam.desktop"));
+            QVERIFY(items.changedSinceLogin());
+            items.revert();
+            QVERIFY(!items.isOn("remapper.desktop") && !items.changedSinceLogin());
+            QVERIFY(items.setOn("steam.desktop", true));
+            QVERIFY(items.isOn("steam.desktop") && items.changedSinceLogin());
+            QVERIFY(items.setOn("steam.desktop", false));
+            QVERIFY(!items.isOn("steam.desktop") && !items.changedSinceLogin());
+            QVERIFY(!items.setOn("plasma.desktop", false)); // Not an item here.
+            // A locked set changes into My Settings.
+            QVERIFY(items.selectSet("Platinum Reality Base"));
+            QVERIFY(!items.isOn("remapper.desktop"));
+            QVERIFY(items.setOn("remapper.desktop", true));
+            QCOMPARE(items.selectedSet(), QString("My Settings"));
+            QVERIFY(items.isOn("remapper.desktop") && !items.isOn("steam.desktop") && !items.isOn("ours.desktop"));
+            QVERIFY(items.duplicateSet("Work"));
+            QCOMPARE(items.selectedSet(), QString("Work"));
+            QVERIFY(!items.duplicateSet("Work") && !items.error().isEmpty());
+            QVERIFY(!items.duplicateSet("Platinum Reality All"));
+            QVERIFY(items.setGroupOn(false, true));
+            QVERIFY(items.isOn("ours.desktop") && !items.isOn("steam.desktop"));
+            QVERIFY(!items.deleteSet("My Settings") && !items.deleteSet("Platinum Reality Base"));
+        }
+        {
+            // Saved: a new session starts what the last one chose.
+            StartupItems items(profile, {user, system}, {"PlatinumReality"}, QProcessEnvironment::systemEnvironment());
+            QCOMPARE(items.selectedSet(), QString("Work"));
+            QVERIFY(!items.changedSinceLogin());
+            QCOMPARE(items.startAll(launcher), (QStringList{"remapper.desktop", "ours.desktop"}));
+            QCOMPARE(launched, (QStringList{"remapper.desktop", "ours.desktop"}));
+            // Revert puts back the sets as they were when the session started.
+            QVERIFY(items.selectSet("Platinum Reality All"));
+            QVERIFY(items.changedSinceLogin());
+            items.revert();
+            QCOMPARE(items.selectedSet(), QString("Work"));
+            QVERIFY(!items.changedSinceLogin());
+            QVERIFY(items.deleteSet("Work"));
+            QCOMPARE(items.selectedSet(), QString("My Settings"));
+            QVERIFY(!items.sets().contains("Work"));
+        }
+        {
+            // A new item, installed since the set was made, is On.
+            entry(system, "new.desktop", "Name=New Item\nExec=/usr/bin/true\n");
+            StartupItems items(profile, {user, system}, {"PlatinumReality"}, QProcessEnvironment::systemEnvironment());
+            QVERIFY(items.isOn("new.desktop") && !items.isOn("steam.desktop"));
+        }
+        // The standard folders: the user's, then each system one.
+        QProcessEnvironment environment;
+        environment.insert("HOME", "/home/someone");
+        environment.insert("XDG_CONFIG_DIRS", "/etc/xdg:/opt/xdg:relative");
+        QCOMPARE(StartupItems::standardDirectories(environment),
+                 (QStringList{"/home/someone/.config/autostart", "/etc/xdg/autostart", "/opt/xdg/autostart"}));
+    }
+    void extensionsManagerPanelTurnsItemsOnAndOff()
+    {
+        QTemporaryDir root;
+        const auto system = root.filePath("system");
+        QDir().mkpath(system);
+        for (const auto &name : {QString("alpha"), QString("beta")}) {
+            QFile f(system + "/" + name + ".desktop"); QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(("[Desktop Entry]\nType=Application\nName=" + name + " helper\nComment=Helps\nExec=/usr/bin/true\n").toUtf8());
+        }
+        {
+            QDir().mkpath(root.filePath("profile"));
+            QFile saved(root.filePath("profile/extensions.json"));
+            QVERIFY(saved.open(QIODevice::WriteOnly));
+            saved.write(R"({"selected": "My Settings", "sets": {"My Settings": {"off": []}}})");
+        }
+        qputenv("FRANKENSTEIN_AUTOSTART_DIRS", (root.filePath("user") + ":" + system).toUtf8());
+        const auto unset = qScopeGuard([] { qunsetenv("FRANKENSTEIN_AUTOSTART_DIRS"); });
+        QQuickView view; view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.filePath("profile"), {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop = view.rootObject();
+        auto *items = qobject_cast<StartupItems *>(manager.startupItems());
+        QVERIFY(items);
+        // Past the first session (where existing items begin Off): both items are On.
+        QVERIFY(items->isOn("alpha.desktop") && items->isOn("beta.desktop"));
+        QVERIFY(QMetaObject::invokeMethod(desktop, "dispatchShellCommand", Q_ARG(QVariant, QVariant("extensions-manager")), Q_ARG(QVariant, QVariant(0))));
+        auto *panel = desktop->findChild<QObject *>("extensions-manager-panel");
+        QVERIFY(panel);
+        QTRY_VERIFY(panel->property("opened").toBool());
+        const auto item = [&](const QString &name) { view.grabWindow(); return visualItem(view.contentItem(), name); };
+        const auto click = [&](QQuickItem *target) {
+            QTest::mouseClick(&view, Qt::LeftButton, {}, target->mapToScene(QPointF(target->width() / 2, target->height() / 2)).toPoint());
+        };
+        QQuickItem *check = nullptr;
+        QTRY_VERIFY((check = item("extensions-manager-check-alpha.desktop")) && check->isVisible());
+        QVERIFY(item("extensions-manager-group-system"));
+        QVERIFY(!item("extensions-manager-group-user")); // No items of the user's own.
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/extensions-manager.png"));
+        QVERIFY(!item("extensions-manager-revert")->isEnabled());
+        click(check);
+        QTRY_VERIFY(!items->isOn("alpha.desktop"));
+        QTRY_VERIFY(item("extensions-manager-revert")->isEnabled());
+        QCOMPARE(item("extensions-manager-group-check-system")->property("state").toString(), QString("mixed"));
+        click(item("extensions-manager-group-check-system"));
+        QTRY_VERIFY(items->isOn("alpha.desktop") && items->isOn("beta.desktop"));
+        click(item("extensions-manager-group-check-system"));
+        QTRY_VERIFY(!items->isOn("alpha.desktop") && !items->isOn("beta.desktop"));
+        click(item("extensions-manager-revert"));
+        QTRY_VERIFY(items->isOn("alpha.desktop") && items->isOn("beta.desktop"));
+        // Closing the group hides its items.
+        click(item("extensions-manager-disclose-system"));
+        QTRY_VERIFY(!item("extensions-manager-check-alpha.desktop"));
+        click(item("extensions-manager-disclose-system"));
+        QTRY_VERIFY(item("extensions-manager-check-alpha.desktop"));
+        // Show Item Information describes the chosen item.
+        click(item("extensions-manager-item-beta.desktop"));
+        QTRY_COMPARE(panel->property("selectedId").toString(), QString("beta.desktop"));
+        click(item("extensions-manager-show-information"));
+        QTRY_VERIFY(item("extensions-manager-information")->property("text").toString().contains("Runs: /usr/bin/true"));
+        // Duplicate Set… names and selects a copy.
+        click(item("extensions-manager-duplicate"));
+        auto *name = item("extensions-manager-set-name");
+        QTRY_VERIFY(name && name->isVisible());
+        name->setProperty("text", "Travel");
+        click(item("extensions-manager-duplicate-ok"));
+        QTRY_COMPARE(items->selectedSet(), QString("Travel"));
+        QTRY_VERIFY(item("extensions-manager-delete-set")->isVisible());
     }
     // File Exchange (after 9.2.2's PC Exchange, captured 2026-11-12): which application opens each kind
     // of document from the Finder and the desktop. Change… offers the applications that say they open it.
@@ -2914,6 +3114,7 @@ class DesktopTests : public QObject
                      "if sys.argv[1] == 'remove': open(state, 'w').close()\n"
                      "if sys.argv[1] == 'restore' and os.path.exists(state): os.unlink(state)\n"
                      "removed = os.path.exists(state)\n"
+                     "if sys.argv[1] == 'restore': print(json.dumps({'note': 'The sounds of plasma-bigscreen come back with the next Update All Software…'}))\n"
                      "print(json.dumps({'done': sys.argv[1] != 'status', 'removed': removed,\n"
                      "                  'present': [] if removed else ['freedesktop', 'ocean'], 'packages': []}))\n");
         helper.close();
@@ -2970,6 +3171,9 @@ class DesktopTests : public QObject
         click(box, 8);
         QTRY_VERIFY(!sounds->changing() && !sounds->removed());
         QTRY_VERIFY(!box->property("checked").toBool());
+        // What waits for the next update is said, not as an error.
+        QVERIFY(message().contains("plasma-bigscreen come back with the next Update All Software"));
+        QCOMPARE(sounds->error(), QString());
         QCOMPARE(sounds->present(), (QStringList{"freedesktop", "ocean"}));
         // Without its helper the option isn't offered.
         SystemSounds missing(root.filePath("none"), {});

@@ -9,7 +9,7 @@ import unittest
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from session_support import adopt_previous_name, cleanup_runtime, write_bus_config
+from session_support import adopt_previous_name, cleanup_runtime, link_user_services, write_bus_config
 
 
 class SessionSafetyTests(unittest.TestCase):
@@ -101,6 +101,27 @@ class SessionSafetyTests(unittest.TestCase):
         (path / "frankenstein-qualification.lock").write_text("fixture")
         self.assertTrue(cleanup_runtime(path))
         self.assertFalse(path.exists())
+
+    def test_user_services_link_reaches_systemd_and_is_cleaned_up(self):
+        # systemctl --user in a session terminal (Lily Hewitt, 2026-11-14): the private runtime
+        # links the login's systemd directory, and cleanup removes the link, not what it points at.
+        with tempfile.TemporaryDirectory() as login:
+            (Path(login) / "systemd").mkdir()
+            (Path(login) / "systemd" / "private").write_text("keep")
+            runtime = Path(tempfile.mkdtemp(prefix="frankenstein-runtime."))
+            self.assertTrue(link_user_services(runtime, login))
+            self.assertEqual((runtime / "systemd" / "private").read_text(), "keep")
+            self.assertTrue(cleanup_runtime(runtime))
+            self.assertFalse(runtime.exists())
+            self.assertEqual((Path(login) / "systemd" / "private").read_text(), "keep")
+
+    def test_user_services_link_needs_an_owned_systemd_directory(self):
+        with tempfile.TemporaryDirectory() as login, tempfile.TemporaryDirectory(prefix="frankenstein-runtime.") as path:
+            self.assertFalse(link_user_services(path, login))
+            (Path(login) / "elsewhere").mkdir()
+            (Path(login) / "systemd").symlink_to(Path(login) / "elsewhere", target_is_directory=True)
+            self.assertFalse(link_user_services(path, login))
+            self.assertFalse((Path(path) / "systemd").exists())
 
     def test_cleanup_never_traverses_portal_directories_or_symlinks(self):
         with tempfile.TemporaryDirectory(prefix="frankenstein-runtime.") as path, tempfile.TemporaryDirectory() as outside:

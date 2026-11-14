@@ -23,15 +23,22 @@ SCRIPT_LINES = ('# Platinum Reality: no Arch/KDE desktop sounds (Lily Hewitt, 20
 
 
 class Runner:
-    """pacman-conf runs for real; pacman -S is recorded (and can fail)."""
+    """pacman-conf runs for real; pacman -Si answers from `repository` (name: version, the installed
+    1-1 by default); pacman -S and -U are recorded (and can fail)."""
 
-    def __init__(self, fail=''):
+    def __init__(self, fail='', repository=None):
         self.installs = []
         self.fail = fail
+        self.repository = repository or {}
 
     def __call__(self, command, **arguments):
         if command[0] == 'pacman-conf':
             return subprocess.run(command, **arguments)
+        if command[:2] == ['pacman', '-Si']:
+            version = self.repository.get(command[2], '1-1')
+            return subprocess.CompletedProcess(command, 0 if version else 1,
+                                               f'Repository      : extra\nName            : {command[2]}\n'
+                                               f'Version         : {version}\n' if version else '', '')
         self.installs.append(command)
         return subprocess.CompletedProcess(command, 1 if self.fail else 0, '', self.fail)
 
@@ -96,9 +103,28 @@ class SystemSoundsTests(unittest.TestCase):
         sounds.restore(self.root, run)
         self.assertEqual(self.conf(), STOCK)
         self.assertEqual(self.no_extract(), [])
-        self.assertEqual(run.installs, [['pacman', '-S', '--noconfirm', '--noprogressbar', '--color', 'never',
-                                         'ocean-sound-theme', 'oxygen-sounds', 'sound-theme-freedesktop']])
+        self.assertEqual(run.installs, [['pacman', '-S', 'ocean-sound-theme', 'oxygen-sounds', 'sound-theme-freedesktop',
+                                         '--noconfirm', '--noprogressbar', '--color', 'never']])
         self.assertFalse(sounds.status(self.root)['removed'])
+
+    def test_restore_puts_back_the_installed_versions_and_never_upgrades_one_alone(self):
+        sounds.remove(self.root, Runner())
+        # In the cache: installed from there, nothing downloaded. A newer one waiting in the
+        # package lists: left for the next Update All Software (installing it alone could be a
+        # partial upgrade, as with plasma-bigscreen).
+        cache = self.root / sounds.CACHE
+        cache.mkdir(parents=True)
+        (cache / 'ocean-sound-theme-1-1-any.pkg.tar.zst').write_bytes(b'pkg')
+        (cache / 'ocean-sound-theme-1-1-any.pkg.tar.zst.sig').write_bytes(b'sig')
+        (cache / 'ocean-sound-theme-0-9-any.pkg.tar.zst').write_bytes(b'old')
+        run = Runner(repository={'oxygen-sounds': '2-1'})
+        later = sounds.restore(self.root, run)
+        self.assertEqual(later, ['oxygen-sounds'])
+        self.assertEqual(run.installs, [
+            ['pacman', '-U', str(cache / 'ocean-sound-theme-1-1-any.pkg.tar.zst'), '--noconfirm', '--noprogressbar', '--color', 'never'],
+            ['pacman', '-S', 'sound-theme-freedesktop', '--noconfirm', '--noprogressbar', '--color', 'never']])
+        self.assertEqual(self.conf(), STOCK)  # The line is out, so the next update brings the rest.
+
 
     def test_the_first_scripts_lines_are_recognized_and_removed(self):
         stock = STOCK.replace('#NoExtract   =\n', '#NoExtract   =\n' + SCRIPT_LINES)

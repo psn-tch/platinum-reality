@@ -12,6 +12,10 @@ struct DesktopEntry
     qint64 sourceBytes = 0;
     QString unavailable;
     bool hidden = false, noDisplay = false, showHere = true, terminal = false;
+    // As written, for startup items (Extensions Manager), which check them against the session's names.
+    QStringList onlyShowIn, notShowIn;
+    // GNOME's switch for a startup item (X-GNOME-Autostart-enabled=false turns it off).
+    bool autostartEnabled = true;
     bool emulator = false;
     char documentCode = 0;
 };

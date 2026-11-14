@@ -18,6 +18,8 @@ class SystemSounds final : public QObject
     Q_PROPERTY(QStringList present READ present NOTIFY changed)
     Q_PROPERTY(bool changing READ changing NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
+    // What the last change left to do, not an error (sounds waiting for the next Update All Software).
+    Q_PROPERTY(QString note READ note NOTIFY changed)
   public:
     SystemSounds(QString helper, QStringList elevate = {"pkexec"}, QObject *parent = nullptr);
     ~SystemSounds() override;
@@ -26,6 +28,7 @@ class SystemSounds final : public QObject
     QStringList present() const { return m_present; }
     bool changing() const { return m_change.state() != QProcess::NotRunning; }
     QString error() const { return m_error; }
+    QString note() const { return m_note; }
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void setRemoved(bool removed);
 
@@ -38,6 +41,6 @@ class SystemSounds final : public QObject
     QStringList m_elevate;
     QProcess m_status, m_change;
     QStringList m_present;
-    QString m_error;
+    QString m_error, m_note;
     bool m_removed = false;
 };

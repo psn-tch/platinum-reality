@@ -64,7 +64,7 @@ bool DesktopDocumentService::EndSession(QString command)
     QTimer::singleShot(0, m_manager, [manager = m_manager, command]
     {
         if (command == "log-out")
-            manager->quitSession();
+            manager->quitSession("Log Out from the Finder");
         else if (command == "sleep")
             manager->sleepComputer();
         else if (command == "restart")

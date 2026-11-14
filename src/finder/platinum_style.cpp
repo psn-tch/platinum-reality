@@ -5,11 +5,13 @@
 #include <QApplication>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QFileInfo>
 #include <QFileIconProvider>
 #include <QFileSystemModel>
 #include <QPainter>
 #include <QScrollBar>
 #include <QSet>
+#include <QStandardPaths>
 #include <QMessageBox>
 #include <QMenu>
 #include <QPushButton>
@@ -424,7 +426,24 @@ QIcon PlatinumStyle::standardIcon(StandardPixmap icon, const QStyleOption *optio
     if (icon != SP_MessageBoxQuestion && icon != SP_MessageBoxWarning &&
         icon != SP_MessageBoxCritical && icon != SP_MessageBoxInformation)
         return QProxyStyle::standardIcon(icon, option, widget);
-    // Original geometric alert artwork; no Apple or host icon-theme assets.
+    // The person's own 9.2.2 stop, caution and note icons when the Asset Importer brought them in
+    // (<data>/platinum-reality/assets, never shipped). 9.2.2 had no question icon.
+    const auto imported = icon == SP_MessageBoxCritical  ? QString("alert-stop")
+                          : icon == SP_MessageBoxWarning ? QString("alert-caution")
+                          : icon == SP_MessageBoxInformation ? QString("alert-note")
+                                                             : QString();
+    if (!imported.isEmpty())
+    {
+        const auto folder = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
+                            "/platinum-reality/assets/icons/" + imported;
+        QIcon personal;
+        for (const auto &file : {folder + ".png", folder + "-16.png"})
+            if (QFileInfo(file).isFile())
+                personal.addFile(file);
+        if (!personal.isNull())
+            return personal;
+    }
+    // Otherwise original geometric alert artwork; no Apple or host icon-theme assets.
     QPixmap image(32, 32);
     image.fill(Qt::transparent);
     QPainter painter(&image);

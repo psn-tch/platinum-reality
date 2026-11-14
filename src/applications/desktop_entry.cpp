@@ -173,6 +173,9 @@ DesktopEntry readDesktopEntry(const QString &filename, const QString &id,
     entry.noDisplay = flag(file.get(), "NoDisplay");
     const auto only = list(file.get(), "OnlyShowIn"), except = list(file.get(), "NotShowIn");
     entry.showHere = (only.isEmpty() || only.contains("Frankenstein")) && !except.contains("Frankenstein");
+    entry.onlyShowIn = only;
+    entry.notShowIn = except;
+    entry.autostartEnabled = value(file.get(), "X-GNOME-Autostart-enabled").trimmed().toLower() != "false";
     entry.name = value(file.get(), "Name", true).left(512);
     entry.comment = value(file.get(), "Comment", true).left(4096);
     entry.genericName = value(file.get(), "GenericName", true).left(512);

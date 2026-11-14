@@ -31,7 +31,10 @@ def main(arguments):
             platinum_system_sounds.remove()
         else:
             report({'progress': 'Downloading the desktop sounds…'})
-            platinum_system_sounds.restore()
+            later = platinum_system_sounds.restore()
+            if later:
+                report({'note': 'The sounds of ' + ', '.join(later) + ' come back with the next Update All Software…: '
+                        'a newer version is waiting, and updating it alone could upset the rest.'})
     except (platinum_system_sounds.SoundsError, OSError) as problem:
         report({'error': str(problem), **platinum_system_sounds.status()})
         return 1

@@ -268,6 +268,7 @@ Rectangle {
         else if(action==="control-panels-window")controlPanels.show("")
         else if(action==="apple-menu-options")appleMenuOptionsPanel.edit()
         else if(action==="file-exchange")fileExchangePanel.edit()
+        else if(action==="extensions-manager")extensionsManagerPanel.edit()
         else if(action==="calculator")calculator.open()
         else if(action==="asset-importer")assetImporter.open()
         else if(action==="software-update")softwareUpdate.open()
@@ -423,8 +424,10 @@ Rectangle {
                        {name:"Note Pad",action:"note-pad",item:notePadWindow},
                        {name:"Scrapbook",action:"scrapbook",item:scrapbookWindow}]
         return windows.filter(function(w){return w.item && w.item.visible}).map(function(w){
+            const member=w.item.workspaceMember
             return {id:"shell:"+w.action,name:w.name,icon:manager.applicationIcon("shell:"+w.action),hidden:false,attention:false,shell:true,
-                    active:manager.desktopActive && Boolean(w.item.front)}})
+                    active:manager.desktopActive && Boolean(w.item.front),
+                    workspaces:member && member.workspace>0 ? [member.workspace] : [],onShownWorkspace:!member || !member.away}})
     }
     // Restart Desktop after an update (Software Update): the open applications and the desktop's own
     // windows close as at Log Out and open again in a new desktop, without Log In.
@@ -443,6 +446,13 @@ Rectangle {
             return a.name==="Finder" && shell.some(function(w){return w.active}) ? Object.assign({},a,{active:false}) : a})
         return apps.concat(shell).sort(function(a,b){
             return String(a.name).localeCompare(String(b.name),undefined,{sensitivity:"base"}) || String(a.id).localeCompare(String(b.id))})
+            .map(function(a){return Object.assign({},a,{label:workspaceLabel(a)})})
+    }
+    // "Steam (2)" (Lily Hewitt, 2026-11-14): an application with no window on the workspace showing
+    // says which workspaces its windows wait on. One showing, or none open, keeps the plain name.
+    function workspaceLabel(application) {
+        const numbers=application.workspaces||[]
+        return application.onShownWorkspace===false && numbers.length ? application.name+" ("+numbers.join(", ")+")" : application.name
     }
     function activateListedApplication(id) {
         if(String(id).startsWith("shell:"))dispatchShellCommand(String(id).slice(6),0)
@@ -509,7 +519,7 @@ Rectangle {
             {text:"Hide "+manager.activeApplication,action:"hide",enabled:manager.applications.some(function(a){return !a.active && !a.hidden})},
             {text:"Hide Others",action:"hide-others",enabled:manager.applications.some(function(a){return !a.active && !a.hidden})},
             {text:"Show All",action:"show-all",enabled:manager.applications.some(function(a){return a.hidden})},
-            {separator:true,action:"separator"}].concat(desktop.applicationsByName().map(function(a){return {text:a.name,action:"app",id:a.id,icon:a.icon,checked:a.active,marked:a.attention && !a.active,glyph:a.name==="Finder"?"disk":"application"}}))
+            {separator:true,action:"separator"}].concat(desktop.applicationsByName().map(function(a){return {text:a.label,action:"app",id:a.id,icon:a.icon,checked:a.active,marked:a.attention && !a.active,glyph:a.name==="Finder"?"disk":"application"}}))
         if(index===0){
             // Every item but About This Computer has its icon, as in 9.2.2: applications their own,
             // folders a folder, each control panel its own (imported when there is one).
@@ -540,6 +550,7 @@ Rectangle {
                     panel("Date & Time…","date-time"),
                     panel("Desktop Picture…","desktop-picture"),
                     panel("Energy Saver…","energy"),
+                    panel("Extensions Manager…","extensions-manager"),
                     panel("File Exchange…","file-exchange"),
                     panel("Fingerprints…","fingerprints"),
                     panel("Keyboard…","keyboard"),
@@ -2122,6 +2133,7 @@ Rectangle {
         DateTimePanel {id:dateTimePanel;settings:desktop.appearance}
         DesktopPictureDialog {id:desktopPictureDialog;settings:desktop.appearance}
         EnergySaverPanel {id:energyPanel;settings:manager.energy;sessionManager:manager}
+        ExtensionsManagerPanel {id:extensionsManagerPanel;items:manager.startupItems;sessionManager:manager}
         FileExchangePanel {id:fileExchangePanel;catalog:manager.applicationCatalog}
         FingerprintsPanel {id:fingerprintsPanel;service:manager ? manager.fingerprints : null}
         GeneralControlsPanel {id:generalPanel;settings:desktop.appearance}

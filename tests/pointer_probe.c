@@ -8,6 +8,8 @@
 //   cursor hide|show                  no cursor, or a 16x16 cursor with hotspot 3,4 -> cursor-set
 //   idle on|off                       an idle inhibitor on the surface -> idle-set
 //   fullscreen on|off                 full screen with no output named -> fullscreen-set
+//   fullscreen named                  full screen on the first wl_output, bound only now -> fullscreen-set
+//   maximize on|off                                                    -> maximize-set
 //   quit
 // With --resizable the window has no fixed size and takes each configured size.
 // Events: seat VERSION, ready WxH, configure W H [fullscreen], enter X Y, leave, motion X Y, button CODE STATE,
@@ -45,6 +47,8 @@ static struct
     struct zwp_pointer_constraints_v1 *constraints;
     struct zwp_idle_inhibit_manager_v1 *idle;
     struct zwp_idle_inhibitor_v1 *inhibitor;
+    struct wl_registry *registry;
+    uint32_t outputName;
     struct zwp_relative_pointer_v1 *relative;
     struct zwp_locked_pointer_v1 *locked;
     struct zwp_confined_pointer_v1 *confined;
@@ -345,6 +349,8 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
         app.constraints = wl_registry_bind(registry, name, &zwp_pointer_constraints_v1_interface, 1);
     else if (!strcmp(interface, zwp_idle_inhibit_manager_v1_interface.name))
         app.idle = wl_registry_bind(registry, name, &zwp_idle_inhibit_manager_v1_interface, 1);
+    else if (!strcmp(interface, wl_output_interface.name) && !app.outputName)
+        app.outputName = name; // Bound only by "fullscreen named": most tests need an unbound client.
 }
 static void globalRemove(void *data, struct wl_registry *registry, uint32_t name)
 {
@@ -501,6 +507,23 @@ static void command(const char *line)
         wl_surface_commit(app.surface);
         say("fullscreen-set");
     }
+    else if (!strcmp(line, "maximize on") || !strcmp(line, "maximize off"))
+    {
+        if (!strcmp(line, "maximize on"))
+            xdg_toplevel_set_maximized(app.toplevel);
+        else
+            xdg_toplevel_unset_maximized(app.toplevel);
+        wl_surface_commit(app.surface);
+        say("maximize-set");
+    }
+    else if (!strcmp(line, "fullscreen named") && app.outputName)
+    {
+        // A monitor named, as X11 games through xwayland-satellite ask.
+        struct wl_output *output = wl_registry_bind(app.registry, app.outputName, &wl_output_interface, 1);
+        xdg_toplevel_set_fullscreen(app.toplevel, output);
+        wl_surface_commit(app.surface);
+        say("fullscreen-set");
+    }
     else if (!strcmp(line, "cursor show"))
     {
         if (!app.cursor)
@@ -550,7 +573,7 @@ int main(int argc, char **argv)
         say("no-display");
         return 2;
     }
-    struct wl_registry *registry = wl_display_get_registry(app.display);
+    struct wl_registry *registry = app.registry = wl_display_get_registry(app.display);
     wl_registry_add_listener(registry, &registryListener, NULL);
     wl_display_roundtrip(app.display);
     say("globals relative=%d constraints=%d idle=%d", app.relativeManager != NULL, app.constraints != NULL,

@@ -8,7 +8,9 @@ $XDG_DATA_HOME/platinum-reality/assets, which is never part of the repository or
   sounds/<Name>.wav          the System file's alert sounds (they join the Sound panel's list)
   sounds/platinum/<tag>.wav  the Appearance "Platinum Sounds" set, by theme-sound tag
   sounds/platinum/manifest.json
-  icons/<name>.png, icons/<name>-16.png  standard Finder icons (folder, trash, hard-disk, ...)
+  icons/<name>.png, icons/<name>-16.png  standard Finder icons (folder, trash, hard-disk, ...) and the
+                             alert icons (alert-stop, alert-caution, alert-note)
+  icons/keychain.png         Keychain Access's keychain, as its Unlock box shows it (the password box)
   icons/about-banner.png, icons/about-logo.png  the Finder's About This Computer banner, and the
                              Mac OS face from it, shown in About This Computer
   desktop-pictures/<Collection>/<Name>.jpg  the Appearance desktop pictures (JPEG files)
@@ -38,6 +40,9 @@ SYSTEM = 'System Folder/System'
 PLATINUM = 'System Folder/Appearance/Sound Sets/Platinum Sounds'
 ICONS_FILE = 'System Folder/System Resources'  # Mac OS 9; older systems keep icons in System.
 FINDER = 'System Folder/Finder'
+KEYCHAIN = 'System Folder/Control Panels/Keychain Access'
+# The keychain beside "Unlock Keychain:" in 9.2.2 ('icl8'/'ICN#'; matched to a capture, 2026-11-14).
+KEYCHAIN_ICON = 1031
 ABOUT_BANNER = 4000  # The Finder's 'PICT' drawn at the top of About This Computer (Mac OS 9.2.2).
 PICTURES = 'System Folder/Appearance/Desktop Pictures'
 STRIP = 'System Folder/Control Strip Modules'
@@ -51,7 +56,10 @@ ICONS = {-4000: 'document', -3999: 'folder', -3997: 'folder-open', -3996: 'appli
          -3995: 'hard-disk', -3993: 'trash', -3984: 'trash-full', -3983: 'system-folder',
          -3987: 'cdrom', -3998: 'floppy', -3971: 'preferences', -3970: 'suitcase',
          -3972: 'file-server', -3981: 'drop-folder', -3982: 'apple-menu-folder', -16415: 'extension',
-         -16386: 'apple-menu'}  # The rainbow Apple at the left of the menu bar.
+         -16386: 'apple-menu',  # The rainbow Apple at the left of the menu bar.
+         # Alert icons (Icons.h kAlertStopIconResource and its neighbours): the stop hand, the caution
+         # triangle and the note face, for the desktop's and the applications' alerts.
+         -3822: 'alert-stop', -3821: 'alert-caution', -3820: 'alert-note'}
 MAX_BYTES = 4 * 1024 * 1024  # The desktop skips larger personal sounds.
 
 
@@ -188,18 +196,31 @@ def icon_pixels(data, size=32):
     return bytes(channel for (r, g, b), a in zip(rgb, alpha) for channel in (r, g, b, a))
 
 
+def classic_icon(fork, identity, size):
+    """An icon from separate colour (Mac palette) and bitmap-then-mask resources: 'ics8'/'ics#' at 16 px,
+    'icl8'/'ICN#' at 32 px."""
+    colour_kind, bitmap_kind = (b'ics8', b'ics#') if size == 16 else (b'icl8', b'ICN#')
+    pixels = size * size
+    colour = {i: d for i, _, d in resources(fork, colour_kind)}.get(identity)
+    bitmap = {i: d for i, _, d in resources(fork, bitmap_kind)}.get(identity)
+    if bitmap is None or len(bitmap) < pixels // 4:
+        return None
+    alpha = one_bit(bitmap, size, pixels // 8)
+    if colour is not None and len(colour) >= pixels:
+        rgb = [PALETTE[index] for index in colour[:pixels]]
+    else:
+        rgb = [(0, 0, 0) if v else (255, 255, 255) for v in one_bit(bitmap, size, 0)]
+    return bytes(channel for (r, g, b), a in zip(rgb, alpha) for channel in (r, g, b, a))
+
+
 def small_icon(fork, identity):
     """A 16x16 icon from separate 'ics8' (colour, Mac palette) and 'ics#' (bitmap then mask) resources."""
-    colour = {i: d for i, _, d in resources(fork, b'ics8')}.get(identity)
-    bitmap = {i: d for i, _, d in resources(fork, b'ics#')}.get(identity)
-    if bitmap is None or len(bitmap) < 64:
-        return None
-    alpha = one_bit(bitmap, 16, 32)
-    if colour is not None and len(colour) >= 256:
-        rgb = [PALETTE[index] for index in colour[:256]]
-    else:
-        rgb = [(0, 0, 0) if v else (255, 255, 255) for v in one_bit(bitmap, 16, 0)]
-    return bytes(channel for (r, g, b), a in zip(rgb, alpha) for channel in (r, g, b, a))
+    return classic_icon(fork, identity, 16)
+
+
+def large_icon(fork, identity):
+    """A 32x32 icon from separate 'icl8' (colour, Mac palette) and 'ICN#' (bitmap then mask) resources."""
+    return classic_icon(fork, identity, 32)
 
 
 def png(width, height, pixels):
@@ -474,7 +495,7 @@ def extract_forks(source, work):
     else:
         raise SystemExit('No Mac OS System Folder was found in ' + source.name)
     root = systems[0].split('/', 1)[0]
-    wanted = {key: f'{root}/{key}' for key in (SYSTEM, PLATINUM, ICONS_FILE, FINDER)}
+    wanted = {key: f'{root}/{key}' for key in (SYSTEM, PLATINUM, ICONS_FILE, FINDER, KEYCHAIN)}
     got = volume.forks(wanted.values(), True)
     found = {key: got[path] for key, path in wanted.items() if path in got}
     if SYSTEM not in found:
@@ -618,6 +639,13 @@ def main():
                 written += 1
             else:
                 kept += 1
+    pixels = KEYCHAIN in forks and large_icon(forks[KEYCHAIN], KEYCHAIN_ICON)
+    if not pixels:
+        skipped += 1
+    elif write(icons / 'keychain.png', png(32, 32, pixels), options.replace):
+        written += 1
+    else:
+        kept += 1
     close('Finder icons')
     strip_icons = icons / 'control-strip'
     for module, (identity, name) in STRIP_ICONS.items():

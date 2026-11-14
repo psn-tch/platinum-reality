@@ -24,6 +24,7 @@ PATTERNS = [f'{SOUNDS}/{name}/*' for name in FOLDERS] + [f'{SOUNDS}/{LOOSE}*']
 NO_EXTRACT = 'NoExtract   = ' + ' '.join(PATTERNS)
 CONF = 'etc/pacman.conf'
 LOCAL_DB = 'var/lib/pacman/local'
+CACHE = 'var/cache/pacman/pkg'
 ENVIRONMENT = {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}
 
 
@@ -52,9 +53,13 @@ def present(root=Path('/')):
     return sorted(p.name for p in folder.iterdir() if p.name in FOLDERS or p.name.startswith(LOOSE))
 
 
-def owners(root=Path('/')):
+def _field(desc, name):
+    return desc.split(f'%{name}%\n', 1)[1].split('\n', 1)[0]
+
+
+def owners(root=Path('/'), versions=False):
     """Installed packages whose files include desktop sounds, from pacman's local database (which
-    still lists files that were deleted)."""
+    still lists files that were deleted). With versions, [(name, installed version)]."""
     found = []
     database = Path(root) / LOCAL_DB
     if not database.is_dir():
@@ -63,11 +68,12 @@ def owners(root=Path('/')):
     for entry in sorted(database.iterdir()):
         try:
             files = (entry / 'files').read_text(errors='replace').splitlines()
-            name = (entry / 'desc').read_text(errors='replace').split('%NAME%\n', 1)[1].split('\n', 1)[0]
+            desc = (entry / 'desc').read_text(errors='replace')
+            name, version = _field(desc, 'NAME'), _field(desc, 'VERSION')
         except (OSError, IndexError):
             continue
         if any(line.startswith(prefixes) for line in files):
-            found.append(name)
+            found.append((name, version) if versions else name)
     return found
 
 
@@ -157,15 +163,44 @@ def remove(root=Path('/'), run=subprocess.run):
             shutil.rmtree(path)
 
 
-def restore(root=Path('/'), run=subprocess.run):
-    """Let updates bring the desktop sounds again, and download them now."""
-    _rewrite(root, without_no_extract, False, run)
-    packages = owners(root)
-    if not packages:
-        return
-    process = run(['pacman', '-S', '--noconfirm', '--noprogressbar', '--color', 'never', *packages],
+def _sync_version(name, run):
+    process = run(['pacman', '-Si', name], capture_output=True, text=True, env=ENVIRONMENT)
+    if process.returncode != 0:
+        return None
+    for line in process.stdout.splitlines():
+        key, _, value = line.partition(':')
+        if key.strip() == 'Version':
+            return value.strip()
+    return None
+
+
+def _install(command, run):
+    process = run(['pacman', *command, '--noconfirm', '--noprogressbar', '--color', 'never'],
                   capture_output=True, text=True, env=ENVIRONMENT)
     if process.returncode != 0:
         detail = ((process.stderr or process.stdout).strip().splitlines() or ['pacman failed'])[-1]
-        raise SoundsError(f'The sounds could not be downloaded ({detail}). They come back by themselves the '
+        raise SoundsError(f'The sounds could not be put back ({detail}). They come back by themselves the '
                           'next time Update All Software… updates them.')
+
+
+def restore(root=Path('/'), run=subprocess.run):
+    """Let updates bring the desktop sounds again, and put them back now: the version installed, so
+    nothing else is upgraded (a newer plasma-bigscreen alone would be a partial upgrade). From
+    pacman's cache when it is there, else downloaded when the package lists still have that version.
+    Returns the packages whose sounds wait for the next Update All Software…."""
+    _rewrite(root, without_no_extract, False, run)
+    cached, download, later = [], [], []
+    for name, version in owners(root, versions=True):
+        files = sorted(p for p in (Path(root) / CACHE).glob(f'{name}-{version}-*.pkg.tar.*')
+                       if not p.name.endswith('.sig')) if (Path(root) / CACHE).is_dir() else []
+        if files:
+            cached.append(str(files[-1]))
+        elif _sync_version(name, run) == version:
+            download.append(name)
+        else:
+            later.append(name)
+    if cached:
+        _install(['-U', *cached], run)
+    if download:
+        _install(['-S', *download], run)
+    return later

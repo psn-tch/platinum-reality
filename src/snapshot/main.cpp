@@ -17,8 +17,17 @@ void withLibv4l(char **argv)
     if (qEnvironmentVariableIsSet("PLATINUM_SNAPSHOT_NO_LIBV4L") || access(convert, R_OK) != 0)
         return;
     const auto preload = qgetenv("LD_PRELOAD");
-    if (preload.contains("v4l2convert.so"))
+    if (preload.contains(convert))
+    {
+        // Started again with it: it is loaded now. Programs Snapshot opens (Show Pictures) don't need it.
+        auto others = preload.split(':');
+        others.removeAll(QByteArray(convert));
+        if (others.isEmpty())
+            qunsetenv("LD_PRELOAD");
+        else
+            qputenv("LD_PRELOAD", others.join(':'));
         return;
+    }
     qputenv("LD_PRELOAD", preload.isEmpty() ? QByteArray(convert) : preload + ":" + convert);
     execv("/proc/self/exe", argv);
     // execv returned: carry on without it.

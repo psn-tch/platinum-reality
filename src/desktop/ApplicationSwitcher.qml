@@ -10,7 +10,7 @@ Item {
     objectName: "application-switcher"
     required property var sessionManager
     required property var settings
-    // [{id, name, icon, active, hidden}] in menu order.
+    // [{id, name, label, icon, active, hidden}] in menu order; label adds where its windows wait, "Steam (2)".
     property var applications: []
     signal chosen(var id)
     readonly property rect screenRect: sessionManager.primaryDisplayRect
@@ -127,7 +127,7 @@ Item {
                     }
                     Text {
                         x: 26; width: parent.width - 30; anchors.verticalCenter: parent.verticalCenter
-                        text: row.modelData.name; textFormat: Text.PlainText; elide: Text.ElideRight
+                        text: row.modelData.label || row.modelData.name; textFormat: Text.PlainText; elide: Text.ElideRight
                         font.family:switcher.settings.fontFamily;font.pixelSize: 12; color: row.modelData.hidden ? "#555" : "black"
                     }
                     MouseArea { id: rowMouse; anchors.fill: parent; onClicked: switcher.chosen(row.modelData.id) }

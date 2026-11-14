@@ -53,7 +53,11 @@ int main(int argc, char **argv)
 
     const auto *account = getpwuid(getuid());
     if (!account || !account->pw_name)
-        qFatal("No password database entry for this user");
+    {
+        // A refusal, not a crash: qFatal aborted and left a core dump for every bad start.
+        qCritical("No password database entry for this user");
+        return 1;
+    }
     const QString user = QString::fromLocal8Bit(account->pw_name);
     int ready = -1;
     if (parser.isSet(readyFd))
@@ -61,7 +65,10 @@ int main(int argc, char **argv)
         bool ok = false;
         ready = parser.value(readyFd).toInt(&ok);
         if (!ok || ready < 0)
-            qFatal("Invalid --ready-fd");
+        {
+            qCritical("Invalid --ready-fd");
+            return 2;
+        }
     }
     int chosen = -1;
     if (parser.isSet(sessionFd))
@@ -69,7 +76,10 @@ int main(int argc, char **argv)
         bool ok = false;
         chosen = parser.value(sessionFd).toInt(&ok);
         if (!ok || chosen < 0 || !parser.isSet(login))
-            qFatal("Invalid --session-fd (it needs --login)");
+        {
+            qCritical("Invalid --session-fd (it needs --login)");
+            return 2;
+        }
     }
 
     SessionLock lock;

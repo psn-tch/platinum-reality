@@ -2894,6 +2894,50 @@ class NativeTests : public QObject
         QCOMPARE(terminal.exitStatus(),QProcess::NormalExit);
         QCOMPARE(terminal.exitCode(),0);
     }
+    void fullScreenAndMaximizeSurviveAWindowWithoutAMonitor()
+    {
+        // 2026-11-14: an X11 game through xwayland-satellite named a monitor in its full-screen
+        // request while its window's view had none: with a display layout, reconcileSurfaces
+        // gives a view no monitor while it is hidden or its client has bound none (binding and
+        // the request arrive in one dispatch). Qt's shell item read that empty monitor and the
+        // whole desktop crashed. This single-monitor scene has no layout, so empty it here.
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager=*scene.manager;
+        LineProcess probe;
+        probe.process.setProcessEnvironment(scene.childEnvironment());
+        probe.process.start(QCoreApplication::applicationDirPath()+"/pointer-probe",{"--resizable"});
+        QVERIFY(!probe.next("ready").isEmpty());
+        QVariantMap window;
+        QTRY_VERIFY(!(window=first(manager,"Pointer Probe")).isEmpty());
+        const auto id=window.value("id").toULongLong();
+        auto *client=qobject_cast<QWaylandQuickItem *>(visualItem(scene.view.contentItem(),"client-"+QString::number(id)));
+        QVERIFY(client);
+        for(auto *view:client->surface()->views())
+            view->setOutput(nullptr);
+        QTest::qWait(100);
+        QVERIFY(!client->view()->output());
+        probe.skip();
+        QVERIFY(probe.send("fullscreen named","fullscreen-set"));
+        QTRY_VERIFY(first(manager,"Pointer Probe").value("fullScreen").toBool());
+        QVERIFY2(QTest::qWaitFor([&]{return !probe.pending("configure").filter(QRegularExpression(" fullscreen$")).isEmpty();}),
+                 qPrintable(probe.lines.join(" | ")));
+        QVERIFY(scene.view.isExposed());
+        probe.skip();
+        QVERIFY(probe.send("fullscreen off","fullscreen-set"));
+        QTRY_VERIFY(!first(manager,"Pointer Probe").value("fullScreen").toBool());
+        // Qt's maximize handler reads the same view output.
+        QTest::qWait(100);
+        for(auto *view:client->surface()->views())
+            view->setOutput(nullptr);
+        QVERIFY(!client->view()->output());
+        probe.skip();
+        QVERIFY(probe.send("maximize on","maximize-set"));
+        QVERIFY2(!probe.next("configure").isEmpty(),qPrintable(probe.lines.join(" | ")));
+        QVERIFY(!first(manager,"Pointer Probe").isEmpty());
+        QVERIFY(probe.send("maximize off","maximize-set"));
+        QVERIFY(!probe.next("configure").isEmpty());
+    }
     void gamesLockAndConfineThePointerThroughTheHost()
     {
         // docs/relative-pointer-plan.md: real host input from the owned headless Sway through
@@ -5402,6 +5446,16 @@ class NativeTests : public QObject
         QVERIFY(!list.at(2).toMap().value("checked").toBool());
         QCOMPARE(list.at(2).toMap().value("text").toString(),"Workspace 3 — "+zuluName);
         QCOMPARE(list.at(4).toMap().value("text").toString(),QString("Workspace 5"));
+        // The Application menu and switcher say where windows wait (Lily Hewitt, 2026-11-14):
+        // Zulu is only on 3, so it reads "Zulu (3)"; Alpha shows on 1 and keeps its plain name.
+        QVariant byName;
+        QMetaObject::invokeMethod(scene.view.rootObject(),"applicationsByName",Q_RETURN_ARG(QVariant,byName));
+        const auto label=[&](const QString &name){
+            for(const auto &entry:byName.toList())
+                if(entry.toMap().value("name").toString()==name)return entry.toMap().value("label").toString();
+            return QString();};
+        QCOMPARE(label(alphaName),alphaName);
+        QCOMPARE(label(zuluName),zuluName+" (3)");
         // Command-Tab still switches applications (Finder, Alpha, Zulu by name); reaching Zulu
         // shows the workspace its window is on.
         QTRY_COMPARE(active(),alphaName);
@@ -9644,6 +9698,69 @@ class NativeTests : public QObject
         QVERIFY2(errors.isEmpty(), qPrintable(errors.isEmpty() ? QString() : errors.first().first().toString()));
         QVERIFY(capture(scene.view, "native-tab-detached.png"));
         probe.call("Finish");
+    }
+    void aDragGoesOnWhenItsWindowHasNoMonitor()
+    {
+        // Qt's own drag update (QWaylandQuickItemPrivate::handleDragUpdate) reads the source view's output
+        // unchecked, as its full-screen and maximize handlers did (2026-11-14). reconcileSurfaces empties it
+        // while the client has bound no monitor; this scene has no layout, so the test empties it mid-drag.
+        // Platinum's drag handling never reaches that read today; this keeps it that way.
+        NativeScene scene;
+        auto &manager = *scene.manager;
+        const auto from = scene.files.path() + "/Drag Source";
+        QVERIFY(QDir().mkpath(from));
+        {
+            QFile file(from + "/Note.txt");
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("note");
+        }
+        QVERIFY(scene.show());
+        QTRY_VERIFY_WITH_TIMEOUT(manager.snapshot().value("dropReceiverReady").toBool(), 10000);
+        manager.launchFinder(from);
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager, "Drag Source").isEmpty(), 10000);
+        const auto sourceId = first(manager, "Drag Source").value("id").toULongLong();
+        manager.moveWindow(sourceId, 45, 65);
+        manager.resizeWindow(sourceId, 370, 300);
+        const auto service =
+            "org.frankenstein.Finder.p" +
+            QString::fromLatin1(QCryptographicHash::hash((scene.files.path() + "\n" + scene.files.path() + "/profile").toUtf8(),
+                                                         QCryptographicHash::Sha256).toHex().left(24));
+        QDBusInterface finder(service, "/Finder", "org.frankenstein.Finder");
+        QTRY_VERIFY(finder.isValid());
+        const auto state = [&] { return QDBusReply<QVariantMap>(finder.call("DirectoryState", from)).value(); };
+        QTRY_VERIFY(state().value("loaded").toBool());
+        QTRY_COMPARE(first(manager, "Drag Source").value("width").toInt(), 370);
+        auto *client = qobject_cast<QWaylandQuickItem *>(visualItem(scene.view.contentItem(), "client-" + QString::number(sourceId)));
+        QVERIFY(client);
+        const auto filePoint = [&]
+        {
+            for (const auto &value : qdbus_cast<QVariantList>(state().value("entries")))
+            {
+                const auto item = qdbus_cast<QVariantMap>(value);
+                if (item.value("name").toString() == "Note.txt")
+                    return client->mapToScene(client->mapFromSurface(QPointF(item.value("x").toReal() + item.value("width").toReal() / 2,
+                                                                             item.value("y").toReal() + item.value("height").toReal() / 2))).toPoint();
+            }
+            return QPoint(-1, -1);
+        };
+        manager.activate(sourceId);
+        QTRY_VERIFY(first(manager, "Drag Source").value("active").toBool());
+        QTRY_VERIFY(filePoint().x() > 0);
+        const auto start = filePoint();
+        QTest::mousePress(&scene.view, Qt::LeftButton, {}, start);
+        QTest::mouseMove(&scene.view, start + QPoint(28, 0), 40);
+        QTRY_VERIFY(manager.nativeDragging());
+        for (auto *view : client->surface()->views())
+            view->setOutput(nullptr);
+        QVERIFY(!client->view()->output());
+        QTest::mouseMove(&scene.view, start + QPoint(60, 12), 40);
+        QTest::mouseMove(&scene.view, start + QPoint(90, 20), 40);
+        QVERIFY(manager.nativeDragging());
+        nativeKeyEvent(&scene.view, QEvent::KeyPress, Qt::Key_Escape, {}, 1);
+        nativeKeyEvent(&scene.view, QEvent::KeyRelease, Qt::Key_Escape, {}, 1);
+        QTest::mouseRelease(&scene.view, Qt::LeftButton, {}, start + QPoint(90, 20));
+        QTRY_VERIFY(!manager.nativeDragging());
+        QVERIFY(QFileInfo::exists(from + "/Note.txt"));
     }
     void finderDragsReachDesktopAndBackgroundFoldersAndRightClickMenus()
     {

@@ -119,6 +119,7 @@ target_sources(frankenstein-desktop PRIVATE src/desktop/host_pointer.cpp src/des
                src/desktop/fingerprints.cpp src/desktop/fingerprints.hpp
                src/desktop/camera_switch.cpp src/desktop/camera_switch.hpp
                src/desktop/system_sounds.cpp src/desktop/system_sounds.hpp
+               src/desktop/startup_items.cpp src/desktop/startup_items.hpp
                src/desktop/scroll_bar_art.cpp src/desktop/scroll_bar_art.hpp
                src/desktop/icon_store.cpp src/desktop/icon_store.hpp
                src/desktop/notifications.cpp src/desktop/notifications.hpp
@@ -196,7 +197,7 @@ target_include_directories(frankenstein-desktop PRIVATE ${CMAKE_CURRENT_BINARY_D
 target_link_libraries(frankenstein-desktop PUBLIC frankenstein-policy frankenstein-applications Qt6::Quick Qt6::Qml Qt6::DBus Qt6::WaylandCompositor PRIVATE PkgConfig::WAYLAND_SERVER PkgConfig::WAYLAND_CLIENT Qt6::GuiPrivate Qt6::WaylandCompositorPrivate Qt6::QuickPrivate Qt6::Network)
 target_include_directories(frankenstein-desktop PRIVATE ${PLATINUM_PROTOCOLS})
 target_compile_options(frankenstein-desktop PRIVATE -Wall -Wextra -Wpedantic)
-qt_add_resources(frankenstein-desktop desktop-assets PREFIX "/desktop" FILES src/desktop/Desktop.qml src/desktop/ClientSurface.qml src/desktop/DesktopIcon.qml src/desktop/MenuGlyph.qml src/desktop/ShellDialog.qml src/desktop/PlatinumButton.qml src/desktop/TitleBox.qml src/desktop/titlebar/close-active.svg src/desktop/titlebar/close-pressed.svg src/desktop/titlebar/close-inactive.svg src/desktop/titlebar/zoom-active.svg src/desktop/titlebar/zoom-pressed.svg src/desktop/titlebar/zoom-inactive.svg src/desktop/titlebar/shade-active.svg src/desktop/titlebar/shade-pressed.svg src/desktop/titlebar/shade-inactive.svg src/desktop/PlatinumCheckBox.qml src/desktop/PlatinumRadioButton.qml src/desktop/ApplicationBrowser.qml src/desktop/NotificationAlerts.qml src/desktop/MonitorsPanel.qml src/desktop/InfoWindow.qml src/desktop/ClipboardWindow.qml src/desktop/HelpWindow.qml src/desktop/ControlPanelsWindow.qml src/desktop/NetworkPanel.qml src/desktop/DateTimePanel.qml src/desktop/KeyboardPanel.qml src/desktop/EnergySaverPanel.qml src/desktop/StickyNote.qml src/desktop/ShellWindowFocus.qml src/desktop/WorkspaceMember.qml src/desktop/MousePanel.qml src/desktop/PlatinumSlider.qml src/desktop/PlatinumGroup.qml src/desktop/GeneralControlsPanel.qml src/desktop/AppleMenuOptionsPanel.qml src/desktop/FileExchangePanel.qml src/desktop/FieldBackground.qml src/desktop/ApplicationSwitcher.qml src/desktop/PlatinumPopup.qml)
+qt_add_resources(frankenstein-desktop desktop-assets PREFIX "/desktop" FILES src/desktop/Desktop.qml src/desktop/ClientSurface.qml src/desktop/DesktopIcon.qml src/desktop/MenuGlyph.qml src/desktop/ShellDialog.qml src/desktop/PlatinumButton.qml src/desktop/TitleBox.qml src/desktop/titlebar/close-active.svg src/desktop/titlebar/close-pressed.svg src/desktop/titlebar/close-inactive.svg src/desktop/titlebar/zoom-active.svg src/desktop/titlebar/zoom-pressed.svg src/desktop/titlebar/zoom-inactive.svg src/desktop/titlebar/shade-active.svg src/desktop/titlebar/shade-pressed.svg src/desktop/titlebar/shade-inactive.svg src/desktop/PlatinumCheckBox.qml src/desktop/PlatinumRadioButton.qml src/desktop/ApplicationBrowser.qml src/desktop/NotificationAlerts.qml src/desktop/MonitorsPanel.qml src/desktop/InfoWindow.qml src/desktop/ClipboardWindow.qml src/desktop/HelpWindow.qml src/desktop/ControlPanelsWindow.qml src/desktop/NetworkPanel.qml src/desktop/DateTimePanel.qml src/desktop/KeyboardPanel.qml src/desktop/EnergySaverPanel.qml src/desktop/StickyNote.qml src/desktop/ShellWindowFocus.qml src/desktop/WorkspaceMember.qml src/desktop/MousePanel.qml src/desktop/PlatinumSlider.qml src/desktop/PlatinumGroup.qml src/desktop/GeneralControlsPanel.qml src/desktop/AppleMenuOptionsPanel.qml src/desktop/FileExchangePanel.qml src/desktop/ExtensionsManagerPanel.qml src/desktop/FieldBackground.qml src/desktop/ApplicationSwitcher.qml src/desktop/PlatinumPopup.qml)
 qt_add_resources(frankenstein-desktop appearance-assets PREFIX "/desktop" FILES src/desktop/WindowRoll.qml src/desktop/PopUpTab.qml src/desktop/AppearanceDialog.qml src/desktop/ControlStrip.qml src/desktop/StripGlyph.qml src/desktop/PlatinumScrollBar.qml)
 qt_add_resources(frankenstein-desktop computer-assets PREFIX "/desktop" FILES src/desktop/AboutComputerWindow.qml)
 qt_add_resources(frankenstein-desktop picture-assets PREFIX "/desktop" FILES src/desktop/DesktopPictureDialog.qml)
@@ -274,6 +275,21 @@ add_executable(platinum-app-store src/appstore/main.cpp)
 target_link_libraries(platinum-app-store PRIVATE platinum-app-store-ui)
 add_dependencies(frankenstein frankenstein-finder frankenstein-editor frankenstein-style frankenstein-drop-receiver
                  platinum-app-store)
+# The password box (docs/password-box.md): the session's polkit authentication agent, drawn like
+# Mac OS 9.2.2. polkit-agent-helper-1 and PAM decide passwords; the agent only carries the answer.
+find_package(PolkitQt6-1 REQUIRED)
+add_library(platinum-authentication-ui STATIC src/authentication/authentication_controller.cpp
+            src/authentication/authentication_controller.hpp src/authentication/authentication_dialog.cpp
+            src/authentication/authentication_dialog.hpp src/authentication/authentication_session.hpp)
+target_include_directories(platinum-authentication-ui PUBLIC src)
+target_link_libraries(platinum-authentication-ui PUBLIC frankenstein-appearance Qt6::Widgets)
+target_compile_options(platinum-authentication-ui PRIVATE -Wall -Wextra -Wpedantic)
+add_executable(platinum-authentication-agent src/authentication/main.cpp src/authentication/polkit_agent.cpp
+               src/authentication/polkit_agent.hpp)
+# platinum-lock-ui for pamServiceUsesFingerprint (the lock's check of a PAM stack).
+target_link_libraries(platinum-authentication-agent PRIVATE platinum-authentication-ui platinum-lock-ui PolkitQt6-1::Agent)
+target_compile_options(platinum-authentication-agent PRIVATE -Wall -Wextra)
+add_dependencies(frankenstein platinum-authentication-agent)
 
 # The Platinum screen lock (Mac OS 9.2.2 Log In style) for the session supervisor. PAM decides
 # passwords; the lock role itself is Qt private API, confined to src/lock/session_lock.cpp.
@@ -303,7 +319,7 @@ file(RELATIVE_PATH PLATINUM_LIB_FROM_BIN "${CMAKE_INSTALL_FULL_BINDIR}"
 configure_file(packaging/platinum-reality.in platinum-reality @ONLY)
 configure_file(packaging/platinum-reality-session.in platinum-reality-session @ONLY)
 install(TARGETS frankenstein frankenstein-finder frankenstein-editor frankenstein-drop-receiver frankenstein-puzzle
-                platinum-lock platinum-app-store platinum-snapshot
+                platinum-lock platinum-app-store platinum-snapshot platinum-authentication-agent
         RUNTIME DESTINATION "${PLATINUM_LIBDIR}")
 install(TARGETS frankenstein-style LIBRARY DESTINATION "${PLATINUM_LIBDIR}/plugins/styles")
 install(PROGRAMS "${CMAKE_CURRENT_BINARY_DIR}/platinum-reality"
@@ -400,6 +416,10 @@ if(BUILD_TESTING)
     add_executable(installer-tests tests/installer_tests.cpp)
     target_link_libraries(installer-tests PRIVATE platinum-installer-ui Qt6::Test)
     add_test(NAME installer COMMAND installer-tests)
+    add_executable(authentication-tests tests/authentication_tests.cpp)
+    target_link_libraries(authentication-tests PRIVATE platinum-authentication-ui Qt6::Test)
+    add_test(NAME authentication COMMAND authentication-tests)
+    set_tests_properties(authentication PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=generic")
     add_executable(app-store-tests tests/app_store_tests.cpp)
     target_link_libraries(app-store-tests PRIVATE platinum-app-store-ui Qt6::Test)
     target_compile_definitions(app-store-tests PRIVATE APP_STORE_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/app-store")

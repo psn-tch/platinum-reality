@@ -14,8 +14,8 @@ import tempfile
 library = (Path(__file__).resolve().parent / "@PLATINUM_LIB_FROM_BIN@").resolve()
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(library))
-from session_support import (adopt_previous_name, cleanup_runtime, host_wallet_status, wallet_login_requested,
-                             write_bus_config)
+from session_support import (adopt_previous_name, cleanup_runtime, host_wallet_status, link_user_services,
+                             wallet_login_requested, write_bus_config)
 
 
 def main():
@@ -68,6 +68,7 @@ def main():
             probe.bind(str(runtime / "preflight"))
             probe.listen(1)
         (runtime / "preflight").unlink()
+        link_user_services(runtime)
         profile.mkdir(parents=True, exist_ok=True, mode=0o700)
         profile_lock = os.open(profile / "session.lock",
                                os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)

@@ -204,6 +204,9 @@ int main(int argc, char **argv)
         QTimer::singleShot(150, &manager, [&] { manager.launchFinder(); });
     if (!topology && !preview)
         QTimer::singleShot(600, &manager, [&] { manager.reopenAfterRestart(); });
+    // Extensions Manager's startup items, once the desktop is up (once per login).
+    if (!topology && !preview)
+        QTimer::singleShot(1500, &manager, [&] { manager.startStartupItems(); });
     if (!preview)
         manager.initializeWallet();
     if (!preview && qEnvironmentVariable("FRANKENSTEIN_ISOLATED") == "1")

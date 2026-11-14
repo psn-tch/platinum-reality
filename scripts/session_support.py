@@ -157,6 +157,21 @@ def write_bus_config(runtime, *, wallet_supervisor=None, service_directory=WALLE
     return path
 
 
+def link_user_services(runtime, user_runtime=None):
+    """Point the private runtime's "systemd" at the login's own, so systemctl --user and
+    journalctl --user work in the session's terminals (Lily Hewitt, 2026-11-14), as
+    PIPEWIRE_RUNTIME_DIR and PULSE_SERVER already do for sound."""
+    services = Path(user_runtime or "/run/user/%d" % os.getuid()) / "systemd"
+    try:
+        info = services.lstat()
+    except OSError:
+        return False
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        return False
+    (Path(runtime) / "systemd").symlink_to(services, target_is_directory=True)
+    return True
+
+
 def cleanup_runtime(runtime):
     runtime = Path(runtime).absolute()
     if (runtime.parent != Path("/tmp") or not runtime.name.startswith("frankenstein-runtime.")
@@ -167,8 +182,9 @@ def cleanup_runtime(runtime):
         # Unlink only known files or sockets created in this private runtime.
         # Empty, owned helper directories can be removed without descending.
         # rmdir rejects nonempty directories, symlinks and mounted portal roots.
+        # The link_user_services link is removed itself, never followed.
         if stat.S_ISSOCK(mode) or (stat.S_ISREG(mode) and entry.name in (
-                "bus.conf", "frankenstein-qualification.lock")):
+                "bus.conf", "frankenstein-qualification.lock")) or (stat.S_ISLNK(mode) and entry.name == "systemd"):
             entry.unlink()
         elif stat.S_ISDIR(mode) and entry.lstat().st_uid == os.getuid():
             if entry.name == "wallet-services":

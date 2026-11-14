@@ -233,6 +233,7 @@ Item {
                 text: !service ? ""
                       : service.changing ? (service.removed ? "Downloading the Arch and KDE desktop sounds…" : "Removing the Arch and KDE desktop sounds…")
                       : service.error !== "" ? service.error
+                      : service.note !== "" ? service.note
                       : service.removed ? "The Arch and KDE desktop sounds are removed, and updates won’t bring them back. "
                                           + "Turn this off to download them again."
                       : "Removes the Arch and KDE desktop sounds, so only Mac sounds play. Asks for an administrator’s password."

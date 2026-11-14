@@ -169,6 +169,24 @@ class ImporterTests(unittest.TestCase):
         self.assertEqual(pixels[7], 0)  # the second pixel is outside the mask
         self.assertIsNone(importer.small_icon(fork_data, 257))
 
+    def test_keychain_large_icon_uses_its_colours_and_mask(self):
+        # Keychain Access's 32x32 'icl8'/'ICN#' pair: colour index 9 everywhere, mask on the last pixel only.
+        bitmap = bytes(128)
+        mask = bytes(127) + bytes([0x01])
+        fork_data = forks({b'icl8': [(importer.KEYCHAIN_ICON, '', bytes([9]) * 1024)],
+                           b'ICN#': [(importer.KEYCHAIN_ICON, '', bitmap + mask)]})
+        pixels = importer.large_icon(fork_data, importer.KEYCHAIN_ICON)
+        self.assertEqual(len(pixels), 32 * 32 * 4)
+        self.assertEqual(tuple(pixels[-4:]), importer.PALETTE[9] + (255,))
+        self.assertEqual(pixels[3], 0)  # the first pixel is outside the mask
+        self.assertIsNone(importer.large_icon(fork_data, importer.KEYCHAIN_ICON + 1))
+
+    def test_the_alert_icons_are_imported_by_name(self):
+        # Alerts look for alert-stop.png and its neighbours (PlatinumStyle::standardIcon).
+        self.assertEqual(importer.ICONS[-3822], 'alert-stop')
+        self.assertEqual(importer.ICONS[-3821], 'alert-caution')
+        self.assertEqual(importer.ICONS[-3820], 'alert-note')
+
     def test_standard_8_bit_sound_stays_unsigned_mono(self):
         self.assertEqual(importer.decode_sound(sound(standard(22050, bytes([128, 200, 56])))),
                          (1, 22050, 8, bytes([128, 200, 56])))

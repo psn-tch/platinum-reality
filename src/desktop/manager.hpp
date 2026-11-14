@@ -13,6 +13,7 @@
 #include "fingerprints.hpp"
 #include "camera_switch.hpp"
 #include "system_sounds.hpp"
+#include "startup_items.hpp"
 #include "handheld.hpp"
 #include <QElapsedTimer>
 #include <QAbstractListModel>
@@ -268,6 +269,8 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(QObject *camera READ camera CONSTANT)
     // Sound ▸ Alert Sounds ▸ Mac sounds only (docs/alert-sounds.md).
     Q_PROPERTY(QObject *systemSounds READ systemSounds CONSTANT)
+    // Extensions Manager: the programs that start at login (startup_items.hpp).
+    Q_PROPERTY(QObject *startupItems READ startupItems CONSTANT)
     // Special ▸ Sleep, Restart and Shut Down: only in the whole session (power_control.hpp).
     Q_PROPERTY(bool powerAvailable READ powerAvailable CONSTANT)
     // Alert sounds (docs/alert-sounds.md); silent outside a real session.
@@ -365,6 +368,9 @@ class NativeManager final : public QAbstractListModel
     QObject *fingerprints() const { return m_fingerprints; }
     QObject *camera() const { return m_camera; }
     QObject *systemSounds() const { return m_systemSounds; }
+    QObject *startupItems() const { return m_startupItems; }
+    // Once per login (not after Restart Desktop): starts the startup items that are On.
+    void startStartupItems();
     QObject *alertSounds() const { return m_alertSounds; }
     QObject *interfaceSounds() const { return m_interfaceSounds; }
     QObject *startupSound() const { return m_startupSound; }
@@ -458,7 +464,8 @@ class NativeManager final : public QAbstractListModel
     Q_INVOKABLE void launchTrash();
     // A trusted .desktop launcher on the desktop (the user's own and executable).
     void launchDesktopFile(const QString &path);
-    Q_INVOKABLE void quitSession();
+    // The reason goes in the journal, so an unexpected Log Out can be traced to what asked for it.
+    Q_INVOKABLE void quitSession(const QString &reason = QStringLiteral("Log Out from the Special menu"));
     // Restart Desktop (Lily Hewitt, 2026-11-12): an update takes effect without Log Out. The
     // applications are asked to close as at Log Out; the desktop then exits with
     // RestartDesktopExit, the session supervisor starts a new one without Log In, and it reopens
@@ -623,6 +630,7 @@ class NativeManager final : public QAbstractListModel
     FingerprintService *m_fingerprints = nullptr;
     CameraSwitch *m_camera = nullptr;
     SystemSounds *m_systemSounds = nullptr;
+    StartupItems *m_startupItems = nullptr;
     std::optional<PowerControl::Action> m_pendingPower;
     void endSession();
     bool m_normalApplicationSettings = false;

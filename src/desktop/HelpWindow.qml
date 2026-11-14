@@ -37,7 +37,8 @@ FocusScope {
             "<p>The <b>application menu</b> at the far right shows which application is in front. Choose " +
             "another one there to switch to it, or hide the others. Drag down past the open menu to " +
             "tear it off as the <b>Application Switcher</b>, a palette of running applications: " +
-            "click one to switch to it.</p>" +
+            "click one to switch to it. An application whose windows are all on another workspace shows " +
+            "that workspace's number after its name, as in <i>Steam (2)</i>.</p>" +
             "<p>The <b>Control Strip</b> in the bottom-left corner has volume, brightness, monitors, " +
             "battery, Wi-Fi and Bluetooth. Its <b>Camera</b> module turns the camera off so that nothing at all " +
             "can use it (turning it on asks for an administrator's password), and its <b>Clipboard</b> module " +
@@ -145,6 +146,9 @@ FocusScope {
             "seconds, the date). Click the clock in the menu bar to see the date.</li>" +
             "<li><b>Desktop Picture</b>: choose a picture, then Set Desktop.</li>" +
             "<li><b>Energy Saver</b>: when the display turns off and the computer sleeps.</li>" +
+            "<li><b>Extensions Manager</b>: which programs start when you log in. Check or uncheck each one; " +
+            "sets keep different choices (Duplicate Set…). Programs that were already set to start for other " +
+            "desktops begin unchecked; ones you install later begin checked.</li>" +
             "<li><b>File Exchange</b>: which application opens each kind of document from the Finder and the desktop.</li>" +
             "<li><b>General Controls</b>: whether the desktop's icons show behind other applications, " +
             "how many times a chosen menu item blinks, and how fast the insertion point blinks.</li>" +
@@ -210,7 +214,11 @@ FocusScope {
             "<li>Install an application: <tt>sudo pacman -S</tt> followed by its name, for example " +
             "<tt>sudo pacman -S gimp</tt></li>" +
             "<li>Find one: <tt>pacman -Ss</tt> followed by a word</li></ul>" +
-            "<p>New applications appear in Applications… as soon as they are installed.</p>"},
+            "<p>New applications appear in Applications… as soon as they are installed.</p>" +
+            "<p>When something needs an administrator's password (installing an update, the Camera module, " +
+            "Fingerprints), a password box asks for it. Type the password and click <b>OK</b>; <b>Cancel</b> " +
+            "never counts as a wrong password. After three wrong passwords the box closes, and the account " +
+            "may be locked for ten minutes.</p>"},
         {id: "leaving", title: "Sleep and shutting down", body:
             "<h3>Sleep, restart and shutting down</h3>" +
             "<p><b>Special ▸ Sleep</b>, <b>Restart</b> and <b>Shut Down</b> do what they say. Restart and " +

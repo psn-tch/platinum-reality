@@ -205,7 +205,7 @@ class LockSessionTests(unittest.TestCase):
         refused = subprocess.run([str(BUILD / 'platinum-lock'), '--session-fd', str(writer)], env=self.environment,
                                  pass_fds=(writer,), capture_output=True, timeout=15)
         os.close(writer)
-        self.assertNotEqual(refused.returncode, 0)
+        self.assertEqual(refused.returncode, 2)  # Refused, not aborted (a crash is a negative signal here).
 
     def test_only_the_right_password_reveals_the_desktop(self):
         self.assertTrue(wait(lambda: self.pixel('HEADLESS-1', 512, 350) == PROBE_COLOR, 10),

@@ -3,6 +3,7 @@
 #include "scroll_bar_art.hpp"
 #include "applications/desktop_entry.hpp"
 #include <unistd.h>
+#include <set>
 #include "appearance_settings.hpp"
 #include "system_controls.hpp"
 #include "audio_service.hpp"
@@ -102,6 +103,9 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
         qmlRegisterType<ClientSurfaceItem>("Frankenstein", 1, 0, "NativeClientSurfaceItem");
     Q_UNUSED(clientSurfaceType);
     registerScrollBarArt();
+    // Platinum's own password box first (Lily Hewitt, 2026-11-14: "make the polkit more 9.2.2 style");
+    // KDE's and the others stay as the fallback when it is not installed.
+    m_authenticationAgents.prepend(QCoreApplication::applicationDirPath() + "/platinum-authentication-agent");
     m_state.session = {qulonglong(QDateTime::currentMSecsSinceEpoch())};
     QDir().mkpath(m_profile);
     {
@@ -159,6 +163,15 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     m_systemSounds = new SystemSounds(hostCamera ? QCoreApplication::applicationDirPath() + "/platinum-system-sounds"
                                                  : qEnvironmentVariable("FRANKENSTEIN_SYSTEM_SOUNDS_HELPER"),
                                       hostCamera ? QStringList{"pkexec"} : QStringList(), this);
+    // Extensions Manager. Tests name their own folders, so no test reads or starts the host's items.
+    {
+        const auto system = QProcessEnvironment::systemEnvironment();
+        const auto folders = qEnvironmentVariable("FRANKENSTEIN_AUTOSTART_DIRS");
+        m_startupItems = new StartupItems(m_profile,
+                                          folders.isEmpty() && !nativeTest && c != nullptr ? StartupItems::standardDirectories(system)
+                                                                           : folders.split(':', Qt::SkipEmptyParts),
+                                          {"PlatinumReality", "Frankenstein"}, system, this);
+    }
     m_power = new PowerControl(hostBluetooth ? QDBusConnection::systemBus() : QDBusConnection(QString()), this);
     connect(m_power, &PowerControl::lockFailed, this, &NativeManager::errorOccurred);
     connect(m_power, &PowerControl::finished, this, [this](bool ok, const QString &error)
@@ -1152,13 +1165,30 @@ QVariantList NativeManager::applications() const
 {
     QVariantList result;
     for (auto id : m_state.applications_back_to_front)
+    {
+        // Where its windows are (Lily Hewitt, 2026-11-14): the workspace numbers in order, and
+        // whether one shows, so the Application menu and switcher can say "Steam (2)".
+        std::set<std::uint32_t> numbers;
+        bool shown = false;
+        for (const auto window : m_state.applications.at(id).windows_back_to_front)
+            if (!m_state.windows.at(window).parent)
+            {
+                numbers.insert(m_state.windows.at(window).workspace);
+                shown = shown || on_shown_workspace(m_state, window);
+            }
+        QVariantList workspaces;
+        for (const auto number : numbers)
+            workspaces.push_back(int(number));
         result.push_back(QVariantMap{{"id", qulonglong(id.value)},
                                      {"name", m_applicationNames.value(id.value)},
                                      {"icon", applicationIcon(m_applicationIds.key(id))},
                                      {"hidden", m_state.applications.at(id).hidden},
                                      {"active", m_state.active.application == id},
                                      {"attention", m_wantsAttention.contains(id.value)},
-                                     {"agent", m_authenticationApplications.contains(id.value)}});
+                                     {"agent", m_authenticationApplications.contains(id.value)},
+                                     {"workspaces", workspaces},
+                                     {"onShownWorkspace", shown}});
+    }
     return result;
 }
 void NativeManager::updateScreens(const DisplayLayout &layout)
@@ -1327,6 +1357,7 @@ QUrl NativeManager::applicationIcon(QString identity, int size) const
         {"shell:energy", {"energy-saver", "preferences-system-power-management"}},
         {"shell:fingerprints", {"fingerprints", "preferences-desktop-user-password"}},
         {"shell:apple-menu-options", {"apple-menu-options", "preferences-desktop-menu"}},
+        {"shell:extensions-manager", {"extensions-manager", "preferences-system-session-services"}},
         {"shell:file-exchange", {"file-exchange", "preferences-desktop-default-applications"}},
         {"shell:keyboard", {"keyboard", "input-keyboard"}},
         {"shell:monitors", {"monitors", "preferences-desktop-display"}},
@@ -1415,23 +1446,28 @@ void NativeManager::createWindow(QWaylandXdgToplevel *top, QWaylandXdgSurface *x
             queueClientFlush();
         }
     };
+    // Qt's shell-item handlers for full screen and maximize, connected after ours, ignore any
+    // named output and dereference the item's view output. That is empty while reconcileSurfaces
+    // finds no monitor for the view: in Extend before the client bound wl_output, and while the
+    // window is hidden or has no buffer. Full screen crashed the whole desktop that way, also for
+    // X11 games through xwayland-satellite, which name a monitor (2026-11-14). Give such views the
+    // named monitor, else the window's own (so even Qt's interim configure has the right size).
+    const auto giveViewsAMonitor=[this,mapped,surface=QPointer(xdg->surface())](QWaylandOutput *named) {
+        if(!surface) return;
+        auto *fallback=named && !named->property("platinumRetired").toBool() ? named
+                       : *mapped ? outputForScreen(windowScreen(mapped->data()))
+                       : m_compositor ? m_compositor->defaultOutput() : nullptr;
+        for(auto *view:surface->views())
+            if(!view->output() && fallback) view->setOutput(fallback);
+    };
     connect(top,&QWaylandXdgToplevel::setFullscreen,this,
-            [this,requestedFullscreen,requestedOutput,applyFullscreenIntent,mapped,surface=QPointer(xdg->surface())](QWaylandOutput *output) {
+            [this,requestedFullscreen,requestedOutput,applyFullscreenIntent,giveViewsAMonitor](QWaylandOutput *output) {
                 *requestedFullscreen=true;
                 *requestedOutput=output;
-                // Qt's shell-item handler, connected after this one, uses the item's view output
-                // when the request names none, and dereferences it. In Extend a client that never
-                // bound wl_output has no view output yet: full screen crashed the whole desktop.
-                // Give such views the output of the window's own monitor (so even Qt's interim
-                // configure has the right size); our policy below still sends the final one.
-                if(!output && surface) {
-                    auto *fallback=*mapped ? outputForScreen(windowScreen(mapped->data()))
-                                           : m_compositor ? m_compositor->defaultOutput() : nullptr;
-                    for(auto *view:surface->views())
-                        if(!view->output() && fallback) view->setOutput(fallback);
-                }
+                giveViewsAMonitor(output); // Our policy below still sends the final configure.
                 QTimer::singleShot(0,this,applyFullscreenIntent);
             });
+    connect(top,&QWaylandXdgToplevel::setMaximized,this,[giveViewsAMonitor] { giveViewsAMonitor(nullptr); });
     connect(top,&QWaylandXdgToplevel::unsetFullscreen,this,
             [this,requestedFullscreen,applyFullscreenIntent] {
                 *requestedFullscreen=false;
@@ -3088,12 +3124,12 @@ bool NativeManager::eventFilter(QObject *object, QEvent *event)
         QTimer::singleShot(0, this, &NativeManager::hostScaleChanged);
     if (object == m_view && event->type() == QEvent::Close && !m_allowExit)
     {
-        quitSession();
+        quitSession("the desktop window was asked to close");
         return true;
     }
     return QAbstractListModel::eventFilter(object, event);
 }
-void NativeManager::quitSession()
+void NativeManager::quitSession(const QString &reason)
 {
     if (shellModal() || m_desktopItems->busy())
     {
@@ -3106,6 +3142,8 @@ void NativeManager::quitSession()
     if (m_quitting)
         return;
     m_quitting = true;
+    qInfo("Session ending: %s (%lld application window(s) asked to close)", qUtf8Printable(reason),
+          static_cast<long long>(m_windows.size()));
     if (!m_compositor || m_windows.isEmpty())
     {
         endSession();
@@ -3207,7 +3245,7 @@ void NativeManager::restartDesktop(const QStringList &shellWindows)
         return;
     }
     m_restartingDesktop = true;
-    quitSession();
+    quitSession("Restart Desktop");
     if (!m_quitting)
     {
         m_restartingDesktop = false;
@@ -3246,6 +3284,34 @@ void NativeManager::reopenUpdatedPrograms()
         }
     });
     timer->start();
+}
+void NativeManager::startStartupItems()
+{
+    // Once per login: the supervisor's folder for this login keeps the note, so a new desktop
+    // after Restart Desktop starts nothing again. Without a supervisor (a preview), nothing starts.
+    const auto control = qEnvironmentVariable("PLATINUM_SESSION_CONTROL");
+    if (!m_compositor || control.isEmpty())
+        return;
+    QFile note(QFileInfo(control).absolutePath() + "/startup-items-started");
+    if (note.exists() || !note.open(QIODevice::WriteOnly | QIODevice::NewOnly))
+        return;
+    note.close();
+    const auto environment = nativeApplicationEnvironment(
+        QProcessEnvironment::systemEnvironment(), QString::fromUtf8(m_compositor->socketName()), m_profile,
+        QCoreApplication::applicationDirPath() + "/plugins");
+    const auto started = m_startupItems->startAll(
+        [this, &environment](const QString &file, const QString &id)
+        {
+            const auto entry = frankenstein::applications::readDesktopEntry(file, id, environment);
+            const auto plan = frankenstein::applications::planLaunch(entry, {}, m_workspace, environment);
+            if (!plan)
+            {
+                qWarning("Startup item %s not started: %s", qUtf8Printable(id), qUtf8Printable(plan.error));
+                return false;
+            }
+            return launch(plan.program, plan.arguments, plan.workingDirectory, plan.existingApplicationSettings);
+        });
+    qInfo("Startup items started: %s", qUtf8Printable(started.isEmpty() ? QString("none") : started.join(", ")));
 }
 void NativeManager::reopenAfterRestart()
 {
@@ -3290,7 +3356,7 @@ void NativeManager::restartComputer()
     if (!powerAvailable() || m_quitting || m_power->busy())
         return;
     m_pendingPower = PowerControl::Action::Restart;
-    quitSession();
+    quitSession("Restart");
     if (!m_quitting)
         m_pendingPower.reset();
 }
@@ -3299,7 +3365,7 @@ void NativeManager::shutDownComputer()
     if (!powerAvailable() || m_quitting || m_power->busy())
         return;
     m_pendingPower = PowerControl::Action::ShutDown;
-    quitSession();
+    quitSession("Shut Down");
     if (!m_quitting)
         m_pendingPower.reset();
 }

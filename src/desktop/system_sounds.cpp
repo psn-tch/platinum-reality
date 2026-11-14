@@ -47,6 +47,8 @@ void SystemSounds::finished(QProcess *process, int code, QProcess::ExitStatus st
         reported = true;
         if (message.contains("error"))
             m_error = message.value("error").toString();
+        if (message.contains("note"))
+            m_note = message.value("note").toString();
         if (message.contains("removed"))
         {
             m_removed = message.value("removed").toBool();
@@ -78,6 +80,7 @@ void SystemSounds::setRemoved(bool removed)
     if (changing() || !available())
         return;
     m_error.clear();
+    m_note.clear();
     const QString argument = removed ? "remove" : "restore";
     if (m_elevate.isEmpty())
         m_change.start("/usr/bin/python3", {"-I", m_helper, argument});
