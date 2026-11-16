@@ -7,6 +7,8 @@ ShellDialog {
     required property var catalog
     property string documentPath: ""
     property var pendingLaunch: null
+    // What Add To Launcher did, shown until another application is chosen.
+    property string status: ""
     readonly property var selected: {let count = catalog.count; return catalog.item(applicationList.currentIndex)}
     width: Math.min(620, parent.width - 32)
     height: Math.min(510, parent.height - 54)
@@ -21,6 +23,7 @@ ShellDialog {
         catalog.query = ""
         catalog.showAll = false
         rememberChoice.checked = false
+        status = ""
         search.text = ""
         applicationList.currentIndex = 0
         open()
@@ -41,6 +44,7 @@ ShellDialog {
         }
     }
     Connections {target: catalog; function onCountChanged() {applicationList.currentIndex = catalog.count > 0 ? 0 : -1}}
+    Connections {target: applicationList; function onCurrentIndexChanged() {browser.status = ""}}
     contentItem: Column {
         spacing: 10
         Text {
@@ -52,7 +56,7 @@ ShellDialog {
             width: parent.width; spacing: 10
             TextField {
                 id: search; objectName: "application-search"
-                width: parent.width - refreshButton.width - 10; height: 28
+                width: parent.width - refreshButton.width - (addToLauncher.visible ? addToLauncher.width + 10 : 0) - 10; height: 28
                 placeholderText: "Find an application"; font.pixelSize: 12; selectByMouse: true
                 color: "black"; selectionColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightColor : "#ccccff"; selectedTextColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightTextColor : "black"
                 background: FieldBackground {}
@@ -62,6 +66,14 @@ ShellDialog {
                 Keys.onPressed: function(event) {if(event.key===Qt.Key_A && (event.modifiers & Qt.MetaModifier)){selectAll();event.accepted=true}}
             }
             PlatinumButton {id:refreshButton; objectName:"application-refresh"; text:"Refresh"; enabled:!catalog.busy; onClicked:catalog.refresh()}
+            // The Launcher's items: the chosen application, as an alias to its .desktop file (not the
+            // desktop's own applications, which have none).
+            PlatinumButton {
+                id:addToLauncher; objectName:"application-add-launcher"; text:"Add To Launcher"
+                visible:browser.documentPath===""; enabled:Boolean(browser.selected.file) && !catalog.busy
+                onClicked:browser.status = browser.sessionManager.addApplicationToLauncher(browser.selected.id)
+                    ? "“" + browser.selected.name + "” is in the Launcher." : "“" + browser.selected.name + "” is already in the Launcher."
+            }
         }
         Rectangle {
             width: parent.width; height: browser.height - (browser.documentPath === "" ? 206 : 292)
@@ -95,7 +107,7 @@ ShellDialog {
         }
         Text {
             width:parent.width; height:32
-            text: catalog.busy ? "Reading applications…" : browser.selected.reason || catalog.notice || catalog.count + " applications"
+            text: catalog.busy ? "Reading applications…" : browser.status || browser.selected.reason || catalog.notice || catalog.count + " applications"
             textFormat:Text.PlainText;font.pixelSize:12;wrapMode:Text.Wrap;color:"#333"
         }
         PlatinumCheckBox {visible:browser.documentPath!=="";text:"Show all applications that accept documents";checked:catalog.showAll;onToggled:catalog.showAll=checked}

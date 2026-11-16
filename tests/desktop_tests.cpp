@@ -223,8 +223,8 @@ class DesktopTests : public QObject
         icon=visualItem(switcher,"application-switcher-icon-Paint");QVERIFY(icon);
         QTRY_VERIFY(icon->property("useFallback").toBool());
     }
-    // "Steam (2)" (Lily Hewitt, 2026-11-14): an application with no window on the workspace showing
-    // says where its windows wait, in the switcher and the Application menu; others keep their name.
+    // "Steam (2)" (Lily Hewitt, 2026-11-14; every application since 2026-11-15): an application with windows
+    // says which workspaces they are on, in the switcher and the Application menu; one without keeps its name.
     void applicationLabelsSayWhichWorkspaceTheirWindowsWaitOn()
     {
         QTemporaryDir root;QQuickView view;view.resize(1120,760);
@@ -240,7 +240,8 @@ class DesktopTests : public QObject
             return result.toString();};
         QCOMPARE(label({{"name","Steam"},{"workspaces",QVariantList{2}},{"onShownWorkspace",false}}),QString("Steam (2)"));
         QCOMPARE(label({{"name","Steam"},{"workspaces",QVariantList{2,5}},{"onShownWorkspace",false}}),QString("Steam (2, 5)"));
-        QCOMPARE(label({{"name","Steam"},{"workspaces",QVariantList{1,2}},{"onShownWorkspace",true}}),QString("Steam"));
+        QCOMPARE(label({{"name","Steam"},{"workspaces",QVariantList{1,2}},{"onShownWorkspace",true}}),QString("Steam (1, 2)"));
+        QCOMPARE(label({{"name","Steam"},{"workspaces",QVariantList{2}},{"onShownWorkspace",true}}),QString("Steam (2)"));
         QCOMPARE(label({{"name","Steam"},{"workspaces",QVariantList{}},{"onShownWorkspace",false}}),QString("Steam"));
         QCOMPARE(label({{"name","Finder"}}),QString("Finder"));
         auto *switcher=visualItem(view.contentItem(),"application-switcher");QVERIFY(switcher);
@@ -529,6 +530,483 @@ class DesktopTests : public QObject
         environment.insert("XDG_CONFIG_DIRS", "/etc/xdg:/opt/xdg:relative");
         QCOMPARE(StartupItems::standardDirectories(environment),
                  (QStringList{"/home/someone/.config/autostart", "/etc/xdg/autostart", "/opt/xdg/autostart"}));
+    }
+    void sherlockFindsItemsByNameAndContents()
+    {
+        // Sherlock 2's Files channel (9.2.2 captured 2026-11-15): Command-F opens it from the desktop;
+        // it finds items on the checked disks by name or by the text in them, lists Name, Kind, Date
+        // Modified and Size, and shows where the chosen one is, from its disk down.
+        QTemporaryDir root;
+        QVERIFY(QDir().mkpath(root.filePath("Documents/Notes Folder")));
+        QVERIFY(QDir().mkpath(root.filePath(".hidden")));
+        const auto write = [&](const QString &name, const QByteArray &text) {
+            QFile file(root.filePath(name));
+            return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
+        };
+        QVERIFY(write("Documents/notes.txt", "Remember the platinum appearance.\n"));
+        QVERIFY(write("Documents/picture.png", QByteArray("\x89PNG\r\n\x1a\n\0\0", 10)));
+        QVERIFY(write(".hidden/secret-notes.txt", "platinum\n"));
+        QQuickView view; view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.filePath("profile"), {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop = view.rootObject();
+        const auto item = [&](const QString &name) { view.grabWindow(); return visualItem(view.contentItem(), name); };
+        const auto click = [&](QQuickItem *target) {
+            QTest::mouseClick(&view, Qt::LeftButton, {}, target->mapToScene(QPointF(target->width() / 2, target->height() / 2)).toPoint());
+        };
+        auto *search = qobject_cast<FileSearch *>(manager.fileSearch());
+        QVERIFY(search);
+        QVERIFY(manager.activateDesktop());
+        QTest::keyClick(&view, Qt::Key_F, Qt::MetaModifier);
+        auto *window = desktop->findChild<QQuickItem *>("sherlock-window");
+        QVERIFY(window);
+        QTRY_VERIFY(window->isVisible());
+        QCOMPARE(search->volumes().size(), 1);
+        QCOMPARE(search->volumes().first().toMap().value("name").toString(), QString("Hard Disk"));
+        QVERIFY(search->volumes().first().toMap().value("on").toBool());
+        // Typed into the field, Return finds by name: not inside hidden folders.
+        auto *field = item("sherlock-field");
+        QTRY_VERIFY(field && field->hasActiveFocus());
+        for (const char key : QByteArray("NOTE")) QTest::keyClick(&view, key, Qt::ShiftModifier);
+        QTest::keyClick(&view, Qt::Key_Return);
+        QTRY_VERIFY(!search->searching());
+        QStringList names;
+        for (const auto &result : search->results()) names << result.toMap().value("name").toString();
+        names.sort();
+        QCOMPARE(names, QStringList({"Notes Folder", "notes.txt"}));
+        QTRY_VERIFY(item("sherlock-items-found") && item("sherlock-items-found")->property("text").toString() == "Items Found: 2");
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/sherlock.png"));
+        // Choosing one shows where it is: its disk, then each folder.
+        int text = -1;
+        for (int i = 0; i < search->results().size(); ++i)
+            if (search->results().at(i).toMap().value("name") == "notes.txt") text = i;
+        QVERIFY(text >= 0);
+        QVERIFY(window->setProperty("selectedIndex", text));
+        const auto where = search->location(root.filePath("Documents/notes.txt"));
+        QCOMPARE(where.size(), 3);
+        QCOMPARE(where.at(0).toMap().value("name").toString(), QString("Hard Disk"));
+        QCOMPARE(where.at(1).toMap().value("kind").toString(), QString("folder"));
+        QCOMPARE(where.at(2).toMap().value("kind").toString(), QString("file"));
+        QTRY_VERIFY(item("sherlock-location") && item("sherlock-location")->isVisible());
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/sherlock-chosen.png"));
+        // Its Find menu, after Edit, as 9.2.2's: Find by Content (Command-G) switches to Contents.
+        QStringList menus;
+        for (const auto &entry : desktop->property("barEntries").toList()) menus << entry.toMap().value("label").toString();
+        QCOMPARE(menus, QStringList({"◆", "File", "Edit", "Find", "Window", "Help"}));
+        QTest::keyClick(&view, Qt::Key_G, Qt::MetaModifier);
+        QTRY_VERIFY(window->property("searchContents").toBool());
+        QTRY_VERIFY(item("sherlock-field")->hasActiveFocus());
+        click(item("sherlock-file-names"));
+        QVERIFY(!window->property("searchContents").toBool());
+        // Contents: the text file that says "platinum", not the picture or the hidden one.
+        click(item("sherlock-contents"));
+        QVERIFY(window->property("searchContents").toBool());
+        search->search("Platinum", true);
+        QTRY_VERIFY(!search->searching());
+        QCOMPARE(search->results().size(), 1);
+        QCOMPARE(search->results().first().toMap().value("name").toString(), QString("notes.txt"));
+        QVERIFY(!search->truncated());
+        // An unchecked disk is not searched.
+        search->setVolumeOn(root.path(), false);
+        search->search("note", false);
+        QVERIFY(!search->searching());
+        QVERIFY(search->results().isEmpty());
+    }
+    void systemProfilerShowsTheComputer()
+    {
+        // Apple System Profiler, as 9.2.2's (captured 2026-11-15): System Profile's overviews and
+        // Devices and Volumes, from a fixture's etc/, proc/, sys/ and hwdata.
+        QTemporaryDir root;
+        const auto fixture = root.filePath("fixture");
+        const auto write = [&](const QString &name, const QByteArray &text) {
+            QDir().mkpath(QFileInfo(fixture + "/" + name).path());
+            QFile file(fixture + "/" + name);
+            return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
+        };
+        QVERIFY(write("etc/os-release", "NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\n"));
+        QVERIFY(write("proc/sys/kernel/osrelease", "7.3.4-arch1-2\n"));
+        QVERIFY(write("proc/cpuinfo", "processor\t: 0\nmodel name\t: Example 8-Core Processor\n\nprocessor\t: 1\nmodel name\t: Example 8-Core Processor\n"));
+        QVERIFY(write("sys/class/dmi/id/product_name", "Example Handheld 1\n"));
+        QVERIFY(write("sys/class/dmi/id/sys_vendor", "Example Maker\n"));
+        QVERIFY(write("sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq", "5157895\n"));
+        QVERIFY(QDir().mkpath(fixture + "/var/lib/pacman/local/platinum-reality-0.50-1"));
+        QVERIFY(write("sys/bus/usb/devices/usb3/idVendor", "1d6b\n")); // A root hub: not listed.
+        QVERIFY(write("sys/bus/usb/devices/3-1/idVendor", "046d\n"));
+        QVERIFY(write("sys/bus/usb/devices/3-1/idProduct", "c31c\n"));
+        QVERIFY(write("sys/bus/usb/devices/3-1/busnum", "3\n"));
+        QVERIFY(write("usr/share/hwdata/usb.ids", "046d  Logitech, Inc.\n\tc31c  Keyboard K120\n"));
+        QVERIFY(write("sys/block/sdz/size", "500118192\n"));
+        QVERIFY(write("sys/block/sdz/removable", "1\n"));
+        QVERIFY(write("sys/block/sdz/device/model", "EXAMPLE SSD 256\n"));
+        QVERIFY(write("sys/block/zram0/size", "8388608\n")); // Swap in memory: not a disk.
+        QVERIFY(write("sys/class/drm/card1/device/vendor", "0x1002\n"));
+        QVERIFY(write("sys/class/drm/card1/device/device", "0x150e\n"));
+        QVERIFY(write("sys/class/drm/card1-eDP-1/status", "connected\n"));
+        QVERIFY(write("sys/class/drm/card1-DP-1/status", "disconnected\n"));
+        QVERIFY(write("usr/share/hwdata/pci.ids", "1002  Advanced Micro Devices, Inc. [AMD/ATI]\n\t150e  Strix [Radeon 880M / 890M]\n"));
+        qputenv("FRANKENSTEIN_PROFILE_ROOT", fixture.toUtf8());
+        const auto unset = qScopeGuard([] { qunsetenv("FRANKENSTEIN_PROFILE_ROOT"); });
+        QQuickView view; view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.filePath("profile"), {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop = view.rootObject();
+        const auto item = [&](const QString &name) { view.grabWindow(); return visualItem(view.contentItem(), name); };
+        const auto click = [&](QQuickItem *target) {
+            QTest::mouseClick(&view, Qt::LeftButton, {}, target->mapToScene(QPointF(target->width() / 2, target->height() / 2)).toPoint());
+        };
+        const auto value = [&](const QString &name) {
+            auto *fact = item(name);
+            return fact ? fact->childItems().at(1)->property("text").toString() : QString();
+        };
+        QVERIFY(QMetaObject::invokeMethod(desktop, "dispatchShellCommand", Q_ARG(QVariant, QVariant("system-profiler")), Q_ARG(QVariant, QVariant(0))));
+        auto *window = desktop->findChild<QQuickItem *>("system-profiler-window");
+        QTRY_VERIFY(window && window->isVisible());
+        QTRY_COMPARE(value("profiler-system"), QString("Arch Linux"));
+        QCOMPARE(value("profiler-platinum"), QString("0.50-1"));
+        QCOMPARE(value("profiler-model"), QString("Example Maker Example Handheld 1"));
+        QCOMPARE(value("profiler-processor"), QString("Example 8-Core Processor"));
+        const auto facts = window->property("facts").toMap();
+        QCOMPARE(facts.value("hardware").toMap().value("cores").toInt(), 2);
+        QCOMPARE(facts.value("hardware").toMap().value("speed").toString(), QString("5157 MHz"));
+        QCOMPARE(facts.value("usb").toList().size(), 1);
+        QCOMPARE(facts.value("usb").toList().first().toMap().value("name").toString(), QString("Logitech, Inc. Keyboard K120"));
+        QCOMPARE(facts.value("storage").toList().size(), 1);
+        QCOMPARE(facts.value("storage").toList().first().toMap().value("size").toString(), QString("256 GB"));
+        QCOMPARE(facts.value("video").toList().first().toMap().value("card").toString(),
+                 QString("Advanced Micro Devices, Inc. [AMD/ATI] Strix [Radeon 880M / 890M]"));
+        QCOMPARE(facts.value("video").toList().first().toMap().value("connectors").toStringList(), QStringList({"eDP-1"}));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/system-profiler.png"));
+        // Its triangles close and open each overview; Devices and Volumes lists the disk.
+        click(item("profiler-triangle-memory"));
+        QTRY_VERIFY(!item("profiler-built-in")->isVisible());
+        click(item("profiler-tab-devices"));
+        QTRY_VERIFY(item("profiler-devices")->isVisible() && item("profiler-disk-sdz"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/system-profiler-devices.png"));
+    }
+    void favoritesAreAddedAndListedInTheAppleMenu()
+    {
+        // Favorites, as 9.2.2's: File ▸ Add To Favorites makes an alias (a link) in the Favorites folder,
+        // the Apple menu's Favorites lists them, and choosing one opens it.
+        QTemporaryDir root;
+        QVERIFY(QDir().mkpath(root.filePath("Projects")));
+        QVERIFY(QDir().mkpath(root.filePath("Desktop")));
+        QFile note(root.filePath("Desktop/report.txt"));
+        QVERIFY(note.open(QIODevice::WriteOnly)); note.write("hello\n"); note.close();
+        QQuickView view; view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.filePath("profile"), {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop = view.rootObject();
+        const auto favorites = [&](QVariantList entries) {
+            for (const auto &entry : entries)
+                if (entry.toMap().value("text").toString() == "Favorites") return entry.toMap().value("children").toList();
+            return QVariantList();
+        };
+        const auto appleMenu = [&] {
+            QVariant entries;
+            QMetaObject::invokeMethod(desktop, "shellMenuEntries", Q_RETURN_ARG(QVariant, entries), Q_ARG(QVariant, 0));
+            return entries.toList();
+        };
+        QCOMPARE(favorites(appleMenu()).size(), 1);
+        QCOMPARE(favorites(appleMenu()).first().toMap().value("text").toString(), QString("No Favorites"));
+        // The desktop's File ▸ Add To Favorites, with report.txt selected; and a folder.
+        auto *items = qobject_cast<DesktopItems *>(manager.desktopItems());
+        QVERIFY(items);
+        items->refresh();
+        const auto key = [&](const QString &name) {
+            for (int row = 0; row < items->rowCount(); ++row)
+                if (items->data(items->index(row), DesktopItems::NameRole).toString() == name)
+                    return items->data(items->index(row), DesktopItems::KeyRole).toString();
+            return QString();
+        };
+        QTRY_VERIFY(!key("report.txt").isEmpty());
+        items->select(key("report.txt"));
+        QCOMPARE(items->selectedPaths(), QStringList({root.filePath("Desktop/report.txt")}));
+        QVERIFY(QMetaObject::invokeMethod(desktop, "dispatchShellCommand", Q_ARG(QVariant, QVariant("add-to-favorites")), Q_ARG(QVariant, QVariant(0))));
+        QCOMPARE(manager.addFavorites({root.filePath("Projects"), root.filePath("Desktop/report.txt")}), 1); // Already there: once.
+        auto listed = favorites(appleMenu());
+        QCOMPARE(listed.size(), 2);
+        QCOMPARE(listed.at(0).toMap().value("text").toString(), QString("Projects"));
+        QCOMPARE(listed.at(0).toMap().value("glyph").toString(), QString("folder"));
+        QCOMPARE(listed.at(1).toMap().value("text").toString(), QString("report.txt"));
+        // They are links: the items themselves are untouched, and a gone item is dimmed.
+        QVERIFY(QFileInfo(manager.favoritesFolder() + "/report.txt").isSymLink());
+        QVERIFY(QFile::remove(root.filePath("Desktop/report.txt")));
+        listed = favorites(appleMenu());
+        QVERIFY(!listed.at(1).toMap().value("enabled").toBool());
+        QVERIFY(listed.at(0).toMap().value("enabled").toBool());
+    }
+    void launcherShowsItsItemsAndOpensThem()
+    {
+        // The Launcher, as 9.2.2's: a button for each alias in the Launcher Items folder. An application
+        // is added from the Applications window (an alias to its .desktop file, named as it), files and
+        // folders with File ▸ Add To Launcher; an alias to a listed application opens that application.
+        QTemporaryDir root;
+        QVERIFY(QDir().mkpath(root.filePath("Projects")));
+        QVERIFY(QDir().mkpath(root.filePath("Desktop")));
+        QVERIFY(QDir().mkpath(root.filePath("applications")));
+        QFile entry(root.filePath("applications/example-paint.desktop"));
+        QVERIFY(entry.open(QIODevice::WriteOnly));
+        entry.write("[Desktop Entry]\nType=Application\nName=Example Paint\nExec=/usr/bin/true\n"); entry.close();
+        QFile note(root.filePath("Desktop/report.txt"));
+        QVERIFY(note.open(QIODevice::WriteOnly)); note.write("hello\n"); note.close();
+        QQuickView view; view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.filePath("profile"), {}, {root.filePath("applications")});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop = view.rootObject();
+        auto *catalog = qobject_cast<ApplicationCatalog *>(manager.applicationCatalog());
+        QVERIFY(catalog);
+        catalog->refresh(); QTRY_VERIFY(catalog->ready());
+        // Apple menu ▸ Control Panels ▸ Launcher opens it, empty, saying how to add items.
+        QVariant entries;
+        QMetaObject::invokeMethod(desktop, "shellMenuEntries", Q_RETURN_ARG(QVariant, entries), Q_ARG(QVariant, 0));
+        QStringList panels;
+        for (const auto &e : entries.toList())
+            if (e.toMap().value("text").toString() == "Control Panels")
+                for (const auto &child : e.toMap().value("children").toList())
+                    panels << child.toMap().value("text").toString();
+        QVERIFY(panels.indexOf("Launcher") > panels.indexOf("Keyboard…"));
+        QVERIFY(panels.indexOf("Launcher") < panels.indexOf("Memory…"));
+        QVERIFY(QMetaObject::invokeMethod(desktop, "dispatchShellCommand", Q_ARG(QVariant, QVariant("launcher")), Q_ARG(QVariant, QVariant(0))));
+        auto *window = desktop->findChild<QQuickItem *>("launcher-window");
+        QVERIFY(window); QTRY_VERIFY(window->isVisible());
+        auto *empty = window->findChild<QQuickItem *>("launcher-empty");
+        QVERIFY(empty); QVERIFY(empty->isVisible());
+        // The Applications window's Add To Launcher: once, named as the application; never the desktop's own.
+        QVERIFY(manager.addApplicationToLauncher("example-paint.desktop"));
+        QVERIFY(!manager.addApplicationToLauncher("example-paint.desktop"));
+        QVERIFY(!manager.addApplicationToLauncher("org.frankenstein.Finder.desktop"));
+        QVERIFY(QFileInfo(manager.launcherFolder() + "/Example Paint").isSymLink());
+        // File ▸ Add To Launcher on the desktop, with report.txt selected; and a folder.
+        auto *items = qobject_cast<DesktopItems *>(manager.desktopItems());
+        QVERIFY(items);
+        items->refresh();
+        const auto key = [&](const QString &name) {
+            for (int row = 0; row < items->rowCount(); ++row)
+                if (items->data(items->index(row), DesktopItems::NameRole).toString() == name)
+                    return items->data(items->index(row), DesktopItems::KeyRole).toString();
+            return QString();
+        };
+        QTRY_VERIFY(!key("report.txt").isEmpty());
+        items->select(key("report.txt"));
+        QVERIFY(QMetaObject::invokeMethod(desktop, "dispatchShellCommand", Q_ARG(QVariant, QVariant("add-to-launcher")), Q_ARG(QVariant, QVariant(0))));
+        QCOMPARE(manager.addToLauncher({root.filePath("Projects")}), 1);
+        const auto listed = manager.launcherItems();
+        QCOMPARE(listed.size(), 3);
+        QCOMPARE(listed.at(0).toMap().value("name").toString(), QString("Example Paint"));
+        QCOMPARE(listed.at(0).toMap().value("application").toString(), QString("example-paint.desktop"));
+        QCOMPARE(listed.at(1).toMap().value("name").toString(), QString("Projects"));
+        QVERIFY(listed.at(1).toMap().value("folder").toBool());
+        QVERIFY(listed.at(2).toMap().value("application").toString().isEmpty());
+        // The window follows the folder: a button each, and no hint.
+        QTRY_COMPARE(window->property("items").toList().size(), 3);
+        QTRY_VERIFY(visualItem(window, "launcher-item-Example Paint"));
+        QTRY_VERIFY(visualItem(window, "launcher-item-report.txt"));
+        QTRY_VERIFY(!empty->isVisible());
+        // With the Launcher in front, File has Open Launcher Items.
+        QVariant fileMenu;
+        QVariantList bar;
+        QMetaObject::invokeMethod(desktop, "makeBarEntries", Q_RETURN_ARG(QVariant, fileMenu));
+        bar = fileMenu.toList();
+        int file = -1;
+        for (int i = 0; i < bar.size(); ++i)
+            if (bar.at(i).toMap().value("kind").toString() == "app-file") file = i;
+        QVERIFY(file > 0);
+        QMetaObject::invokeMethod(desktop, "shellMenuEntries", Q_RETURN_ARG(QVariant, fileMenu), Q_ARG(QVariant, file));
+        QStringList commands;
+        for (const auto &e : fileMenu.toList()) commands << e.toMap().value("text").toString();
+        QVERIFY2(commands.contains("Open Launcher Items"), qPrintable(commands.join(", ")));
+        // A gone item says so; an alias from anywhere but the Launcher Items folder opens nothing.
+        QSignalSpy errors(&manager, &NativeManager::errorOccurred);
+        QVERIFY(QFile::remove(root.filePath("Desktop/report.txt")));
+        manager.openLauncherItem(manager.launcherFolder() + "/report.txt");
+        QCOMPARE(errors.count(), 1);
+        QVERIFY(errors.first().first().toString().contains("could not be found"));
+        QVERIFY(QFile::link(root.filePath("Projects"), root.filePath("elsewhere")));
+        manager.openLauncherItem(root.filePath("elsewhere"));
+        QCOMPARE(errors.count(), 1);
+    }
+    void controlStripPanelShowsHidesAndUsesTheHotKey()
+    {
+        // Control Strip, as 9.2.2's (captured 2026-11-15): Show, Hide, or Hot key to show/hide, where
+        // Command-Control-S shows and hides the strip; kept in the profile.
+        QTemporaryDir root;
+        QQuickView view; view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.filePath("profile"), {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop = view.rootObject();
+        auto *settings = qobject_cast<AppearanceSettings *>(manager.appearance());
+        QVERIFY(settings);
+        const auto item = [&](const QString &name) { view.grabWindow(); return visualItem(view.contentItem(), name); };
+        const auto click = [&](QQuickItem *target) {
+            QTest::mouseClick(&view, Qt::LeftButton, {}, target->mapToScene(QPointF(target->width() / 2, target->height() / 2)).toPoint());
+        };
+        QVERIFY(QMetaObject::invokeMethod(desktop, "dispatchShellCommand", Q_ARG(QVariant, QVariant("control-strip-panel")), Q_ARG(QVariant, QVariant(0))));
+        auto *panel = desktop->findChild<QObject *>("control-strip-panel");
+        QTRY_VERIFY(panel && panel->property("opened").toBool());
+        QTRY_VERIFY(item("control-strip-show") && item("control-strip-show")->property("checked").toBool());
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/control-strip-panel.png"));
+        click(item("control-strip-hide"));
+        QTRY_VERIFY(!settings->controlStripVisible());
+        QVERIFY(!settings->controlStripHotKey());
+        click(item("control-strip-hotkey"));
+        QTRY_VERIFY(settings->controlStripHotKey());
+        QVERIFY(!settings->controlStripVisible()); // Kept as it was.
+        QTest::keyClick(&view, Qt::Key_Escape); // Close Control Panels; the hot key works anywhere.
+        QTest::keyClick(&view, Qt::Key_S, Qt::MetaModifier | Qt::ControlModifier);
+        QTRY_VERIFY(settings->controlStripVisible());
+        QTest::keyClick(&view, Qt::Key_S, Qt::MetaModifier | Qt::ControlModifier);
+        QTRY_VERIFY(!settings->controlStripVisible());
+        // Read back in a later session; without hot key mode the chord does nothing.
+        AppearanceSettings reloaded(root.filePath("profile"));
+        QVERIFY(reloaded.controlStripHotKey());
+        QVERIFY(settings->setControlStripMode("show"));
+        QVERIFY(settings->controlStripVisible() && !settings->controlStripHotKey());
+        QTest::keyClick(&view, Qt::Key_S, Qt::MetaModifier | Qt::ControlModifier);
+        QTest::qWait(100);
+        QVERIFY(settings->controlStripVisible());
+        QVERIFY(!settings->setControlStripMode("sideways"));
+    }
+    void memoryShowsTheCacheSwapAndRamDiskAsTheyAre()
+    {
+        // Memory, as 9.2.2's: Disk Cache, Virtual Memory and RAM Disk, from the page cache, swap
+        // and a tmpfs /tmp (here a fixture's proc files), shown and not changeable.
+        QTemporaryDir root;
+        const auto proc = root.filePath("fixture/proc");
+        QVERIFY(QDir().mkpath(proc));
+        const auto write = [&](const QString &name, const QByteArray &text) {
+            QFile file(proc + "/" + name);
+            return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
+        };
+        QVERIFY(write("meminfo", "MemTotal:       16777216 kB\nMemFree:  1 kB\nCached:          2097152 kB\n"));
+        QVERIFY(write("swaps", "Filename\tType\tSize\tUsed\tPriority\n/dev/zram0  partition\t4194304\t524288\t100\n"));
+        QVERIFY(write("mounts", "/dev/nvme0n1p2 / btrfs rw 0 0\ntmpfs /tmp tmpfs rw,nosuid 0 0\n"));
+        qputenv("FRANKENSTEIN_MEMORY_ROOT", root.filePath("fixture").toUtf8());
+        const auto unset = qScopeGuard([] { qunsetenv("FRANKENSTEIN_MEMORY_ROOT"); });
+        QQuickView view; view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.filePath("profile"), {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop = view.rootObject();
+        const auto item = [&](const QString &name) { view.grabWindow(); return visualItem(view.contentItem(), name); };
+        const auto text = [&](const QString &name) { auto *found = item(name); return found ? found->property("text").toString() : QString(); };
+        QVERIFY(QMetaObject::invokeMethod(desktop, "dispatchShellCommand", Q_ARG(QVariant, QVariant("memory")), Q_ARG(QVariant, QVariant(0))));
+        auto *panel = desktop->findChild<QObject *>("memory-panel");
+        QVERIFY(panel);
+        QTRY_VERIFY(panel->property("opened").toBool());
+        QTRY_VERIFY(text("memory-cache-text").contains("Its current size is 2048M."));
+        QCOMPARE(text("memory-built-in"), QString("Available built-in memory: 16384M"));
+        QCOMPARE(text("memory-swap-kind"), QString("Uses compressed memory (zram)."));
+        QCOMPARE(text("memory-swap-size"), QString("4096M"));
+        QVERIFY(item("memory-swap-on")->property("checked").toBool() && !item("memory-swap-on")->isEnabled());
+        QVERIFY(item("memory-ramdisk-on")->property("checked").toBool());
+        QVERIFY(text("memory-ramdisk-size").endsWith("M"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/memory.png"));
+        // No swap, and /tmp on the hard disk.
+        QVERIFY(write("swaps", "Filename\tType\tSize\tUsed\tPriority\n"));
+        QVERIFY(write("mounts", "/dev/nvme0n1p2 / btrfs rw 0 0\n"));
+        QVERIFY(QMetaObject::invokeMethod(manager.memoryInfo(), "refresh"));
+        QTRY_COMPARE(text("memory-swap-kind"), QString("No swap space is set up."));
+        QVERIFY(item("memory-swap-off")->property("checked").toBool());
+        QVERIFY(item("memory-ramdisk-off")->property("checked").toBool());
+        QVERIFY(!item("memory-ramdisk-size")->isVisible());
+    }
+    void numbersAndTextSaveTheLocaleForTheNextLogin()
+    {
+        // Numbers and Text, as 9.2.2's: a number format and a text behavior from the installed
+        // locales, saved in locale.conf (here the profile's), which keeps LANG and other lines.
+        QTemporaryDir root;
+        QDir().mkpath(root.filePath("profile"));
+        {
+            QFile conf(root.filePath("profile/locale.conf"));
+            QVERIFY(conf.open(QIODevice::WriteOnly));
+            conf.write("# mine\nLC_TIME=en_US.UTF-8\n");
+        }
+        qputenv("FRANKENSTEIN_LOCALES", "en_US.utf8:de_DE.utf8:en_GB.utf8");
+        const auto oldLang = qgetenv("LANG");
+        qputenv("LANG", "en_US.UTF-8");
+        const auto unset = qScopeGuard([&] { qunsetenv("FRANKENSTEIN_LOCALES"); qputenv("LANG", oldLang); });
+        QQuickView view; view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.filePath("profile"), {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *desktop = view.rootObject();
+        auto *settings = qobject_cast<LocaleSettings *>(manager.localeSettings());
+        QVERIFY(settings);
+        QCOMPARE(settings->formats().size(), 3);
+        QCOMPARE(settings->numbers(), QString("en_US.UTF-8"));
+        const auto item = [&](const QString &name) { view.grabWindow(); return visualItem(view.contentItem(), name); };
+        const auto text = [&](const QString &name) { auto *found = item(name); return found ? found->property("text").toString() : QString(); };
+        QVERIFY(QMetaObject::invokeMethod(desktop, "dispatchShellCommand", Q_ARG(QVariant, QVariant("numbers")), Q_ARG(QVariant, QVariant(0))));
+        auto *numbers = desktop->findChild<QObject *>("numbers-panel");
+        QVERIFY(numbers);
+        QTRY_VERIFY(numbers->property("opened").toBool());
+        QTRY_COMPARE(text("numbers-sample"), QString("$1,234.56"));
+        QCOMPARE(text("numbers-decimal"), QString("."));
+        QCOMPARE(text("numbers-symbol"), QString("$"));
+        QVERIFY(item("numbers-before")->property("checked").toBool());
+        QVERIFY(!text("numbers-note").contains("next log in"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/numbers.png"));
+        // Germany: comma decimals, the euro after the number, at the next login.
+        QVERIFY(QMetaObject::invokeMethod(item("numbers-format"), "chosen", Q_ARG(QString, "de_DE.UTF-8")));
+        QTRY_COMPARE(text("numbers-decimal"), QString(","));
+        QCOMPARE(text("numbers-thousands"), QString("."));
+        QCOMPARE(text("numbers-symbol"), QString("€"));
+        QVERIFY(item("numbers-after")->property("checked").toBool());
+        QVERIFY(text("numbers-sample").startsWith("1.234,56"));
+        QVERIFY(text("numbers-note").startsWith("Programs use this format after you next log in."));
+        QFile conf(root.filePath("profile/locale.conf"));
+        QVERIFY(conf.open(QIODevice::ReadOnly));
+        QCOMPARE(QString::fromUtf8(conf.readAll()),
+                 QString("LANG=en_US.UTF-8\n# mine\nLC_TIME=en_US.UTF-8\nLC_NUMERIC=de_DE.UTF-8\nLC_MONETARY=de_DE.UTF-8\n"));
+        conf.close();
+        // Text: two English behaviors, so each says its region; British sorting saved for LC_COLLATE.
+        QVERIFY(QMetaObject::invokeMethod(desktop, "dispatchShellCommand", Q_ARG(QVariant, QVariant("text")), Q_ARG(QVariant, QVariant(0))));
+        auto *textPanel = desktop->findChild<QObject *>("text-panel");
+        QTRY_VERIFY(textPanel && textPanel->property("opened").toBool());
+        auto *behavior = item("text-behavior");
+        QVERIFY(behavior);
+        QCOMPARE(behavior->property("currentChoice").toMap().value("name").toString(), QString("English (United States)"));
+        QCOMPARE(item("text-script")->property("currentChoice").toMap().value("name").toString(), QString("Roman"));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/text.png"));
+        QVERIFY(QMetaObject::invokeMethod(behavior, "chosen", Q_ARG(QString, "en_GB.UTF-8")));
+        QTRY_COMPARE(settings->text(), QString("en_GB.UTF-8"));
+        QVERIFY(conf.open(QIODevice::ReadOnly));
+        QVERIFY(QString::fromUtf8(conf.readAll()).endsWith("LC_COLLATE=en_GB.UTF-8\nLC_CTYPE=en_GB.UTF-8\n"));
+        conf.close();
+        // Back to the login language: its lines go, the rest stays.
+        QVERIFY(settings->setNumbers("en_US.utf8"));
+        QVERIFY(conf.open(QIODevice::ReadOnly));
+        QVERIFY(!QString::fromUtf8(conf.readAll()).contains("LC_NUMERIC"));
+        conf.close();
+        // A locale that is not installed is refused, and says so.
+        QVERIFY(!settings->setNumbers("fr_FR.UTF-8"));
+        QTRY_VERIFY(text("text-note").startsWith("fr_FR.UTF-8 is not installed on this computer."));
     }
     void extensionsManagerPanelTurnsItemsOnAndOff()
     {
@@ -946,7 +1424,8 @@ class DesktopTests : public QObject
             Q_ARG(QVariant,view.rootObject()->property("barEntries").toList().size())));
         QStringList names;
         for(const auto &entry:entries.toList())names<<entry.toMap().value("text").toString();
-        QVERIFY2(names.contains("Control Panel") && names.contains("Calculator"),qPrintable(names.join(", ")));
+        // Each with the workspace its window is on, as every application (2026-11-15).
+        QVERIFY2(names.contains("Control Panel (1)") && names.contains("Calculator (1)"),qPrintable(names.join(", ")));
     }
     void printableCommandEventsKeepNoteAndPanelCommandsWorking()
     {
@@ -2462,6 +2941,10 @@ class DesktopTests : public QObject
         };
         QMetaObject::invokeMethod(panel, "edit");
         QTRY_VERIFY(panel->property("opened").toBool());
+        // As 9.2.2's: the panel opens on the Monitor view; the next-login choice is under Arrange.
+        QCOMPARE(panel->property("shownView").toString(), QString("monitor"));
+        QTRY_VERIFY(item("monitors-view-arrange") && item("monitors-view-arrange")->isVisible());
+        click(item("monitors-view-arrange"));
         QQuickItem *useAll = nullptr, *note = nullptr, *hint = nullptr;
         QTRY_VERIFY((useAll = item("monitors-use-all")) && (note = item("monitors-use-all-note")) &&
                     (hint = item("monitors-unavailable")));
@@ -3452,6 +3935,9 @@ class DesktopTests : public QObject
         };
         QMetaObject::invokeMethod(panel, "edit");
         QTRY_VERIFY(panel->property("opened").toBool());
+        QTRY_VERIFY(item("monitors-view-arrange"));
+        QTest::mouseClick(&view, Qt::LeftButton, {}, centre(item("monitors-view-arrange")));
+        QTRY_COMPARE(panel->property("shownView").toString(), QString("arrange"));
         QQuickItem *external = nullptr, *builtIn = nullptr, *menuBar = nullptr;
         QTRY_VERIFY((external = item("monitors-display-DP-3")) && (builtIn = item("monitors-display-eDP-1")) &&
                     (menuBar = item("monitors-menubar")) && menuBar->width() > 0);
@@ -3764,7 +4250,7 @@ class DesktopTests : public QObject
             d.available.append(QVariantMap{{"name", "HDMI-A-1"}, {"label", "Samsung"}, {"lidClosed", true}});
             d.pending = pending;
             const auto mode = [](int w, int h, int r) { return QVariantMap{{"width", w}, {"height", h}, {"refresh", r}}; };
-            d.modes.insert("DP-3", QVariantMap{{"modes", QVariantList{mode(1920, 1080, 60000), mode(1680, 1050, 59954),
+            d.modes.insert("DP-3", QVariantMap{{"modes", QVariantList{mode(1920, 1080, 60000), mode(1920, 1080, 50000), mode(1680, 1050, 59954),
                                                                      mode(1280, 720, 60000)}},
                                                {"mode", mode(1920, 1080, 60000)}});
             return d;
@@ -3785,6 +4271,8 @@ class DesktopTests : public QObject
         };
         QMetaObject::invokeMethod(panel, "edit");
         QTRY_VERIFY(panel->property("opened").toBool());
+        QTRY_VERIFY(item("monitors-view-arrange"));
+        click(item("monitors-view-arrange"));
         QQuickItem *external = nullptr, *builtIn = nullptr, *shut = nullptr;
         QTRY_VERIFY((external = item("monitors-on-DP-3")) && (builtIn = item("monitors-on-eDP-1")) &&
                     (shut = item("monitors-on-HDMI-A-1")));
@@ -3819,13 +4307,21 @@ class DesktopTests : public QObject
         QVERIFY(builtIn->property("checked").toBool() && external->isEnabled());
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/monitors-on.png"));
         // The main display's resolution, rotation and size, each one request at once.
-        QCOMPARE(item("monitors-settings-title")->property("text").toString(), QString("Resolution of PM1561P:"));
+        click(item("monitors-view-monitor"));
+        QCOMPARE(item("monitors-settings-title")->property("text").toString(), QString("PM1561P"));
+        QVERIFY(item("monitors-choose-display")->isVisible()); // Two displays on: either can be shown.
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/monitors-monitor-view.png"));
         QQuickItem *slower = nullptr;
         QTRY_VERIFY((slower = item("monitors-resolution-1")));
         QCOMPARE(slower->childItems().first()->property("text").toString(), QString("1680 × 1050, 59.95 Hz"));
         click(slower);
         QTRY_COMPARE(commands.size(), 3);
         QCOMPARE(commands.last(), QByteArray("display DP-3 mode 1680x1050@59954\n"));
+        // Show: Recommended lists 1920 × 1080 once, at its fastest refresh; All lists the 50 Hz mode too.
+        QCOMPARE(item("monitors-resolutions")->property("count").toInt(), 3);
+        panel->setProperty("allModes", true);
+        QTRY_COMPARE(item("monitors-resolutions")->property("count").toInt(), 4);
+        panel->setProperty("allModes", false);
         QTRY_VERIFY(!manager.displayRequestBusy());
         click(item("monitors-rotate-90"));
         QTRY_COMPARE(commands.size(), 4);
@@ -3838,8 +4334,9 @@ class DesktopTests : public QObject
         QVERIFY(item("monitors-scale-150")->property("checked").toBool());
         QTRY_VERIFY(!manager.displayRequestBusy());
         // The built-in display's settings after clicking it in the arrangement.
+        click(item("monitors-view-arrange"));
         click(item("monitors-display-eDP-1"));
-        QTRY_COMPARE(item("monitors-settings-title")->property("text").toString(), QString("Resolution of Built-in:"));
+        QTRY_COMPARE(item("monitors-settings-title")->property("text").toString(), QString("Built-in"));
         QVERIFY(item("monitors-scale-200")->property("checked").toBool());
         // The Control Strip's Monitor Resolution module, as 9.2.2's: Open Monitors Control Panel, a
         // line, each display's name over its resolutions with a bullet on the current one.
@@ -4783,15 +5280,15 @@ class DesktopTests : public QObject
         QCOMPARE(settings->shadeDuration(), 240);
         QTest::keyClick(&view, Qt::Key_Escape);
         QTRY_VERIFY(!panel->property("opened").toBool());
-        // The menu provides a way back when the strip is hidden: Apple menu >
-        // Control Panels, which also shows the strip's state with a check mark.
+        // The menu provides a way back when the strip is hidden: Apple menu > Control Panels, where
+        // Control Strip opens its control panel, as 9.2.2's (Lily Hewitt, 2026-11-16).
         QTest::mouseClick(&view, Qt::LeftButton, {}, QPoint(25, 13));
         QTRY_COMPARE(view.rootObject()->property("openMenu").toInt(), 0);
         auto *panels = visualItem(view.contentItem(), "desktop-command-control-panels");
         QVERIFY(panels);
         panels->parentItem()->ensurePolished();
         QVERIFY(click("desktop-command-control-panels"));
-        auto *stripCommand = visualItem(view.contentItem(), "desktop-command-control-strip");
+        auto *stripCommand = visualItem(view.contentItem(), "desktop-command-control-strip-panel");
         QTRY_VERIFY(stripCommand && stripCommand->isVisible());
         stripCommand->parentItem()->ensurePolished();
         auto *entry = visualItem(view.contentItem(), "desktop-command-appearance");

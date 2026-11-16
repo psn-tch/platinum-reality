@@ -89,5 +89,9 @@ class FingerprintService final : public QObject
     QString m_device, m_reader, m_scanType, m_enrolling, m_message, m_error;
     QStringList m_fingers;
     int m_stage = 0, m_stages = 0, m_pending = 0, m_generation = 0;
+    // Changes started and finished so far (each counts twice), and the count when the running status
+    // read began: a read that overlapped a change may hold the old state and must not put it back.
+    int m_changes = 0, m_statusChanges = 0;
+    bool m_statusAgain = false; // A stale read was dropped while a change ran: read again after it.
     bool m_installed = false, m_claimed = false, m_loginAvailable = false, m_login = false, m_sudo = false;
 };

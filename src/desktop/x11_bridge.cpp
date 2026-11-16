@@ -8,6 +8,7 @@
 #include <QRegularExpression>
 #include <QTemporaryDir>
 #include <cstring>
+#include <utility>
 #include <unistd.h>
 
 namespace {
@@ -39,6 +40,7 @@ bool writeAuthority(const QString &path)
 
 X11Bridge::X11Bridge(QObject *parent) : QObject(parent)
 {
+    m_clock.start();
     m_process.setProcessChannelMode(QProcess::MergedChannels);
     connect(&m_process, &QProcess::readyReadStandardOutput, this, &X11Bridge::readOutput);
     connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
@@ -48,10 +50,30 @@ X11Bridge::X11Bridge(QObject *parent) : QObject(parent)
     connect(&m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
         readOutput();
         m_deadline.stop();
-        if (!m_stopping)
-            fail(QString("X11 support stopped (%1, %2). Native Wayland applications remain available.")
-                     .arg(code).arg(status == QProcess::NormalExit ? "exit" : "crash"));
+        const bool wasReady = std::exchange(m_wasReady, false);
+        if (m_stopping) {
+            cleanRuntime();
+            return;
+        }
+        // Stopped after it was working: X11 applications open then have closed with it. Start it again
+        // so the next one can open, unless it keeps stopping (then it stays off until the next login).
+        // A bridge that never became ready is not retried.
+        while (!m_restarts.isEmpty() && m_clock.elapsed() - m_restarts.first() > restartWindowMs)
+            m_restarts.removeFirst();
+        const bool restart = wasReady && m_restarts.size() < maximumRestarts;
+        const auto how = QString("%1, %2").arg(code).arg(status == QProcess::NormalExit ? "exit" : "crash");
+        fail(restart ? QString("X11 support stopped (%1) and is starting again. X11 applications that were open "
+                               "have closed.").arg(how)
+                     : QString("X11 support stopped (%1). Native Wayland applications remain available.").arg(how));
         cleanRuntime();
+        if (restart) {
+            m_restarts.append(m_clock.elapsed());
+            m_failed = false; // The next failure is reported again.
+            QTimer::singleShot(1000 * int(m_restarts.size()), this, [this] {
+                if (!m_stopping && !starting() && !ready())
+                    start(m_socket);
+            });
+        }
     });
     m_deadline.setSingleShot(true);
     m_deadline.setInterval(10000);
@@ -82,8 +104,10 @@ void X11Bridge::start(const QByteArray &waylandSocket)
 {
     if (starting() || ready() || helperPath().isEmpty())
         return;
+    m_socket = waylandSocket;
     m_stopping = false;
     m_failed = false;
+    m_logged = 0;
     const auto parentRuntime = qEnvironmentVariable("XDG_RUNTIME_DIR");
     const QFileInfo parent(parentRuntime);
     if (!parent.isDir() || parent.isSymLink() || parent.ownerId() != getuid()) {
@@ -119,7 +143,9 @@ void X11Bridge::start(const QByteArray &waylandSocket)
         qWarning().noquote() << "X11: private Xwayland launcher missing; X11 Vulkan clients may hang if the desktop exits";
         environment.insert("PATH", "/usr/bin:/bin");
     }
-    environment.insert("RUST_LOG", "warn,xwayland_satellite=info,xwayland_process=error");
+    // PLATINUM_X11_LOG (a RUST_LOG filter, e.g. "xwayland_satellite=debug") for diagnosing the bridge.
+    const auto log = qEnvironmentVariable("PLATINUM_X11_LOG");
+    environment.insert("RUST_LOG", log.isEmpty() ? QStringLiteral("warn,xwayland_satellite=info,xwayland_process=error") : log);
     m_process.setProcessEnvironment(environment);
     m_starting = true;
     emit changed();
@@ -146,6 +172,7 @@ void X11Bridge::readOutput()
                 m_deadline.stop();
                 m_display = match.captured(1);
                 m_starting = false;
+                m_wasReady = true;
                 emit changed();
             }
         }

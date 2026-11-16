@@ -2,6 +2,7 @@
 #include "window_move_outline.hpp"
 #include "scroll_bar_art.hpp"
 #include "applications/desktop_entry.hpp"
+#include "finder/favorites.hpp"
 #include <unistd.h>
 #include <set>
 #include "appearance_settings.hpp"
@@ -172,6 +173,24 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
                                                                            : folders.split(':', Qt::SkipEmptyParts),
                                           {"PlatinumReality", "Frankenstein"}, system, this);
     }
+    // Numbers and Text. Tests name their own file and locales, so none touches the host's locale.conf.
+    {
+        const auto system = QProcessEnvironment::systemEnvironment();
+        const bool host = qEnvironmentVariable("FRANKENSTEIN_LOCALES").isEmpty() && !nativeTest && c != nullptr;
+        m_localeSettings = new LocaleSettings(
+            host ? LocaleSettings::standardFile(system) : m_profile + "/locale.conf",
+            host ? LocaleSettings::installedLocales() : qEnvironmentVariable("FRANKENSTEIN_LOCALES").split(':', Qt::SkipEmptyParts),
+            system, this);
+    }
+    // Memory. Tests name a folder holding proc/meminfo, proc/swaps and proc/mounts.
+    {
+        const auto fixture = qEnvironmentVariable("FRANKENSTEIN_MEMORY_ROOT");
+        m_memoryInfo = new MemoryInfo(fixture.isEmpty() ? QString() : fixture, "/tmp", this);
+    }
+    // Sherlock: the Finder's own disk (the workspace) and its mounted drives.
+    m_fileSearch = new FileSearch(m_workspace, FinderPlaces::diskName(m_profile), FinderPlaces::volumes, this);
+    // Apple System Profiler. Tests name a folder of etc/, proc/ and sys/ fixtures.
+    m_systemProfile = new SystemProfile(qEnvironmentVariable("FRANKENSTEIN_PROFILE_ROOT"), this);
     m_power = new PowerControl(hostBluetooth ? QDBusConnection::systemBus() : QDBusConnection(QString()), this);
     connect(m_power, &PowerControl::lockFailed, this, &NativeManager::errorOccurred);
     connect(m_power, &PowerControl::finished, this, [this](bool ok, const QString &error)
@@ -236,6 +255,7 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
                                        QCoreApplication::applicationDirPath(), this);
     connect(m_catalog, &ApplicationCatalog::refreshed, this, &NativeManager::drainDocumentRequests);
     connect(m_catalog, &ApplicationCatalog::refreshed, this, &NativeManager::refreshApplicationIcons);
+    connect(m_catalog, &ApplicationCatalog::refreshed, this, &NativeManager::launcherItemsChanged); // Which are applications.
     connect(this, &NativeManager::contextChanged, this, &NativeManager::drainDocumentRequests);
     if (m_compositor)
         new DesktopDocumentService(this);
@@ -1360,6 +1380,7 @@ QUrl NativeManager::applicationIcon(QString identity, int size) const
         {"shell:extensions-manager", {"extensions-manager", "preferences-system-session-services"}},
         {"shell:file-exchange", {"file-exchange", "preferences-desktop-default-applications"}},
         {"shell:keyboard", {"keyboard", "input-keyboard"}},
+        {"shell:launcher", {"launcher", "applications-other"}},
         {"shell:monitors", {"monitors", "preferences-desktop-display"}},
         {"shell:mouse", {"mouse", "input-mouse"}},
         {"shell:network", {"network", "preferences-system-network"}},
@@ -2572,7 +2593,7 @@ void NativeManager::setFullScreen(ManagedWindow *w, bool fullScreen, QWaylandOut
     if(!w->fullScreen)
         QTimer::singleShot(0,w,[this,w]{rescueRestoredWindow(w);});
 }
-void NativeManager::zoom(qulonglong id)
+void NativeManager::zoom(qulonglong id, QPointF pointer)
 {
     auto *w = find(id);
     if (!w || !w->canZoom() || w->shadeInMotion || shellModal())
@@ -2580,24 +2601,41 @@ void NativeManager::zoom(qulonglong id)
     if (w->zoomed)
     {
         resizeWindow(id, w->userSize.width(), w->userSize.height());
+        if (const auto from = std::exchange(w->userPosition, std::nullopt))
+            moveWindow(id, from->x(), from->y());
         w->zoomed = false;
         m_interfaceSounds->play("wzmi");
     }
     else
     {
         w->userSize = QSize(w->width(), w->height());
-        const auto screen=windowScreen(w);
-        resizeWindow(id, std::min(850, screen.width() - 110),
-                     std::max(120, screen.height() - 140));
+        // The zoom box's screen (a big window dragged partly onto a small display zooms there),
+        // else the window's. A window that would run off that screen moves onto it.
+        const bool clicked = !qIsNaN(pointer.x()) && !qIsNaN(pointer.y());
+        const auto screen = clicked ? effectiveDisplayLayout().screenForWindow(QRect(pointer.toPoint(), QSize(1, 1)))
+                                    : windowScreen(w);
+        const int width = std::min(850, screen.width() - 110), height = std::max(120, screen.height() - 140);
+        const int top = screen.y() + (screen.contains(effectiveDisplayLayout().primaryRect().topLeft()) ? platinumMenuBarHeight : 0);
+        const QPoint fitted(std::clamp(w->x(), screen.x(), std::max(screen.x(), screen.right() + 1 - width)),
+                            std::clamp(w->y(), top, std::max(top, screen.bottom() + 1 - height)));
+        w->userPosition.reset();
+        if (clicked && fitted != QPoint(w->x(), w->y()))
+        {
+            w->userPosition = QPoint(w->x(), w->y());
+            moveWindow(id, fitted.x(), fitted.y());
+        }
+        resizeWindow(id, width, height);
         w->zoomed = true;
         m_interfaceSounds->play("wzmo");
     }
 }
-void NativeManager::fillScreen(qulonglong id)
+void NativeManager::fillScreen(qulonglong id, QPointF pointer)
 {
     auto *w = find(id);
     if (!w || !w->top || !w->canResize() || w->fullScreen || shellModal())
         return;
+    if (!qIsNaN(pointer.x()) && !qIsNaN(pointer.y()))
+        w->fillPointer = pointer;
     if (w->collapsed() && !w->shadeInMotion)
         dispatch(SetCollapsed{{id}, false});
     if (w->shadeInMotion)
@@ -2605,6 +2643,7 @@ void NativeManager::fillScreen(qulonglong id)
         w->fillPending = true;
         return;
     }
+    const auto clicked = std::exchange(w->fillPointer, std::nullopt);
     if (w->filled)
     {
         w->filled = false;
@@ -2613,8 +2652,11 @@ void NativeManager::fillScreen(qulonglong id)
         m_interfaceSounds->play("wzmi");
         return;
     }
-    // The window's screen, below the menu bar on the main one; the frame's chrome fits inside too.
-    const auto screen = windowScreen(w);
+    // The screen the click was on (a big window dragged partly onto a small display fills that
+    // display; Lily Hewitt, 2026-11-15), else the window's; below the menu bar on the main one,
+    // with the frame's chrome inside too.
+    const auto screen = clicked ? effectiveDisplayLayout().screenForWindow(QRect(clicked->toPoint(), QSize(1, 1)))
+                                : windowScreen(w);
     const int top = screen.y() + (screen.contains(effectiveDisplayLayout().primaryRect().topLeft()) ? platinumMenuBarHeight : 0);
     const int frameWidth = w->serverDecorated() ? 6 : 0, frameHeight = w->serverDecorated() ? 27 : 0;
     w->filledRestore = QRect(w->x(), w->y(), w->width(), w->height());
@@ -3284,6 +3326,91 @@ void NativeManager::reopenUpdatedPrograms()
         }
     });
     timer->start();
+}
+QVariantList NativeManager::favorites() const { return Favorites::list(m_profile); }
+int NativeManager::addFavorites(const QStringList &paths) { return Favorites::add(m_profile, paths); }
+QString NativeManager::favoritesFolder() const
+{
+    QDir().mkpath(Favorites::folder(m_profile));
+    return Favorites::folder(m_profile);
+}
+QString NativeManager::launcherFolder()
+{
+    const auto folder = LauncherItems::folder(m_profile);
+    QDir().mkpath(folder);
+    if (!m_launcherWatcher)
+    {
+        m_launcherWatcher = new QFileSystemWatcher(this);
+        connect(m_launcherWatcher, &QFileSystemWatcher::directoryChanged, this, &NativeManager::launcherItemsChanged);
+    }
+    if (!m_launcherWatcher->directories().contains(folder))
+        m_launcherWatcher->addPath(folder);
+    return folder;
+}
+QVariantList NativeManager::launcherItems()
+{
+    auto items = Aliases::list(launcherFolder());
+    for (auto &item : items)
+    {
+        auto map = item.toMap();
+        const auto target = map.value("target").toString();
+        map.insert("application",
+                   target.endsWith(".desktop", Qt::CaseInsensitive) ? m_catalog->applicationForFile(target) : QString());
+        item = map;
+    }
+    return items;
+}
+int NativeManager::addToLauncher(const QStringList &paths)
+{
+    const auto added = Aliases::add(launcherFolder(), paths, LauncherItems::maximumCount);
+    if (added)
+        emit launcherItemsChanged();
+    return added;
+}
+bool NativeManager::addApplicationToLauncher(const QString &id)
+{
+    const auto file = m_catalog->applicationFile(id);
+    if (file.isEmpty())
+        return false;
+    launcherFolder();
+    const auto added = LauncherItems::addApplication(m_profile, file, m_catalog->applicationName(id));
+    if (added)
+        emit launcherItemsChanged();
+    return added;
+}
+void NativeManager::openLauncherItem(const QString &link)
+{
+    // Only an alias in the Launcher Items folder; what it opens is decided here, never by the alias.
+    const QFileInfo alias(link);
+    if (!alias.isSymLink() || QFileInfo(alias.absolutePath()).canonicalFilePath() !=
+                                  QFileInfo(LauncherItems::folder(m_profile)).canonicalFilePath())
+        return;
+    const QFileInfo item(alias.symLinkTarget());
+    if (!item.exists())
+    {
+        emit errorOccurred("The original item for “" + alias.fileName() + "” could not be found.");
+        return;
+    }
+    if (item.suffix().compare("desktop", Qt::CaseInsensitive) == 0)
+    {
+        if (!m_catalog->ready())
+        {
+            // Opened once the applications are read, so an application is never opened as a document.
+            connect(m_catalog, &ApplicationCatalog::refreshed, this, [this, link] { openLauncherItem(link); },
+                    Qt::SingleShotConnection);
+            m_catalog->refresh();
+            return;
+        }
+        if (const auto application = m_catalog->applicationForFile(item.absoluteFilePath()); !application.isEmpty())
+        {
+            launchApplication(application);
+            return;
+        }
+    }
+    if (item.isDir())
+        launchFinder(item.absoluteFilePath());
+    else
+        requestOpenDocument(item.absoluteFilePath());
 }
 void NativeManager::startStartupItems()
 {

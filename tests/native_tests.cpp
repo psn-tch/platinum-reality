@@ -1717,6 +1717,83 @@ class NativeTests : public QObject
         probe.process.write("quit\n");
         QVERIFY(probe.process.waitForFinished(3000));
     }
+    void expandingUsesTheMonitorItWasAskedOn()
+    {
+        // Lily Hewitt, 2026-11-15: an app moved to the second monitor and maximized (double-clicking
+        // its own title bar asks for that) must grow on that monitor, not on the main one.
+        const auto ipc=qEnvironmentVariable("FRANKENSTEIN_HEADLESS_IPC");
+        QVERIFY2(ipc.startsWith("/tmp/platinum-headless."),"Requires the owned two-output venue");
+        NativeScene scene;
+        QVERIFY(scene.show());
+        QProcess command;
+        command.start("swaymsg",{"-s",ipc,QString("[pid=%1] fullscreen enable global").arg(QCoreApplication::applicationPid())});
+        QVERIFY(command.waitForFinished(3000));
+        QCOMPARE(command.exitCode(),0);
+        QTRY_COMPARE(scene.view.size(),QSize(2080,760));
+        const auto layout=DisplayLayout::create({{"HEADLESS-1",{0,0,1120,760},1.5,"normal"},
+                                                 {"HEADLESS-2",{1120,0,960,600},2,"90"}},
+                                                "HEADLESS-1",DisplayLayout::Mode::Extend);
+        QVERIFY(layout);
+        scene.manager->setDisplayLayout(*layout);
+        auto &manager=*scene.manager;
+        LineProcess probe;
+        probe.process.setProcessEnvironment(scene.childEnvironment());
+        probe.process.start(QCoreApplication::applicationDirPath()+"/pointer-probe",{"--resizable"});
+        QVERIFY(!probe.next("ready").isEmpty());
+        QVariantMap window;
+        QTRY_VERIFY(!(window=first(manager,"Pointer Probe")).isEmpty());
+        const auto id=window.value("id").toULongLong();
+        const auto frame=[&]{auto *item=visualItem(scene.view.contentItem(),"frame-"+QString::number(id));
+                             return item?QRectF(item->position(),item->size()):QRectF();};
+        const auto failure=qScopeGuard([&]{if(QTest::currentTestFailed()){
+            qWarning()<<"Probe"<<probe.lines.join(" | ")<<"window"<<first(manager,"Pointer Probe")<<"frame"<<frame();
+            capture(scene.view,"maximize-second-monitor-failure.png");}});
+        const QRectF second(1120,0,960,600);
+        manager.moveWindow(id,1250,80);
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("x").toInt(),1250);
+        probe.skip();
+        QVERIFY(probe.send("maximize on","maximize-set"));
+        QVERIFY(!probe.next("configure").isEmpty());
+        QTest::qWait(300);
+        // Every configure fits the second monitor, and the window is still on it.
+        for(const auto &line:probe.lines.filter(QRegularExpression("^configure "))) {
+            const auto parts=line.split(' ');
+            QVERIFY2(parts.size()>=3 && parts.at(1).toInt()<=960 && parts.at(2).toInt()<=600,qPrintable(line));
+        }
+        QTRY_VERIFY2(second.contains(frame().center()),qPrintable(QString("frame %1,%2 %3x%4").arg(frame().x())
+                     .arg(frame().y()).arg(frame().width()).arg(frame().height())));
+        QVERIFY(capture(scene.view,"maximize-second-monitor.png"));
+        probe.skip();
+        QVERIFY(probe.send("maximize off","maximize-set"));
+        QTest::qWait(300);
+        QTRY_VERIFY(second.contains(frame().center()));
+        // Platinum's title bar (a double-click, then a third click) fills the screen the click was on,
+        // even with most of the window still on the other one: here 270 of its 320 px are on the main.
+        manager.moveWindow(id,850,80);
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("x").toInt(),850);
+        manager.fillScreen(id,QPointF(1150,90));
+        QTRY_COMPARE(frame().topLeft(),second.topLeft());
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("width").toInt(),960);
+        QVERIFY(capture(scene.view,"fill-second-monitor.png"));
+        manager.fillScreen(id,QPointF(1150,90)); // Again: back where it was.
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("x").toInt(),850);
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("width").toInt(),320);
+        // Without a click position (as before), the screen holding most of the window.
+        manager.fillScreen(id);
+        QTRY_COMPARE(frame().topLeft(),QPointF(0,platinumMenuBarHeight));
+        manager.fillScreen(id);
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("x").toInt(),850);
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("width").toInt(),320);
+        // The zoom box the same way: zoomed for the screen it was clicked on, moved fully onto it.
+        manager.zoom(id,QPointF(1150,90));
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("width").toInt(),850);
+        QTRY_VERIFY(second.contains(frame()));
+        manager.zoom(id,QPointF(1150,90));
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("x").toInt(),850);
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("width").toInt(),320);
+        probe.process.write("quit\n");
+        QVERIFY(probe.process.waitForFinished(3000));
+    }
     void popupMenusStayOnTheirMonitor()
     {
         // A menu opened near a monitor's edge must be flipped or slid onto that monitor. Monitor
@@ -2271,9 +2348,10 @@ class NativeTests : public QObject
         QVERIFY(!host->confine(QRegion(QRect(otherMonitorX, 100, 100, 100))));
         QVERIFY(host->desktopConfinementEngaged()); // Rejected requests keep the current domain.
 
-        // Native wheel events take the ordinary path with the desktop domain engaged.
+        // Native wheel events take the ordinary path with the desktop domain engaged: the wheel
+        // source and notch count too, as on one monitor since a5e3c1f (2026-10-22).
         QVERIFY(driver.send("wheel v 1", "ok"));
-        QCOMPARE(probe.next("scroll"), QString("scroll none 0.00 15.00"));
+        QCOMPARE(probe.next("scroll"), QString("scroll wheel 0.00 15.00 discrete 0 1"));
         QVERIFY(driver.send("rel 2000 0", "ok"));
         QTRY_VERIFY(observed.position && observed.position->x() > domain.right() - 20 &&
                     observed.position->x() < domain.x() + domain.width());
@@ -3907,6 +3985,273 @@ class NativeTests : public QObject
         api.call("Finish");
         QTRY_COMPARE_WITH_TIMEOUT(probe.state(),QProcess::NotRunning,5000);
     }
+    void x11WindowsComeForwardWhenTheirApplicationAsks()
+    {
+        // Lily Hewitt's laptop, 2026-11-13/14: each time Steam started (and before Noita launched) the
+        // bridge logged "No last focused toplevel, cannot focus window" and the window stayed where it
+        // was. Steam's web views, Java and Qt take focus with WM_TAKE_FOCUS, and the bridge remembered
+        // the focused X11 window only for windows without it. An X11 window asking to come forward
+        // while an X11 window has the keyboard must come forward.
+        if (X11Bridge::helperPath().isEmpty()) QSKIP("This build explicitly disables X11 support.");
+        NativeScene scene;
+        QVERIFY(scene.show());
+        QVERIFY2(QTest::qWaitFor([&]{ return scene.x11.ready() || scene.x11.state()=="failed"; },12000),
+                 "Private X11 startup timed out");
+        QCOMPARE(scene.x11.state(),QString("ready"));
+        auto &manager=*scene.manager;
+        QVERIFY(QDir().mkpath(scene.files.path()+"/applications"));
+        for(const auto *name:{"X11A","X11B"}) {
+            QFile entry(scene.files.path()+"/applications/"+QString(name).toLower()+".desktop");
+            QVERIFY(entry.open(QIODevice::WriteOnly));
+            entry.write("[Desktop Entry]\nType=Application\nName="+QByteArray(name)+"\nExec=/usr/bin/env QT_QPA_PLATFORM=xcb "+
+                (QCoreApplication::applicationDirPath()+"/native-probe "+name).toUtf8()+"\n");
+        }
+        auto *catalog=qobject_cast<ApplicationCatalog *>(manager.applicationCatalog());
+        QVERIFY(catalog);
+        catalog->refresh();
+        QTRY_VERIFY(catalog->ready());
+        const auto cleanup=qScopeGuard([&]{
+            for(const auto *name:{"X11A","X11B"}) {
+                QDBusInterface api(QString("org.frankenstein.NativeProbe")+name,"/Probe","org.frankenstein.NativeProbe");
+                if(api.isValid()) api.call("Finish");
+            }
+        });
+        const auto failureCapture=qScopeGuard([&]{
+            if(QTest::currentTestFailed()) capture(scene.view,"native-x11-activation-failure.png");
+        });
+        manager.launchApplication("x11a.desktop");
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager,"Native Probe X11A").isEmpty(),10000);
+        manager.launchApplication("x11b.desktop");
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager,"Native Probe X11B").isEmpty(),10000);
+        const auto idA=first(manager,"Native Probe X11A").value("id").toULongLong();
+        const auto idB=first(manager,"Native Probe X11B").value("id").toULongLong();
+        manager.moveWindow(idA,100,90);
+        manager.moveWindow(idB,420,180);
+        auto *clientA=qobject_cast<QWaylandQuickShellSurfaceItem *>(visualItem(scene.view.contentItem(),"client-"+QString::number(idA)));
+        auto *clientB=qobject_cast<QWaylandQuickShellSurfaceItem *>(visualItem(scene.view.contentItem(),"client-"+QString::number(idB)));
+        QVERIFY(clientA && clientB);
+        QDBusInterface a("org.frankenstein.NativeProbeX11A","/Probe","org.frankenstein.NativeProbe");
+        QDBusInterface b("org.frankenstein.NativeProbeX11B","/Probe","org.frankenstein.NativeProbe");
+        QTRY_VERIFY(a.isValid() && b.isValid());
+        // B in front with the keyboard, given by a click as a person would.
+        manager.activate(idB);
+        QTRY_VERIFY(clientB->hasActiveFocus());
+        const auto point=clientB->mapToScene(clientB->mapFromSurface(QPointF(120,120))).toPoint();
+        QTest::mouseMove(&scene.view,point);
+        QTest::qWait(60);
+        QTest::mouseClick(&scene.view,Qt::LeftButton,{},point);
+        QTRY_VERIFY(QDBusReply<int>(b.call("MousePresses")).value()>0);
+        QTRY_VERIFY(QJsonDocument::fromJson(QDBusReply<QString>(b.call("InputState")).value().toUtf8()).object()
+                        .value("activeWindow").toBool());
+        // A asks to come forward with _NET_ACTIVE_WINDOW alone, as Steam's web views and xdotool do
+        // (Qt's own activateWindow also moves the X focus itself, which hid the problem).
+        const auto activate=[&](const QString &title) {
+            QProcess sender;
+            auto environment=scene.childEnvironment();
+            scene.x11.applyTo(environment);
+            sender.setProcessEnvironment(environment);
+            sender.start(QCoreApplication::applicationDirPath()+"/x11-activate-probe",{title});
+            return sender.waitForFinished(5000) && sender.exitCode()==0 &&
+                   QString::fromUtf8(sender.readAllStandardOutput()).startsWith("sent ");
+        };
+        QTest::qWait(300);
+        QVERIFY(clientB->hasActiveFocus() && !clientA->hasActiveFocus());
+        QVERIFY(!first(manager,"Native Probe X11A").value("active").toBool());
+        QVERIFY(activate("Native Probe X11A"));
+        QTRY_VERIFY2_WITH_TIMEOUT(clientA->hasActiveFocus(),"The X11 window that asked did not come forward",4000);
+        QVERIFY(first(manager,"Native Probe X11A").value("active").toBool());
+        QTRY_VERIFY(QJsonDocument::fromJson(QDBusReply<QString>(a.call("InputState")).value().toUtf8()).object()
+                        .value("activeWindow").toBool());
+        // With the desktop in front, a request never takes the keyboard (focus-stealing prevention).
+        QVERIFY(manager.activateDesktop());
+        QTRY_VERIFY(manager.desktopActive());
+        QVERIFY(activate("Native Probe X11B"));
+        QTest::qWait(500);
+        QVERIFY(manager.desktopActive());
+        QVERIFY(!clientB->hasActiveFocus());
+    }
+    void x11WindowsMoveAndResizeFromTheirOwnFrame()
+    {
+        // Steam draws its own title bar and edges and asks the window manager to move or resize it
+        // (_NET_WM_MOVERESIZE) when one is dragged. Lily Hewitt's laptop logged "Requested resize of
+        // window ... but we don't have a click serial for it" (2026-11-13). A drag on the window's own
+        // frame must move or resize it, following the pointer while the button is held.
+        if (X11Bridge::helperPath().isEmpty()) QSKIP("This build explicitly disables X11 support.");
+        NativeScene scene;
+        QVERIFY(scene.show());
+        QVERIFY2(QTest::qWaitFor([&]{ return scene.x11.ready() || scene.x11.state()=="failed"; },12000),
+                 "Private X11 startup timed out");
+        auto &manager=*scene.manager;
+        QVERIFY(QDir().mkpath(scene.files.path()+"/applications"));
+        QFile entry(scene.files.path()+"/applications/x11m.desktop");
+        QVERIFY(entry.open(QIODevice::WriteOnly));
+        entry.write("[Desktop Entry]\nType=Application\nName=X11M\nExec=/usr/bin/env QT_QPA_PLATFORM=xcb "+
+            (QCoreApplication::applicationDirPath()+"/native-probe X11M").toUtf8()+"\n");
+        entry.close();
+        auto *catalog=qobject_cast<ApplicationCatalog *>(manager.applicationCatalog());
+        QVERIFY(catalog);
+        catalog->refresh();
+        QTRY_VERIFY(catalog->ready());
+        const auto cleanup=qScopeGuard([&]{
+            QDBusInterface api("org.frankenstein.NativeProbeX11M","/Probe","org.frankenstein.NativeProbe");
+            if(api.isValid()) api.call("Finish");
+        });
+        const auto failureCapture=qScopeGuard([&]{
+            if(QTest::currentTestFailed()) capture(scene.view,"native-x11-moveresize-failure.png");
+        });
+        manager.launchApplication("x11m.desktop");
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager,"Native Probe X11M").isEmpty(),10000);
+        const auto id=first(manager,"Native Probe X11M").value("id").toULongLong();
+        auto *client=qobject_cast<QWaylandQuickShellSurfaceItem *>(visualItem(scene.view.contentItem(),"client-"+QString::number(id)));
+        QVERIFY(client);
+        QDBusInterface api("org.frankenstein.NativeProbeX11M","/Probe","org.frankenstein.NativeProbe");
+        QTRY_VERIFY(api.isValid());
+        manager.moveWindow(id,200,150);
+        manager.resizeWindow(id,360,260);
+        manager.activate(id);
+        QTRY_VERIFY(client->hasActiveFocus());
+        QTRY_COMPARE(QDBusReply<int>(api.call("Width")).value(),360);
+        const auto request=[&](const QString &kind) {
+            QProcess sender;
+            auto environment=scene.childEnvironment();
+            scene.x11.applyTo(environment);
+            sender.setProcessEnvironment(environment);
+            sender.start(QCoreApplication::applicationDirPath()+"/x11-activate-probe",{"Native Probe X11M",kind,"0","0"});
+            const bool ok=sender.waitForFinished(5000) && sender.exitCode()==0;
+            qInfo()<<"x11-activate-probe"<<kind<<sender.readAllStandardOutput().trimmed()<<"presses"
+                   <<QDBusReply<int>(api.call("MousePresses")).value();
+            return ok;
+        };
+        const auto drag=[&](QPoint from,QPoint by,const QString &kind) {
+            QTest::mouseMove(&scene.view,from);
+            QTest::qWait(60);
+            QTest::mousePress(&scene.view,Qt::LeftButton,{},from);
+            QTest::qWait(150);
+            if(!request(kind)) return false;
+            QTest::qWait(150);
+            for(int step=1;step<=8;++step) QTest::mouseMove(&scene.view,from+by*step/8,15);
+            QTest::qWait(100);
+            QTest::mouseRelease(&scene.view,Qt::LeftButton,{},from+by,15);
+            return true;
+        };
+        // Its own "title bar": a press near the top of its content.
+        const auto x=first(manager,"Native Probe X11M").value("x").toInt(), y=first(manager,"Native Probe X11M").value("y").toInt();
+        QVERIFY(drag(client->mapToScene(client->mapFromSurface(QPointF(150,30))).toPoint(),QPoint(120,80),"move"));
+        QTRY_VERIFY2(qAbs(first(manager,"Native Probe X11M").value("x").toInt()-(x+120))<=4 &&
+                     qAbs(first(manager,"Native Probe X11M").value("y").toInt()-(y+80))<=4,
+                     qPrintable(QString("moved to %1,%2 from %3,%4").arg(first(manager,"Native Probe X11M").value("x").toInt())
+                                .arg(first(manager,"Native Probe X11M").value("y").toInt()).arg(x).arg(y)));
+        // Its own bottom-right edge.
+        const auto corner=client->mapToScene(client->mapFromSurface(QPointF(350,250))).toPoint();
+        QVERIFY(drag(corner,QPoint(60,40),"size-br"));
+        QTRY_VERIFY2(qAbs(QDBusReply<int>(api.call("Width")).value()-420)<=4 && qAbs(QDBusReply<int>(api.call("Height")).value()-300)<=4,
+                     qPrintable(QString("size %1x%2").arg(QDBusReply<int>(api.call("Width")).value()).arg(QDBusReply<int>(api.call("Height")).value())));
+    }
+    void x11SupportStartsAgainAfterItStops()
+    {
+        // Every X11 application goes through one bridge. When it stopped during a session, it stayed
+        // off until the next login, so Steam and games could not open again (found 2026-11-15). Now
+        // it starts again (a few times at most), and the next X11 application opens.
+        if (X11Bridge::helperPath().isEmpty()) QSKIP("This build explicitly disables X11 support.");
+        NativeScene scene;
+        QVERIFY(scene.show());
+        QVERIFY2(QTest::qWaitFor([&]{ return scene.x11.ready() || scene.x11.state()=="failed"; },12000),
+                 "Private X11 startup timed out");
+        QCOMPARE(scene.x11.state(),QString("ready"));
+        auto &manager=*scene.manager;
+        QSignalSpy errors(&manager,&NativeManager::errorOccurred);
+        const auto before=scene.x11.processId();
+        QVERIFY(before>0);
+        QVERIFY(::kill(pid_t(before),SIGKILL)==0);
+        QTRY_VERIFY(errors.size()>=1);
+        QVERIFY2(errors.first().first().toString().contains("is starting again"),qPrintable(errors.first().first().toString()));
+        QTRY_VERIFY_WITH_TIMEOUT(scene.x11.ready(),15000);
+        QVERIFY(scene.x11.processId()!=before);
+        // The alert saying so is modal; OK it, as a person would.
+        QTRY_VERIFY(manager.shellModal());
+        QTest::keyClick(&scene.view,Qt::Key_Return);
+        QTRY_VERIFY(!manager.shellModal());
+        // An X11 application opens on the new bridge.
+        QVERIFY(QDir().mkpath(scene.files.path()+"/applications"));
+        QFile entry(scene.files.path()+"/applications/x11r.desktop");
+        QVERIFY(entry.open(QIODevice::WriteOnly));
+        entry.write("[Desktop Entry]\nType=Application\nName=X11R\nExec=/usr/bin/env QT_QPA_PLATFORM=xcb "+
+            (QCoreApplication::applicationDirPath()+"/native-probe X11R").toUtf8()+"\n");
+        entry.close();
+        auto *catalog=qobject_cast<ApplicationCatalog *>(manager.applicationCatalog());
+        QVERIFY(catalog);
+        catalog->refresh();
+        QTRY_VERIFY(catalog->ready());
+        const auto cleanup=qScopeGuard([&]{
+            QDBusInterface api("org.frankenstein.NativeProbeX11R","/Probe","org.frankenstein.NativeProbe");
+            if(api.isValid()) api.call("Finish");
+        });
+        manager.launchApplication("x11r.desktop");
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager,"Native Probe X11R").isEmpty(),10000);
+        // It keeps starting again only so often: a bridge that stops over and over stays off.
+        for(int restart=2; restart<=X11Bridge::maximumRestarts+1; ++restart) {
+            QTRY_VERIFY_WITH_TIMEOUT(scene.x11.ready(),15000);
+            QVERIFY(::kill(pid_t(scene.x11.processId()),SIGKILL)==0);
+            QTRY_COMPARE_WITH_TIMEOUT(errors.size(),restart,5000);
+        }
+        QVERIFY(errors.last().first().toString().contains("Native Wayland applications remain available"));
+        QTest::qWait(X11Bridge::maximumRestarts*1000+1500);
+        QVERIFY(!scene.x11.ready() && !scene.x11.starting());
+        QCOMPARE(scene.x11.state(),QString("failed"));
+    }
+    void x11GamesThatChangeTheResolutionGoFullScreenAndBack()
+    {
+        // Many games (older ones, Proton) switch to a smaller display mode for full screen. Xwayland
+        // only pretends to, scaling the game's window, so the desktop's own screen never changes.
+        // The game must cover the screen, come back to a window, and quit, with nothing crashing.
+        if (X11Bridge::helperPath().isEmpty()) QSKIP("This build explicitly disables X11 support.");
+        NativeScene scene;
+        QVERIFY(scene.show());
+        QTRY_VERIFY_WITH_TIMEOUT(scene.x11.ready(),12000);
+        auto &manager=*scene.manager;
+        const auto screen=scene.view.size();
+        auto env=scene.childEnvironment();
+        env.insert("SDL_VIDEO_DRIVER","x11");
+        env.remove("WAYLAND_DISPLAY");
+        LineProcess game;
+        game.process.setProcessEnvironment(env);
+        game.process.start(QCoreApplication::applicationDirPath()+"/relative-mouse-probe");
+        const auto stop=qScopeGuard([&]{ if(game.process.state()!=QProcess::NotRunning){game.process.kill();game.process.waitForFinished(3000);} });
+        const auto failureCapture=qScopeGuard([&]{
+            if(QTest::currentTestFailed()){
+                qWarning()<<"Game"<<game.lines.join(" | ")<<"window"<<first(manager,"Relative Mouse Probe");
+                capture(scene.view,"native-x11-mode-change-failure.png");}
+        });
+        QCOMPARE(game.next("ready",10000),QString("ready x11"));
+        QVariantMap window;
+        QTRY_VERIFY_WITH_TIMEOUT(!(window=first(manager,"Relative Mouse Probe")).isEmpty(),10000);
+        const auto id=window.value("id").toULongLong();
+        manager.activate(id);
+        game.skip();
+        game.process.write("exclusive\n");
+        const auto requested=game.next("exclusive-requested",5000);
+        QVERIFY2(!requested.isEmpty(),qPrintable(game.lines.join(" | ")));
+        QVERIFY(!game.next("fullscreen-entered",5000).isEmpty());
+        QTRY_VERIFY(first(manager,"Relative Mouse Probe").value("fullScreen").toBool());
+        QTest::qWait(300);
+        QVERIFY(capture(scene.view,"native-x11-mode-change.png"));
+        // It covers the screen, and the desktop's own screen is unchanged.
+        auto *frame=visualItem(scene.view.contentItem(),"frame-"+QString::number(id));
+        QVERIFY(frame);
+        QCOMPARE(frame->position(),QPointF(0,0));
+        QCOMPARE(scene.view.size(),screen);
+        QCOMPARE(manager.primaryDisplayRect().size(),QSize(1120,760));
+        // Back to a window, then quit.
+        game.process.write("windowed\n");
+        QVERIFY(!game.next("fullscreen-left",5000).isEmpty());
+        QTRY_VERIFY(!first(manager,"Relative Mouse Probe").value("fullScreen").toBool());
+        QCOMPARE(scene.view.size(),screen);
+        game.process.write("quit\n");
+        QVERIFY(game.process.waitForFinished(5000));
+        QCOMPARE(game.process.exitCode(),0);
+        QTRY_VERIFY(first(manager,"Relative Mouse Probe").isEmpty());
+        QVERIFY(scene.x11.ready());
+    }
     void x11ApplicationsAppearAsClassicWindows()
     {
         if (X11Bridge::helperPath().isEmpty()) QSKIP("This build explicitly disables X11 support.");
@@ -4336,6 +4681,63 @@ class NativeTests : public QObject
         QVERIFY2(expectExit("retirement"),"Connected Vulkan client remained alive after display teardown");
         const auto errors=bytes(stderrPath);
         QVERIFY2(!errors.contains("AddressSanitizer") && !errors.contains("runtime error:"),qPrintable(stderrPath));
+    }
+    void clipboardPicturesTravelBetweenX11AndWayland()
+    {
+        // A screenshot copied to the clipboard and pasted into an X11 application (Discord and
+        // Steam chat often run over X11), and a picture copied in one pasted into a Wayland one.
+        // The X11 documentation listed rich clipboard formats as not qualified.
+        if (X11Bridge::helperPath().isEmpty()) QSKIP("This build explicitly disables X11 support.");
+        NativeScene scene;
+        QVERIFY(scene.show());
+        QTRY_VERIFY_WITH_TIMEOUT(scene.x11.ready(),10000);
+        QProcess x11,wayland;
+        const auto cleanup=qScopeGuard([&]{
+            for(auto *process:{&x11,&wayland})if(process->state()!=QProcess::NotRunning){process->kill();process->waitForFinished(3000);}
+        });
+        auto environment=scene.childEnvironment();
+        environment.insert("QT_QPA_PLATFORM","xcb");
+        x11.setProcessEnvironment(environment);
+        x11.start(QCoreApplication::applicationDirPath()+"/native-probe",{"PicX"});
+        QVERIFY(x11.waitForStarted());
+        wayland.setProcessEnvironment(scene.childEnvironment());
+        wayland.start(QCoreApplication::applicationDirPath()+"/native-probe",{"PicW"});
+        QVERIFY(wayland.waitForStarted());
+        auto &manager=*scene.manager;
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager,"Native Probe PicX").isEmpty(),10000);
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager,"Native Probe PicW").isEmpty(),10000);
+        QDBusInterface x("org.frankenstein.NativeProbePicX","/Probe","org.frankenstein.NativeProbe");
+        QDBusInterface w("org.frankenstein.NativeProbePicW","/Probe","org.frankenstein.NativeProbe");
+        QTRY_VERIFY(x.isValid() && w.isValid());
+        const auto focus=[&](const QString &title) {
+            const auto id=first(manager,title).value("id").toULongLong();
+            manager.activate(id);
+            auto *client=qobject_cast<QWaylandQuickShellSurfaceItem *>(visualItem(scene.view.contentItem(),"client-"+QString::number(id)));
+            if(!client)return false;
+            const auto point=client->mapToScene(client->mapFromSurface(QPointF(120,120))).toPoint();
+            QTest::mouseMove(&scene.view,point);
+            QTest::mouseClick(&scene.view,Qt::LeftButton,{},point);
+            return QTest::qWaitFor([&]{return client->hasActiveFocus();},2000);
+        };
+        // As in the text test: the read needs the desktop to keep serving the transfer.
+        const auto picture=[&](QDBusInterface &api) {
+            QDBusPendingReply<QString> reply=api.asyncCall("ClipboardImage");
+            if (!QTest::qWaitFor([&]{return reply.isFinished();},4000) || reply.isError())
+                return QString("<inspection unavailable>");
+            return reply.value();
+        };
+        // Wayland to X11: a 300x200 screenshot-sized picture.
+        QVERIFY(focus("Native Probe PicW"));
+        w.call("SetClipboardImage",300,200,"#3366cc");
+        QTRY_COMPARE_WITH_TIMEOUT(picture(w),QString("300x200 #3366cc"),3000);
+        QVERIFY(focus("Native Probe PicX"));
+        QTRY_COMPARE_WITH_TIMEOUT(picture(x),QString("300x200 #3366cc"),5000);
+        // X11 to Wayland.
+        x.call("SetClipboardImage",120,90,"#cc3311");
+        QTRY_COMPARE_WITH_TIMEOUT(picture(x),QString("120x90 #cc3311"),3000);
+        QVERIFY(focus("Native Probe PicW"));
+        QTRY_COMPARE_WITH_TIMEOUT(picture(w),QString("120x90 #cc3311"),5000);
+        x.call("Finish"); w.call("Finish");
     }
     void clipboardTextTravelsBetweenX11AndWayland()
     {
@@ -5447,14 +5849,14 @@ class NativeTests : public QObject
         QCOMPARE(list.at(2).toMap().value("text").toString(),"Workspace 3 — "+zuluName);
         QCOMPARE(list.at(4).toMap().value("text").toString(),QString("Workspace 5"));
         // The Application menu and switcher say where windows wait (Lily Hewitt, 2026-11-14):
-        // Zulu is only on 3, so it reads "Zulu (3)"; Alpha shows on 1 and keeps its plain name.
+        // Zulu is only on 3, so it reads "Zulu (3)"; Alpha, showing on 1, reads "Alpha (1)" (2026-11-15).
         QVariant byName;
         QMetaObject::invokeMethod(scene.view.rootObject(),"applicationsByName",Q_RETURN_ARG(QVariant,byName));
         const auto label=[&](const QString &name){
             for(const auto &entry:byName.toList())
                 if(entry.toMap().value("name").toString()==name)return entry.toMap().value("label").toString();
             return QString();};
-        QCOMPARE(label(alphaName),alphaName);
+        QCOMPARE(label(alphaName),alphaName+" (1)");
         QCOMPARE(label(zuluName),zuluName+" (3)");
         // Command-Tab still switches applications (Finder, Alpha, Zulu by name); reaching Zulu
         // shows the workspace its window is on.
@@ -8551,6 +8953,51 @@ class NativeTests : public QObject
         QTRY_COMPARE(app.state(), QProcess::NotRunning);
         QCOMPARE(app.exitCode(), 0);
     }
+    void functionKeysReachTheApplicationWithTheKeyboard()
+    {
+        // F10 opens the menu bar from the keyboard only while the desktop has the keyboard. Since
+        // 2026-11-08 it also did over applications, so Ymir's F10 (Settings) and other programs'
+        // F10 (Midnight Commander's and htop's Quit) never arrived (found 2026-11-15).
+        NativeScene scene;
+        QVERIFY(scene.show());
+        auto &manager = *scene.manager;
+        QProcess app;
+        app.setProcessEnvironment(scene.childEnvironment());
+        app.start(QCoreApplication::applicationDirPath() + "/native-probe", {"Keys"});
+        const auto stop = qScopeGuard([&] {
+            if (app.state() != QProcess::NotRunning) { app.kill(); app.waitForFinished(3000); }
+        });
+        QTRY_VERIFY(!first(manager, "Native Probe Keys").isEmpty());
+        const auto id = first(manager, "Native Probe Keys").value("id").toULongLong();
+        auto *client = visualItem(scene.view.contentItem(), "client-" + QString::number(id));
+        QVERIFY(client);
+        QTRY_VERIFY(client->hasActiveFocus());
+        QDBusInterface probe("org.frankenstein.NativeProbeKeys", "/Probe", "org.frankenstein.NativeProbe");
+        QTRY_VERIFY(probe.isValid());
+        QTRY_VERIFY_WITH_TIMEOUT(probeAcceptsTextInput(probe), 3000);
+        const auto presses = [&] {
+            return QJsonDocument::fromJson(QDBusReply<QString>(probe.call("InputState")).value().toUtf8())
+                .object().value("keyPresses").toInt();
+        };
+        const int before = presses();
+        nativeKeyEvent(&scene.view, QEvent::KeyPress, Qt::Key_F10, {}, 68);
+        nativeKeyEvent(&scene.view, QEvent::KeyRelease, Qt::Key_F10, {}, 68);
+        QTRY_COMPARE(presses(), before + 1);
+        QTest::qWait(200);
+        QVERIFY(!manager.menuOpen());
+        QVERIFY(!scene.view.rootObject()->property("menuKeyboardMode").toBool());
+        // With the desktop in front, F10 is the menu bar's again.
+        QVERIFY(manager.activateDesktop());
+        QTRY_VERIFY(manager.desktopActive());
+        nativeKeyEvent(&scene.view, QEvent::KeyPress, Qt::Key_F10, {}, 68);
+        nativeKeyEvent(&scene.view, QEvent::KeyRelease, Qt::Key_F10, {}, 68);
+        QTRY_VERIFY(manager.menuOpen());
+        QCOMPARE(presses(), before + 1);
+        QTest::keyClick(&scene.view, Qt::Key_Escape);
+        QTRY_VERIFY(!manager.menuOpen());
+        probe.asyncCall("Finish");
+        QTRY_COMPARE(app.state(), QProcess::NotRunning);
+    }
     void applicationShortcutsOpenLauncherAndRespectCloseVeto()
     {
         NativeScene scene;
@@ -9145,6 +9592,33 @@ class NativeTests : public QObject
         }
     }
 #endif
+    void finderFindOpensSherlock()
+    {
+        // The 9.2.2 Finder's File ▸ Find… (Command-F) opened Sherlock; ours asks the desktop to.
+        NativeScene scene;
+        auto &manager = *scene.manager;
+        QVERIFY(scene.show());
+        const auto folder = scene.files.path() + "/Documents";
+        QVERIFY(QDir().mkpath(folder));
+        manager.launchFinder(folder);
+        QTRY_VERIFY_WITH_TIMEOUT(manager.rowCount() == 1, 10000);
+        const auto id = manager.snapshot().value("windows").toList().first().toMap().value("id").toULongLong();
+        manager.activate(id);
+        auto *client = visualItem(scene.view.contentItem(), "client-" + QString::number(id));
+        QVERIFY(client);
+        QTRY_VERIFY(client->hasActiveFocus());
+        QTest::qWait(300);
+        auto *sherlock = scene.view.rootObject()->findChild<QQuickItem *>("sherlock-window");
+        QVERIFY(sherlock && !sherlock->isVisible());
+        nativeKeyEvent(&scene.view, QEvent::KeyPress, Qt::Key_Meta, Qt::MetaModifier, 125);
+        nativeKeyEvent(&scene.view, QEvent::KeyPress, Qt::Key_F, Qt::MetaModifier, 33);
+        nativeKeyEvent(&scene.view, QEvent::KeyRelease, Qt::Key_F, Qt::MetaModifier, 33);
+        nativeKeyEvent(&scene.view, QEvent::KeyRelease, Qt::Key_Meta, Qt::NoModifier, 125);
+        QTRY_VERIFY_WITH_TIMEOUT(sherlock->isVisible(), 5000);
+        QTRY_VERIFY(manager.desktopActive());
+        QTRY_VERIFY(sherlock->property("front").toBool());
+        QVERIFY(capture(scene.view, "native-finder-find-sherlock.png"));
+    }
     void finderPopUpWindowsOpenFromTabsAtTheScreenBottom()
     {
         // Lily Hewitt, 2026-11-09: pop-up folder windows, measured in the 9.2.2 reference VM.

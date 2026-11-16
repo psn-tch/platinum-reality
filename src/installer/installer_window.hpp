@@ -19,7 +19,7 @@ class QTextBrowser;
 
 // Install Platinum Reality, as faithful to the Mac OS 9.2.2 Installer as an original can be: the band
 // naming the step, a page, and the step's buttons. Welcome lists the steps; then Select Destination
-// (a Destination Disk pop-up, Options… for encryption), Important Information and the license (Save…,
+// (a Destination Disk pop-up and whether to encrypt it), Important Information and the license (Save…,
 // Print…, then Agree / Disagree), the account, and Install Software, whose Start erases the chosen disk
 // only after a question whose default button is Cancel. It ends with 9.2.2's finished alert.
 // All disk work is done by the install engine (EngineClient).
@@ -68,7 +68,6 @@ class InstallerWindow final : public QWidget
     QString diskName() const;
     bool diskUsable(int index) const;
     void describeDisk();
-    void showOptions();
     void saveText();
     QWidget *welcomePage();
     QWidget *destinationPage();
@@ -85,7 +84,7 @@ class InstallerWindow final : public QWidget
            *m_finishedSummary = nullptr, *m_diskContents = nullptr, *m_diskSize = nullptr, *m_diskRequired = nullptr;
     QWidget *m_band = nullptr;
     QComboBox *m_disks = nullptr, *m_licenseLanguage = nullptr;
-    QDialog *m_optionsDialog = nullptr, *m_finishedAlert = nullptr;
+    QDialog *m_finishedAlert = nullptr;
     QElapsedTimer m_installClock;
     QTextBrowser *m_information = nullptr, *m_license = nullptr;
     QLineEdit *m_fullName = nullptr, *m_userName = nullptr, *m_password = nullptr, *m_verify = nullptr,
@@ -93,7 +92,7 @@ class InstallerWindow final : public QWidget
     QComboBox *m_timeZone = nullptr, *m_keymap = nullptr, *m_language = nullptr;
     QCheckBox *m_encrypt = nullptr;
     QProgressBar *m_progress = nullptr;
-    QPushButton *m_back = nullptr, *m_continue = nullptr, *m_restart = nullptr, *m_quit = nullptr, *m_options = nullptr,
+    QPushButton *m_back = nullptr, *m_continue = nullptr, *m_restart = nullptr, *m_quit = nullptr,
                 *m_save = nullptr, *m_print = nullptr;
     bool m_choicesAsked = false;
     bool m_agreed = false, m_userNameEdited = false, m_installOk = false, m_diskChanged = false;

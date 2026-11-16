@@ -50,6 +50,10 @@ class ApplicationCatalog final : public QAbstractListModel
     Q_INVOKABLE bool setFileTypeApplication(const QString &type, const QString &id);
     // The kind of document an extension ("txt" or ".txt") names: {type, kind, extension}, or {}.
     Q_INVOKABLE QVariantMap fileTypeFor(const QString &extension) const;
+    // The application's .desktop file (empty for the desktop's own, which have none), and the
+    // application a .desktop file is, for an alias to it in the Launcher (empty if not listed).
+    QString applicationFile(const QString &id) const;
+    QString applicationForFile(const QString &file) const;
     QString applicationName(const QString &waylandId) const;
     QString applicationIcon(const QString &waylandId) const;
   signals:

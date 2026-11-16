@@ -113,7 +113,9 @@ class InstallerTests final : public QObject
         QCOMPARE(window.page(), InstallerWindow::Install);
         QCOMPARE(next->text(), QString("Start"));
         QVERIFY(find<QLabel>(window, "installer-summary")->text().contains("/dev/vda"));
-        QVERIFY(find<QLabel>(window, "installer-summary")->text().contains("The disk will be encrypted"));
+        // The summary says the disk will be encrypted exactly when Encrypt Disk is checked (off unless chosen).
+        QCOMPARE(find<QLabel>(window, "installer-summary")->text().contains("The disk will be encrypted"),
+                 find<QCheckBox>(window, "installer-encrypt")->isChecked());
         // Go Back keeps every answer.
         find<QPushButton>(window, "installer-back")->click();
         QCOMPARE(window.page(), InstallerWindow::Account);
@@ -228,14 +230,14 @@ class InstallerTests final : public QObject
         QVERIFY(argv.contains("--confirm-erase") && argv.contains("/dev/vda"));
         QVERIFY(!QJsonDocument(install.value("argv").toArray()).toJson().contains("platinum\""));
         QCOMPARE(install.value("password_length").toInt(), 8);
-        // Encrypted by default, unlocked with the same password.
-        QCOMPARE(install.value("passphrase_length").toInt(), 8);
+        // Not encrypted unless chosen, so no disk passphrase.
+        QCOMPARE(install.value("passphrase_length").toInt(), 0);
         const auto config = install.value("config").toObject();
         QCOMPARE(config.value("disk").toString(), QString("/dev/vda"));
         QCOMPARE(config.value("hostname").toString(), QString("platinum-g4"));
         QCOMPARE(config.value("user").toObject().value("name").toString(), QString("patexample"));
         QVERIFY(!config.contains("password"));
-        QVERIFY(config.value("encrypt").toBool());
+        QVERIFY(!config.value("encrypt").toBool());
         QVERIFY(!QJsonDocument(config).toJson().contains("platinum\"")); // Not in the config file either.
         // The fields are cleared once the engine has the password.
         QVERIFY(find<QLineEdit>(window, "installer-password")->text().isEmpty());
@@ -437,7 +439,7 @@ class InstallerTests final : public QObject
             key(Qt::Key_Home);key(Qt::Key_Down);
             QCOMPARE(combo->currentIndex(),1);
         }
-        QVERIFY(find<QCheckBox>(window,"installer-encrypt")->isChecked()); // Destination ▸ Options…
+        QVERIFY(!find<QCheckBox>(window,"installer-encrypt")->isChecked()); // Off unless chosen.
         key(Qt::Key_Return);
         QCOMPARE(window.page(),InstallerWindow::Install);
         questionMode=1;poll.start();watchdog.start(3000);
@@ -457,7 +459,7 @@ class InstallerTests final : public QObject
         const auto config=made.last().value("config").toObject();
         QCOMPARE(config.value("hostname").toString(),QString("keyboard-g4"));
         QCOMPARE(config.value("user").toObject().value("name").toString(),QString("keyboarduser"));
-        QVERIFY(config.value("encrypt").toBool());
+        QVERIFY(!config.value("encrypt").toBool());
         for(auto pair:{std::pair{"locale","installer-language"},{"timezone","installer-time-zone"},{"keymap","installer-keymap"}})
             QCOMPARE(config.value(pair.first).toString(),find<QComboBox>(window,pair.second)->currentData().toString());
         auto *alert=window.findChild<QDialog *>("installer-finished");
@@ -586,9 +588,10 @@ class InstallerTests final : public QObject
         QCOMPARE(find<QComboBox>(window, "installer-keymap")->count(), 8);
         QVERIFY(find<QLabel>(window, "installer-summary")->text().contains("/dev/vda")); // No error shown.
     }
-    void destinationOptionsChooseEncryptionAndCancelKeepsTheChoice()
+    void encryptionIsChosenOnTheDestinationPage()
     {
-        // 9.2.2's Select Destination ▸ Options… asked about a clean installation; here it is encryption.
+        // Lily Hewitt, 2026-11-15: whether the disk is encrypted (a password at every startup, before
+        // the login) is shown with the disk, not behind Options…, and is off unless chosen.
         QTemporaryDir root;
         qputenv("FAKE_ENGINE_LOG", root.filePath("engine.jsonl").toLocal8Bit());
         qunsetenv("FAKE_ENGINE_FAIL");
@@ -596,25 +599,26 @@ class InstallerTests final : public QObject
         InstallerWindow window(&engine, "Read me.", "MIT License");
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
-        auto *options = find<QPushButton>(window, "installer-options");
-        QVERIFY(!options->isVisible());
+        QVERIFY(!window.findChild<QPushButton *>("installer-options"));
+        auto *encrypt = find<QCheckBox>(window, "installer-encrypt");
+        QVERIFY(!encrypt->isVisible());
         find<QPushButton>(window, "installer-continue")->click();
         QTRY_COMPARE(find<QComboBox>(window, "installer-disks")->count(), 2);
-        QVERIFY(options->isVisible());
-        auto *encrypt = find<QCheckBox>(window, "installer-encrypt");
-        const auto answer = [&](bool ok) {
-            QTimer::singleShot(50, &window, [&, ok] {
-                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
-                QVERIFY(dialog && encrypt->isVisible());
-                encrypt->click();
-                ok ? dialog->accept() : dialog->reject();
-            });
-            options->click();
-        };
-        answer(false); // Cancel: still encrypted.
+        QVERIFY(encrypt->isVisible() && !encrypt->isChecked());
+        QVERIFY(find<QLabel>(window, "installer-encrypt-explanation")->text().contains("each time it starts up"));
+        encrypt->click();
         QVERIFY(encrypt->isChecked());
-        answer(true);  // OK: not encrypted.
-        QVERIFY(!encrypt->isChecked());
+        find<QPushButton>(window, "installer-back")->click(); // Back to Welcome; the choice stays.
+        QCOMPARE(window.page(), InstallerWindow::Welcome);
+        reachInstall(window);
+        QVERIFY(encrypt->isChecked());
+        QVERIFY(find<QLabel>(window, "installer-summary")->text().contains("The disk will be encrypted"));
+        window.setConfirmationAnswers(true, true);
+        find<QPushButton>(window, "installer-continue")->click();
+        QTRY_COMPARE(window.page(), InstallerWindow::Finished);
+        const auto made = calls(root.filePath("engine.jsonl"));
+        QVERIFY(made.last().value("config").toObject().value("encrypt").toBool());
+        QCOMPARE(made.last().value("passphrase_length").toInt(), made.last().value("password_length").toInt());
     }
     void disksTooSmallToInstallOnAreDimmedAndNeverChosenFirst()
     {

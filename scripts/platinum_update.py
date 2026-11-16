@@ -186,8 +186,12 @@ def stage(source, staging):
 
 
 def keep(package, signature, folder):
-    """Replace the release kept in `folder` (current or previous) with this package and signature."""
-    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    """Replace the release kept in `folder` (current or previous) with this package and signature.
+    The folder is readable by everyone: Software Update, running as the person logged in, looks
+    there to offer Restore Previous Version. A root-only folder hid that button (2026-11-14). The
+    kept files are signed public releases, and only root changes them."""
+    folder.mkdir(mode=0o755, parents=True, exist_ok=True)
+    folder.chmod(0o755)
     for old in folder.iterdir():
         old.unlink()
     for path in (package, signature):

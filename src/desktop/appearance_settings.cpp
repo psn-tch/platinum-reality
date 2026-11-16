@@ -129,6 +129,7 @@ AppearanceSettings::AppearanceSettings(QString profile, QObject *parent)
     m_stripVisible = object.value("stripVisible").toBool();
     m_stripCollapsed = object.value("stripCollapsed").toBool();
     // Optional fields extend version 1 without invalidating existing profiles.
+    m_stripHotKey = object.value("stripHotKey").toBool(false);
     if (object.value("wallpaperPath").isString() && object.value("wallpaperLayout").isString())
     {
         const auto path = object.value("wallpaperPath").toString();
@@ -213,6 +214,7 @@ bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x,
                                                  {"shadeDuration", duration},
                                                  {"stripVisible", visible},
                                                  {"stripCollapsed", collapsed},
+                                                 {"stripHotKey", m_stripHotKey},
                                                  {"stripX", x},
                                                  {"stripY", y},
                                                  {"stripModules", m_stripModules},
@@ -251,6 +253,20 @@ bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x,
     m_wallpaper = pictureUrl(picture);
     emit changed();
     return true;
+}
+bool AppearanceSettings::setControlStripMode(QString mode)
+{
+    if (mode != "show" && mode != "hide" && mode != "hotkey")
+    {
+        emit errorOccurred("That Control Strip setting is not available.");
+        return false;
+    }
+    const auto previous = std::exchange(m_stripHotKey, mode == "hotkey");
+    const bool visible = mode == "show" ? true : mode == "hide" ? false : m_stripVisible;
+    if (save(m_duration, visible, m_stripCollapsed, m_stripX, m_stripY, m_wallpaperPath, m_wallpaperLayout))
+        return true;
+    m_stripHotKey = previous;
+    return false;
 }
 bool AppearanceSettings::apply(int duration, bool visible)
 {

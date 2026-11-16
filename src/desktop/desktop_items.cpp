@@ -931,6 +931,14 @@ QString DesktopItems::selectedNames() const
         names.push_back(entry->name);
     return names.join('\n');
 }
+QStringList DesktopItems::selectedPaths() const
+{
+    QStringList paths;
+    for (const auto &entry : m_entries)
+        if (m_selected.contains(entry.key) && !entry.path.isEmpty())
+            paths << entry.path;
+    return paths;
+}
 QVariantMap DesktopItems::selectedDetails() const
 {
     if (m_selected.size() != 1)

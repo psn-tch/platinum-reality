@@ -70,7 +70,9 @@ administrator password (action `org.platinumreality.update.install`). The helper
    against a stale database is an unsupported partial upgrade. If something is missing it says
    so and asks for a full system update (`pacman -Syu`) first;
 5. keeps the currently installed package (`/var/cache/pacman/pkg`, or rebuilt with nothing) as
-   `/var/cache/platinum-update/previous/`, and, on btrfs with snapper, takes a "pre" snapshot;
+   `/var/cache/platinum-update/previous/`, and, on btrfs with snapper, takes a "pre" snapshot.
+   The kept folders are readable by everyone (`/usr/lib/tmpfiles.d/platinum-update.conf`), so
+   Software Update, running as you, can offer Restore Previous Version; only root changes them;
 6. runs `pacman -U --noconfirm <package>` and reports pacman's result.
 
 If the installation fails, pacman leaves the old version in place.

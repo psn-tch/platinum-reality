@@ -37,8 +37,8 @@ FocusScope {
             "<p>The <b>application menu</b> at the far right shows which application is in front. Choose " +
             "another one there to switch to it, or hide the others. Drag down past the open menu to " +
             "tear it off as the <b>Application Switcher</b>, a palette of running applications: " +
-            "click one to switch to it. An application whose windows are all on another workspace shows " +
-            "that workspace's number after its name, as in <i>Steam (2)</i>.</p>" +
+            "click one to switch to it. Each application shows the number of the workspace its windows " +
+            "are on after its name, as in <i>Steam (2)</i>.</p>" +
             "<p>The <b>Control Strip</b> in the bottom-left corner has volume, brightness, monitors, " +
             "battery, Wi-Fi and Bluetooth. Its <b>Camera</b> module turns the camera off so that nothing at all " +
             "can use it (turning it on asks for an administrator's password), and its <b>Clipboard</b> module " +
@@ -108,7 +108,8 @@ FocusScope {
         {id: "windows", title: "Windows", body:
             "<h3>Windows</h3>" +
             "<p>Click a window once to bring it forward. Drag the title bar to move it. The close box " +
-            "is at the left of the title bar, and the zoom and WindowShade boxes are at the right.</p>" +
+            "is at the left of the title bar, and the zoom and WindowShade boxes are at the right. With two " +
+            "monitors, the zoom box fills the monitor the window was clicked on.</p>" +
             "<p>Double-click a title bar to roll the window up into it, and again to roll it down. Set the " +
             "speed in <b>Appearance</b>.</p>" +
             "<p>The <b>Window</b> menu lists the open windows of the application in front.</p>" +
@@ -142,6 +143,8 @@ FocusScope {
             "<li><b>Appearance</b>: highlight colour, sounds, WindowShade and the Control Strip.</li>" +
             "<li><b>Apple Menu Options</b>: submenus on or off, and how many recent applications to remember.</li>" +
             "<li><b>Bluetooth</b>: pair, connect and forget devices.</li>" +
+            "<li><b>Control Strip</b>: show or hide the Control Strip, or choose Hot key to show/hide and " +
+            "press Command-Control-S to show or hide it.</li>" +
             "<li><b>Date &amp; Time</b>: a calendar, the time zone, and the menu bar clock (24-hour, " +
             "seconds, the date). Click the clock in the menu bar to see the date.</li>" +
             "<li><b>Desktop Picture</b>: choose a picture, then Set Desktop.</li>" +
@@ -154,14 +157,56 @@ FocusScope {
             "how many times a chosen menu item blinks, and how fast the insertion point blinks.</li>" +
             "<li><b>Keyboard</b>: your keyboard layouts (check more than one for a keyboard menu in the menu bar), " +
             "and how fast keys repeat when held down.</li>" +
+            "<li><b>Launcher</b>: a window of buttons for the applications, folders and documents you use most " +
+            "(see <a href=\"topic:launcher\">Launcher</a>).</li>" +
+            "<li><b>Memory</b>: the disk cache, virtual memory (swap) and the RAM disk (/tmp), as Linux " +
+            "manages them.</li>" +
             "<li><b>Monitors</b>: turn screens on or off, and change resolution, rotation, size and " +
             "arrangement. A change goes back by itself after 15 seconds unless you click Keep, so a " +
             "blank screen fixes itself.</li>" +
             "<li><b>Mouse &amp; Trackpad</b>: tracking speed, scrolling direction, tap to click.</li>" +
             "<li><b>Network</b>: join and forget Wi-Fi networks, and TCP/IP: this computer's addresses, router " +
             "and name servers.</li>" +
+            "<li><b>Numbers</b>: how programs write numbers and money (separators, currency), from the formats " +
+            "installed on this computer. Programs use a new format after you next log in.</li>" +
             "<li><b>Sound</b>: alert sounds, microphones, speakers, Main Volume and the startup sound. " +
-            "<b>Mac sounds only</b> removes the Arch and KDE desktop sounds (or downloads them again).</li></ul>"},
+            "<b>Mac sounds only</b> removes the Arch and KDE desktop sounds (or downloads them again).</li>" +
+            "<li><b>Text</b>: how programs sort text and change its case, from the languages installed on this " +
+            "computer. Programs use a new choice after you next log in.</li></ul>"},
+        {id: "favorites", title: "Favorites", body:
+            "<h3>Favorites</h3>" +
+            "<p>Select items on the desktop or in a Finder window and choose <b>File ▸ Add To Favorites</b> " +
+            "(in a Finder window with nothing selected, it adds that window's folder). Your favorites are in " +
+            "<b>Apple menu ▸ Favorites</b>: choose one to open it.</p>" +
+            "<p>A favorite is an alias. To remove one, choose the Favorites folder itself (with Apple Menu " +
+            "Options' submenus off) or open it from the Finder, and move the alias to the Trash; the item " +
+            "itself is not touched.</p>"},
+        {id: "launcher", title: "Launcher", body:
+            "<h3>Launcher</h3>" +
+            "<p>Choose <b>Apple menu ▸ Control Panels ▸ Launcher</b> to open the Launcher, a window of buttons " +
+            "for the applications, folders and documents you use most. Click a button once to open it.</p>" +
+            "<p>To add an application, choose <b>Apple menu ▸ Applications…</b>, select it and click " +
+            "<b>Add To Launcher</b>. To add a file or folder, select it on the desktop or in a Finder window " +
+            "and choose <b>File ▸ Add To Launcher</b> (in a Finder window with nothing selected, it adds that " +
+            "window's folder).</p>" +
+            "<p>Each button is an alias in the Launcher Items folder. With the Launcher in front, choose " +
+            "<b>File ▸ Open Launcher Items</b>: rename an alias to rename its button, or move it to the Trash " +
+            "to remove it; the item itself is not touched.</p>"},
+        {id: "system-profiler", title: "Apple System Profiler", body:
+            "<h3>Apple System Profiler</h3>" +
+            "<p>Choose <b>Apple menu ▸ Apple System Profiler</b> to see what is in this computer. <b>System " +
+            "Profile</b> shows the software, memory, hardware and network; click a triangle to show or hide " +
+            "each part. <b>Devices and Volumes</b> shows the USB devices, the disks with their volumes, and the " +
+            "display cards with the displays connected to them. Nothing is changed.</p>"},
+        {id: "sherlock", title: "Sherlock", body:
+            "<h3>Sherlock</h3>" +
+            "<p>Choose <b>Apple menu ▸ Sherlock 2</b>, or <b>File ▸ Find…</b> (Command-F) on the desktop, to find " +
+            "files and folders. Type part of a name and press Return or click the magnifying glass. Choose " +
+            "<b>Contents</b> instead to find text files containing what you typed.</p>" +
+            "<p>Check the disks to search in the list: the Hard Disk (your home folder) is checked; other " +
+            "disks are not, so a large drive is searched only when you ask. Hidden folders are skipped.</p>" +
+            "<p>Click an item to see where it is in the lower pane; double-click it (or press Return) to open it. " +
+            "Double-click a folder in the lower pane to open that folder.</p>"},
         {id: "snapshot", title: "Snapshot", body:
             "<h3>Snapshot</h3>" +
             "<p>Choose <b>Apple menu ▸ Snapshot</b> to take pictures with your camera. The camera's picture " +
@@ -215,6 +260,8 @@ FocusScope {
             "<tt>sudo pacman -S gimp</tt></li>" +
             "<li>Find one: <tt>pacman -Ss</tt> followed by a word</li></ul>" +
             "<p>New applications appear in Applications… as soon as they are installed.</p>" +
+            "<p><b>Apple menu ▸ Control Panels ▸ Software Update…</b> installs new versions of Platinum Reality " +
+            "itself. After an update, <b>Restore Previous Version…</b> goes back to the one you had.</p>" +
             "<p>When something needs an administrator's password (installing an update, the Camera module, " +
             "Fingerprints), a password box asks for it. Type the password and click <b>OK</b>; <b>Cancel</b> " +
             "never counts as a wrong password. After three wrong passwords the box closes, and the account " +

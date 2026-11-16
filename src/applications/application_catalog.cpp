@@ -167,7 +167,8 @@ QVariantMap ApplicationCatalog::item(int row) const
     return {{"id", data(index(row), IdRole)}, {"name", data(index(row), NameRole)},
              {"description", data(index(row), DescriptionRole)},
              {"launchable", data(index(row), LaunchableRole)},
-             {"reason", data(index(row), ReasonRole)}};
+             {"reason", data(index(row), ReasonRole)},
+             {"file", m_entries[m_visible[row]].filename}};
 }
 void ApplicationCatalog::setQuery(QString query)
 {
@@ -419,6 +420,22 @@ QString ApplicationCatalog::applicationName(const QString &waylandId) const
     return entry ? entry->name : QString();
 }
 
+QString ApplicationCatalog::applicationFile(const QString &id) const
+{
+    const auto *entry = find(id);
+    return entry && !entry->hidden && entry->showHere ? entry->filename : QString();
+}
+QString ApplicationCatalog::applicationForFile(const QString &file) const
+{
+    const auto canonical = QFileInfo(file).canonicalFilePath();
+    if (canonical.isEmpty())
+        return {};
+    for (const auto &entry : m_entries)
+        if (!entry.filename.isEmpty() && !entry.hidden && entry.showHere &&
+            QFileInfo(entry.filename).canonicalFilePath() == canonical)
+            return entry.id;
+    return {};
+}
 QString ApplicationCatalog::applicationIcon(const QString &waylandId) const
 {
     const auto *entry = find(waylandId.endsWith(".desktop") ? waylandId : waylandId + ".desktop");

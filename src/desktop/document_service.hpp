@@ -20,6 +20,8 @@ class DesktopDocumentService final : public QObject, protected QDBusContext
     // View ▸ as Window / as Pop-up Window for one of the calling Finder's own windows.
     bool SetPopUpWindow(uint surfaceId, bool popUp);
     bool IsPopUpWindow(uint surfaceId);
+    // The Finder's File ▸ Find… (Command-F): Sherlock, as in 9.2.2.
+    bool OpenSherlock();
 
   private:
     uint ownedPeerPid(const QString &binary) const;

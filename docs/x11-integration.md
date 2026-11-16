@@ -98,6 +98,15 @@ does not execute or certify an actual Steam game. See the current
 a ten-second deadline. Xwayland's displayfd chooses an unused display; the
 version-pinned helper's ready message supplies it. Launches during startup queue.
 Failure is reported; native Wayland applications remain available.
+If the bridge stops after it was ready (a crash, or killed), the X11 applications that were
+open close with it; the desktop says so and starts the bridge again after a second, so the
+next X11 application opens without logging out. It does so at most three times in ten
+minutes (`X11Bridge::maximumRestarts`); a bridge that never became ready is not retried.
+`PLATINUM_X11_LOG` replaces the bridge's `RUST_LOG` filter for diagnosis (for example
+`xwayland_satellite=debug`). Tests: `x11SupportStartsAgainAfterItStops`,
+`x11WindowsComeForwardWhenTheirApplicationAsks`, `x11WindowsMoveAndResizeFromTheirOwnFrame`
+(with `tests/x11_activate_probe.c`, which sends `_NET_ACTIVE_WINDOW` / `_NET_WM_MOVERESIZE`
+alone, as Steam's web views do).
 
 TCP is disabled. A fresh 128-bit MIT-MAGIC-COOKIE-1 cookie in an owner-only
 directory/file authorizes clients. Xauthority FamilyWild/empty display number
@@ -163,14 +172,19 @@ ABIs, apps bypassing our style or custom menus. See Qt's
 [application attributes](https://doc.qt.io/qt-6/qt.html#ApplicationAttribute-enum).
 
 Satellite bridges the clipboard. Qualification pastes Unicode text X11→Wayland
-and back. Primary selection, rich formats and cross-protocol file drag/drop are
-not certified. No clipboard from the user's session is read.
+and back, the primary selection (middle click), and pictures both ways
+(`clipboardPicturesTravelBetweenX11AndWayland`: a screenshot pasted into an X11 app).
+Other rich formats and cross-protocol file drag/drop are not certified. No clipboard
+from the user's session is read.
 
 xdg-shell v1 lacks reactive popup repositioning. Qualification covers a moved
 parent's popup/keyboard menu selection; moving a parent while its popup is open
-remains limited. Relative pointer/constraints, FPS mouse capture, game resolution
-changes, Vulkan/Proton games, Steam login/overlay, controllers, audio and multiple
-monitors require separate qualification. Satellite's X absolute positioning also
+remains limited. Relative pointer/constraints and FPS mouse capture
+(`sdlRelativeMouseModeCapturesThePointer`), game resolution changes
+(`x11GamesThatChangeTheResolutionGoFullScreenAndBack`) and two monitors
+(`x11ApplicationsSeeBothMonitorsAndUseTheSecond`) are covered by owned probes;
+Vulkan/Proton games, Steam login/overlay, controllers and audio require separate
+qualification. Satellite's X absolute positioning also
 differs from a conventional XWM; unusual popups/notifications may differ.
 
 Wine's configuration UI is tested with a disposable prefix/X11 driver and

@@ -134,6 +134,36 @@ Canvas {
             fill(k.outline,3,4,10,8);fill("#9cc0f0",3,4,10,8)
             c.fillStyle="#2a8a2a";c.beginPath();c.moveTo(3,12);c.lineTo(7,7);c.lineTo(10,10);c.lineTo(11.5,8.5);c.lineTo(13,10);c.lineTo(13,12);c.closePath();c.fill()
             c.fillStyle=k.yellow;c.beginPath();c.arc(11,6,1.5,0,Math.PI*2);c.fill()
+        } else if(kind==="memory") {
+            // A memory module: a green board with black chips and gold contacts.
+            fill(k.outline,1,4,14,8);fill("#1f7a3a",2,5,12,6)
+            for(let i=0;i<3;++i)fill(k.outline,3+i*4,6,3,3)
+            for(let i=0;i<6;++i)fill(k.gold,2+i*2,12,1,2)
+        } else if(kind==="diskcache") {
+            // Disk Cache: a hard disk with a memory module in front of it.
+            box(1,2,12,7);fill(k.shade,2,6,10,2);fill(k.green,10,6,1,1)
+            fill(k.outline,4,9,11,5);fill("#1f7a3a",5,10,9,3)
+            fill(k.outline,6,10,2,2);fill(k.outline,10,10,2,2)
+        } else if(kind==="ramdisk") {
+            // RAM Disk: a floppy disk with a memory module on its label.
+            fill(k.outline,1,1,14,14);fill(k.indigo,2,2,12,12)
+            fill(k.shade,4,2,8,4);fill(k.outline,9,3,2,2)
+            fill(k.light,3,8,10,6);fill("#1f7a3a",4,9,8,3);fill(k.outline,5,10,2,1);fill(k.outline,9,10,2,1)
+        } else if(kind==="numbers") {
+            // Numbers: a paper tape with figures, a gold coin in front.
+            box(1,1,11,13,k.light)
+            for(let y=0;y<4;++y){fill(k.outline,3,3+y*2.5,2,1);fill(k.outline,6,3+y*2.5,4,1)}
+            disc(11.5,11.5,3.5,k.gold)
+            fill(k.goldShade,11,10,1,3)
+        } else if(kind==="text") {
+            // Text: a large A and a small a on a page, lines of writing under them.
+            box(1,1,14,14,k.light)
+            c.lineWidth=1.5;c.strokeStyle=k.indigo
+            line(3,10,5.5,3);line(5.5,3,8,10);line(4,7.5,7,7.5)
+            c.lineWidth=1;disc(11,8.5,1.6,k.light)
+            line(12.6,7,12.6,10)
+            c.strokeStyle=k.outline
+            fill(k.shade,3,12,10,1)
         } else if(kind==="general") {
             // A desktop window above a slider: General Controls.
             box(1,1,14,10,k.light)

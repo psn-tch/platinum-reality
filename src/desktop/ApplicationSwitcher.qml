@@ -44,7 +44,7 @@ Item {
                     required property int index
                     x: 14; y: 3 + index * 3; width: texture.width - 16; height: 2
                     Repeater {
-                        model: Math.floor(parent.width / 3)
+                        model: Math.max(0, Math.floor(parent.width / 3)) // Not negative before the palette has a width.
                         Item {
                             required property int index
                             x: index * 3; width: 2; height: 2

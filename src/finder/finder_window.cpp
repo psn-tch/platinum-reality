@@ -1,4 +1,5 @@
 #include "finder_window.hpp"
+#include "favorites.hpp"
 #include <QStandardPaths>
 #include <QLocale>
 #include <QTimer>
@@ -807,6 +808,24 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
                    return r;
                });
            });
+    // Add To Favorites, as 9.2.2's: the selected items, or this window's folder when none is selected.
+    action(file, "Add To Favorites", "addToFavorites", {},
+           [this]
+           {
+               auto items = selectedPaths();
+               if (items.isEmpty())
+                   items << m_directory;
+               Favorites::add(m_profile, items);
+           });
+    // Add To Launcher, the same way; the Launcher shows its new buttons at once.
+    action(file, "Add To Launcher", "addToLauncher", {},
+           [this]
+           {
+               auto items = selectedPaths();
+               if (items.isEmpty())
+                   items << m_directory;
+               LauncherItems::add(m_profile, items);
+           });
     action(file, "New Text File", "newFile", {},
            [this]
            {
@@ -821,14 +840,29 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
                const auto folder = p.size() == 1 && QFileInfo(p.first()).isDir() ? p.first() : m_directory;
                QProcess::startDetached("konsole", {"--separate", "--workdir", folder});
            });
+    // Find… opens Sherlock on the desktop, as the 9.2.2 Finder did; without a desktop to answer (a
+    // Finder started on its own), it finds in this window instead.
     action(file, "Find…", "find", QKeySequence(Qt::CTRL | Qt::Key_F),
            [this]
            {
-               bool ok = false;
-               const auto text = QInputDialog::getText(this, "Find", "Find items whose name contains:",
-                                                       QLineEdit::Normal, {}, &ok).trimmed();
-               if (ok && !text.isEmpty())
-                   findItems(text);
+               const auto findHere = [this]
+               {
+                   bool ok = false;
+                   const auto text = QInputDialog::getText(this, "Find", "Find items whose name contains:",
+                                                           QLineEdit::Normal, {}, &ok).trimmed();
+                   if (ok && !text.isEmpty())
+                       findItems(text);
+               };
+               auto message = QDBusMessage::createMethodCall("org.frankenstein.Desktop", "/Desktop",
+                                                             "org.frankenstein.Desktop", "OpenSherlock");
+               auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(message, 2000), this);
+               connect(watcher, &QDBusPendingCallWatcher::finished, this, [watcher, findHere]
+               {
+                   const QDBusPendingReply<bool> reply = *watcher;
+                   watcher->deleteLater();
+                   if (reply.isError() || !reply.value())
+                       findHere();
+               });
            });
     action(file, "Rename…", "rename", QKeySequence(Qt::Key_F2),
            [this]

@@ -80,6 +80,9 @@ Slider {
             : (slider.pressed ? ["#aaf", "#77d", "#449", "#226"] : ["#ccf", "#99f", "#66c", "#339"])
         onTonesChanged: requestPaint()
         onEnabledChanged: requestPaint()
+        // A slider shown only later (hidden when first laid out) has to paint then.
+        onAvailableChanged: if (available) requestPaint()
+        onVisibleChanged: if (visible) requestPaint()
         onPaint: {
             const c = getContext("2d"), w = width, h = height, shoulder = 9
             c.clearRect(0, 0, w, h)

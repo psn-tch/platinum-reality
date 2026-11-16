@@ -2,6 +2,8 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QClipboard>
+#include <QColor>
+#include <QImage>
 #include <QDrag>
 #include <QUrl>
 #include <QDBusConnection>
@@ -170,6 +172,21 @@ class NativeProbe final : public QMainWindow
     }
     // The primary selection: what middle-click pastes.
     void SetSelection(QString value) { QApplication::clipboard()->setText(value, QClipboard::Selection); }
+    // A picture on the clipboard, as a screenshot is: width x height of one colour.
+    void SetClipboardImage(int width, int height, QString color)
+    {
+        QImage image(width, height, QImage::Format_ARGB32);
+        image.fill(QColor(color));
+        QApplication::clipboard()->setImage(image);
+    }
+    // "WxH #rrggbb" (the colour at its centre) for the clipboard's picture, or "none".
+    QString ClipboardImage() const
+    {
+        const auto image = QApplication::clipboard()->image();
+        return image.isNull() ? QString("none")
+                              : QString("%1x%2 %3").arg(image.width()).arg(image.height())
+                                    .arg(image.pixelColor(image.width() / 2, image.height() / 2).name());
+    }
     QString Selection() const { return QApplication::clipboard()->text(QClipboard::Selection); }
     // Ask to come forward (xdg-activation through Qt's xdg-shell) and ring the bell (xdg-system-bell).
     void RequestActivate() { activateWindow(); }

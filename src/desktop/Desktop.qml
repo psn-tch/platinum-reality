@@ -130,8 +130,10 @@ Rectangle {
     function makeBarEntries() {
         let roots
         if(manager.desktopActive) {
-            roots=currentShellWindow() ? [{label:"File",kind:"app-file"},{label:"Edit",kind:"desktop-edit"},
-                {label:"Window",kind:"window"},{label:"Help",kind:"help"}] :
+            // Sherlock adds its Find menu after Edit, as 9.2.2's (its Channels menu had only the Internet ones).
+            roots=currentShellWindow() ? [{label:"File",kind:"app-file"},{label:"Edit",kind:"desktop-edit"}]
+                .concat(sherlockWindow.visible && sherlockWindow.front ? [{label:"Find",kind:"sherlock-find"}] : [])
+                .concat([{label:"Window",kind:"window"},{label:"Help",kind:"help"}]) :
                 [{label:"File",kind:"desktop-file"},{label:"Edit",kind:"desktop-edit"},{label:"View",kind:"desktop-view"},
                  {label:"Window",kind:"window"},{label:"Special",kind:"special"},{label:"Help",kind:"help"}]
         } else {
@@ -269,12 +271,26 @@ Rectangle {
         else if(action==="apple-menu-options")appleMenuOptionsPanel.edit()
         else if(action==="file-exchange")fileExchangePanel.edit()
         else if(action==="extensions-manager")extensionsManagerPanel.edit()
+        else if(action==="numbers")numbersPanel.edit()
+        else if(action==="control-strip-panel")controlStripPanel.edit()
+        else if(action==="memory")memoryPanel.edit()
+        else if(action==="text")textPanel.edit()
         else if(action==="calculator")calculator.open()
         else if(action==="asset-importer")assetImporter.open()
         else if(action==="software-update")softwareUpdate.open()
         else if(action==="control-panel")classicControlPanel.open()
         else if(action==="note-pad")notePadWindow.open()
         else if(action==="scrapbook")scrapbookWindow.open()
+        else if(action==="sherlock")sherlockWindow.open()
+        else if(action==="favorites-folder")manager.launchFinder(manager.favoritesFolder())
+        else if(action==="open-favorite"){if(manager.favorites().some(function(f){return f.target===applicationId && f.folder}))manager.launchFinder(applicationId);else manager.requestOpenDocument(applicationId)}
+        else if(action==="add-to-favorites")manager.addFavorites(desktopFiles.selectedPaths())
+        else if(action==="launcher")launcherWindow.open()
+        else if(action==="add-to-launcher")manager.addToLauncher(desktopFiles.selectedPaths())
+        else if(action==="launcher-items")manager.launchFinder(manager.launcherFolder())
+        else if(action==="system-profiler")systemProfilerWindow.open()
+        else if(action==="sherlock-files")sherlockWindow.findBy(false)
+        else if(action==="sherlock-contents")sherlockWindow.findBy(true)
         else if(action==="key-caps")keyCapsWindow.open()
         else if(action==="sticky-new")newStickyNote()
         else if(action==="sticky-toggle")manager.stickies.setHidden(!manager.stickies.hidden)
@@ -422,7 +438,10 @@ Rectangle {
                        {name:"Software Update",action:"software-update",item:softwareUpdate},
                        {name:"Key Caps",action:"key-caps",item:keyCapsWindow},
                        {name:"Note Pad",action:"note-pad",item:notePadWindow},
-                       {name:"Scrapbook",action:"scrapbook",item:scrapbookWindow}]
+                       {name:"Scrapbook",action:"scrapbook",item:scrapbookWindow},
+                       {name:"Sherlock 2",action:"sherlock",item:sherlockWindow},
+                       {name:"Apple System Profiler",action:"system-profiler",item:systemProfilerWindow},
+                       {name:"Launcher",action:"launcher",item:launcherWindow}]
         return windows.filter(function(w){return w.item && w.item.visible}).map(function(w){
             const member=w.item.workspaceMember
             return {id:"shell:"+w.action,name:w.name,icon:manager.applicationIcon("shell:"+w.action),hidden:false,attention:false,shell:true,
@@ -448,11 +467,11 @@ Rectangle {
             return String(a.name).localeCompare(String(b.name),undefined,{sensitivity:"base"}) || String(a.id).localeCompare(String(b.id))})
             .map(function(a){return Object.assign({},a,{label:workspaceLabel(a)})})
     }
-    // "Steam (2)" (Lily Hewitt, 2026-11-14): an application with no window on the workspace showing
-    // says which workspaces its windows wait on. One showing, or none open, keeps the plain name.
+    // "Steam (2)" (Lily Hewitt, 2026-11-14): an application says which workspaces its windows are on,
+    // also the one showing (she asked again for every application, 2026-11-15). None open keeps the plain name.
     function workspaceLabel(application) {
         const numbers=application.workspaces||[]
-        return application.onShownWorkspace===false && numbers.length ? application.name+" ("+numbers.join(", ")+")" : application.name
+        return numbers.length ? application.name+" ("+numbers.join(", ")+")" : application.name
     }
     function activateListedApplication(id) {
         if(String(id).startsWith("shell:"))dispatchShellCommand(String(id).slice(6),0)
@@ -519,7 +538,7 @@ Rectangle {
             {text:"Hide "+manager.activeApplication,action:"hide",enabled:manager.applications.some(function(a){return !a.active && !a.hidden})},
             {text:"Hide Others",action:"hide-others",enabled:manager.applications.some(function(a){return !a.active && !a.hidden})},
             {text:"Show All",action:"show-all",enabled:manager.applications.some(function(a){return a.hidden})},
-            {separator:true,action:"separator"}].concat(desktop.applicationsByName().map(function(a){return {text:a.label,action:"app",id:a.id,icon:a.icon,checked:a.active,marked:a.attention && !a.active,glyph:a.name==="Finder"?"disk":"application"}}))
+            {separator:true,action:"separator"}].concat(desktop.applicationsByName().map(function(a){return {text:a.label,plainText:a.name,action:"app",id:a.id,icon:a.icon,checked:a.active,marked:a.attention && !a.active,glyph:a.name==="Finder"?"disk":"application"}}))
         if(index===0){
             // Every item but About This Computer has its icon, as in 9.2.2: applications their own,
             // folders a folder, each control panel its own (imported when there is one).
@@ -536,6 +555,7 @@ Rectangle {
                 {text:"About This Computer",action:"about"},
                 {separator:true,action:"separator"},
                 {text:"App Store",action:"app-store",glyph:"application",icon:icon("app-store")},
+                {text:"Apple System Profiler",action:"system-profiler",glyph:"application",icon:icon("system-profiler")},
                 {text:"Applications…",action:"applications",glyph:"folder",icon:icon("folder")},
                 {text:"Asset Importer",action:"asset-importer",glyph:"application",icon:icon("asset-importer")},
                 {text:"Calculator",action:"calculator",glyph:"application",icon:icon("calculator")},
@@ -546,7 +566,7 @@ Rectangle {
                     panel("Appearance…","appearance"),
                     panel("Apple Menu Options…","apple-menu-options"),
                     panel("Bluetooth…","bluetooth"),
-                    {text:"Control Strip",action:"control-strip",checked:desktop.appearance.controlStripVisible,glyph:"control-panel",icon:icon("control-panel")},
+                    panel("Control Strip…","control-strip-panel"),
                     panel("Date & Time…","date-time"),
                     panel("Desktop Picture…","desktop-picture"),
                     panel("Energy Saver…","energy"),
@@ -554,16 +574,28 @@ Rectangle {
                     panel("File Exchange…","file-exchange"),
                     panel("Fingerprints…","fingerprints"),
                     panel("Keyboard…","keyboard"),
+                    {text:"Launcher",action:"launcher",glyph:"control-panel",icon:icon("launcher")},
+                    panel("Memory…","memory"),
                     panel("Monitors…","monitors"),
                     panel("Mouse & Trackpad…","mouse"),
                     panel("Network…","network"),
+                    panel("Numbers…","numbers"),
                     panel("Quick Controls…","quick-controls"),
                     panel("Software Update…","software-update"),
-                    panel("Sound…","sound")]),
+                    panel("Sound…","sound"),
+                    panel("Text…","text")]),
+                // Favorites, as 9.2.2's: the items added with File ▸ Add To Favorites (choosing the folder
+                // itself, with submenus off, opens the Favorites folder, where they can be removed).
+                folder({text:"Favorites",action:"favorites",glyph:"folder",icon:icon("folder")},"favorites-folder",
+                    manager.favorites().length ? manager.favorites().map(function(f){
+                        return {text:f.name,action:"open-favorite",id:f.target,enabled:f.exists,glyph:f.folder?"folder":"document",
+                                icon:f.folder?icon("folder"):""}})
+                    : [{text:"No Favorites",action:"none",enabled:false}]),
                 {text:"Key Caps",action:"key-caps",glyph:"application",icon:icon("key-caps")},
                 {text:"Note Pad",action:"note-pad",glyph:"application",icon:icon("note-pad")},
                 {text:"Puzzle",action:"puzzle",glyph:"application",icon:icon("puzzle")},
                 {text:"Scrapbook",action:"scrapbook",glyph:"application",icon:icon("scrapbook")},
+                {text:"Sherlock 2",action:"sherlock",glyph:"application",icon:icon("sherlock")},
                 {text:"Snapshot",action:"snapshot",glyph:"application",icon:icon("snapshot")},
                 {text:"Stickies",action:"sticky-notes",glyph:"application",icon:icon("sticky-notes"),children:[
                     {text:"New Note",action:"sticky-new"},
@@ -579,6 +611,12 @@ Rectangle {
         if(kind==="app-file")return [{text:"Close Window",key:"⌘W",action:"close-active-window",name:"file-close-window",
             id:manager.desktopActive ? currentShellWindow() : manager.activeWindowId,
             enabled:manager.desktopActive ? canCloseShellWindow() : manager.canCloseActiveWindow}]
+            // With the Launcher in front, its items' folder, where they are rearranged or removed.
+            .concat(manager.desktopActive && launcherWindow.visible && launcherWindow.front
+                    ? [{separator:true,action:"separator"},{text:"Open Launcher Items",action:"launcher-items",name:"file-launcher-items"}] : [])
+        if(kind==="sherlock-find")return [
+            {text:"Find Files",key:"⌘F",action:"sherlock-files",name:"sherlock-find-files"},
+            {text:"Find by Content",key:"⌘G",action:"sherlock-contents",name:"sherlock-find-contents"}]
         if(kind==="desktop-file")return [
             {text:"New Folder…",action:"new-folder",enabled:ready},
             {text:"Open",action:"selection",enabled:desktopFiles.selectionCount>0 && ready},
@@ -590,6 +628,10 @@ Rectangle {
             {text:"Label",action:"label-menu",enabled:desktopFiles.canModifySelection && ready,children:desktop.labelEntries()},
             {text:"Duplicate",action:"duplicate",enabled:desktopFiles.canModifySelection && ready},
             {text:"Rename…",action:"rename",enabled:Boolean(desktopFiles.renameTarget.key) && ready},
+            {text:"Add To Favorites",action:"add-to-favorites",name:"file-add-favorites",enabled:desktopFiles.selectionCount>0 && ready},
+            {text:"Add To Launcher",action:"add-to-launcher",name:"file-add-launcher",enabled:desktopFiles.selectionCount>0 && ready},
+            {separator:true,action:"separator"},
+            {text:"Find…",key:"⌘F",action:"sherlock",name:"file-find"},
             {separator:true,action:"separator"},
             {text:"Open Desktop Folder",action:"desktop-folder"}]
         // Edit as in the 9.2.2 Finder (checked in Lily Hewitt's 9.2.2 VM): no separator before Show Clipboard.
@@ -1081,7 +1123,9 @@ Rectangle {
         }
     }}
     // Mouse-open sticky menus retain 9.2.2's key-to-dismiss behavior. F10 is an
-    // explicit modern keyboard-access mode; its arrows/Enter never reach a client.
+    // explicit modern keyboard-access mode; its arrows/Enter never reach a client. It is the
+    // desktop's only while the desktop has the keyboard: an application keeps its own F10
+    // (Ymir's Settings, Midnight Commander's and htop's Quit; taken from them since 2026-11-08).
     Binding {target:manager;property:"shellMenuOpen";value:(desktop.openMenu>=0 && desktop.exportedRoot<0) || desktop.stripModule!==""}
     Binding {target:manager;property:"shellMenuKeyboardMode";value:desktop.menuKeyboardMode}
     Connections {target:manager
@@ -1129,7 +1173,8 @@ Rectangle {
         if((key===Qt.Key_Return || key===Qt.Key_Enter || key===Qt.Key_Space) && entry && entry.enabled!==false && !entry.separator)
             chooseShellEntry("desktop-command-"+(entry.name || entry.action),entry.action,entry.id)
     }
-    Shortcut {sequence:"F10";autoRepeat:false;enabled:!manager.shellModal && !manager.nativeDragging && !manager.windowMoveActive
+    Shortcut {sequence:"F10";autoRepeat:false
+        enabled:manager.desktopActive && !manager.shellModal && !manager.nativeDragging && !manager.windowMoveActive
         onActivated:{desktop.showMenu(0);desktop.menuKeyboardMode=true}}
     Shortcut {objectName:"fallback-close-window-shortcut";sequence:"Meta+W";autoRepeat:false
         enabled:!manager.shellModal && !manager.menuOpen && desktop.barEntries.some(function(m){return m.kind==="app-file"}) &&
@@ -1182,6 +1227,12 @@ Rectangle {
     Shortcut {sequences:["Meta+C","Ctrl+C"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && desktopFiles.selectionCount>0;onActivated:desktop.copySelectedNames()}
     Shortcut {sequences:["Meta+A","Ctrl+A"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal;onActivated:desktopFiles.selectAll()}
     Shortcut {sequences:["Meta+Shift+N","Ctrl+Shift+N"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && !desktopFiles.busy;onActivated:desktop.promptName("create")}
+    // Control Strip ▸ Hot key to show/hide: Command-Control-S, wherever the keyboard is.
+    Shortcut {sequence:"Meta+Ctrl+S";autoRepeat:false;enabled:desktop.appearance.controlStripHotKey && !manager.shellModal
+              onActivated:desktop.appearance.apply(desktop.appearance.shadeDuration,!desktop.appearance.controlStripVisible)}
+    // Command-F: Find (Sherlock), as the 9.2.2 Finder's File menu.
+    Shortcut {sequence:"Meta+F";autoRepeat:false;enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal
+              onActivated:desktop.dispatchShellCommand("sherlock",0)}
     Shortcut {sequence:"F2";enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && !desktopFiles.busy;onActivated:desktop.promptName("rename")}
     Shortcut {sequences:["Meta+E","Ctrl+E"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && desktopFiles.selectedDrive!=="";onActivated:manager.removableMedia.eject(desktopFiles.selectedDrive)}
     Shortcut {sequences:["Meta+D","Ctrl+D"];enabled:manager.desktopActive && !manager.menuOpen && !manager.shellModal && !desktopFiles.busy && desktopFiles.canModifySelection;onActivated:desktopFiles.duplicateSelected()}
@@ -1368,7 +1419,7 @@ Rectangle {
                         if(doubleClickAt && Date.now()-doubleClickAt<=Qt.styleHints.mouseDoubleClickInterval){
                             doubleClickAt=0
                             if(shadedByDoubleClick)manager.shade(record.id)
-                            manager.fillScreen(record.id)
+                            manager.fillScreen(record.id,mapToItem(desktop,mouse.x,mouse.y))
                             return
                         }
                         manager.beginWindowMove(record.id,mapToItem(desktop,mouse.x,mouse.y))
@@ -1398,7 +1449,7 @@ Rectangle {
                     id: rightControls
                     visible:record.active && (record.canZoom || record.canShade)
                     anchors.right: parent.right; anchors.rightMargin: 2; y: 2; spacing: 3
-                    TitleBox {objectName:"zoom-box-"+record.id;visible:record.canZoom && record.active;kind:"zoom";onActivated:manager.zoom(record.id)}
+                    TitleBox {objectName:"zoom-box-"+record.id;visible:record.canZoom && record.active;kind:"zoom";onActivated:manager.zoom(record.id,mapToItem(desktop,width/2,height/2))}
                     TitleBox {objectName:"shade-box-"+record.id;visible:record.canShade && record.active;kind:"shade";onActivated:manager.shade(record.id)}
                 }
             }
@@ -1670,11 +1721,11 @@ Rectangle {
             // •: the one current choice of several, as 9.2.2's Monitor Resolution module marks it.
             Text{visible:Boolean(modelData.bullet);anchors.verticalCenter:parent.verticalCenter;x:4;text:"•";font.pixelSize:12;color:row.lit?"white":"black"}
             // ◆: this application asks for attention (Mac OS 9's Notification Manager mark).
-            Text{visible:Boolean(modelData.marked);objectName:"attention-mark-"+(modelData.text?modelData.text:"");anchors.verticalCenter:parent.verticalCenter;x:4;text:"◆";font.pixelSize:10;color:row.lit?"white":"black"}
+            Text{visible:Boolean(modelData.marked);objectName:"attention-mark-"+(modelData.plainText||modelData.text||"");anchors.verticalCenter:parent.verticalCenter;x:4;text:"◆";font.pixelSize:10;color:row.lit?"white":"black"}
             // A label's colour swatch (File ▸ Label).
             Rectangle {visible:Boolean(modelData.swatch);x:17;width:12;height:12;anchors.verticalCenter:parent.verticalCenter
                 color:modelData.swatch?modelData.swatch:"transparent";border.color:"#222"}
-            MenuGlyph {objectName:"menu-glyph-"+(modelData.text?modelData.text:"");visible:Boolean(modelData.glyph);x:17;anchors.verticalCenter:parent.verticalCenter;source:modelData.icon || "";kind:modelData.glyph?modelData.glyph:"application"}
+            MenuGlyph {objectName:"menu-glyph-"+(modelData.plainText||modelData.text||"");visible:Boolean(modelData.glyph);x:17;anchors.verticalCenter:parent.verticalCenter;source:modelData.icon || "";kind:modelData.glyph?modelData.glyph:"application"}
             Text{visible:!modelData.separator;anchors.verticalCenter:parent.verticalCenter;x:modelData.glyph || modelData.swatch?39:20;width:parent.width-x-20;elide:Text.ElideRight
                 text:modelData.text?modelData.text:"";textFormat:Text.PlainText;color:modelData.enabled===false?"#777":row.lit?"white":"black";font.family:desktop.appearance.fontFamily;font.bold:desktop.menuFontBold;font.pixelSize:12;font.italic:Boolean(modelData.heading)}
             Text{visible:Boolean(modelData.children);anchors.right:parent.right;anchors.rightMargin:6;anchors.verticalCenter:parent.verticalCenter;text:"▶";font.pixelSize:9;color:row.lit?"white":"black"}
@@ -2087,6 +2138,71 @@ Rectangle {
             else desktop.forceActiveFocus()
         }
     }
+    property var profilerReturnWindow:null
+    SystemProfilerWindow {
+        id:systemProfilerWindow
+        source:manager.systemProfile
+        memory:manager.memoryInfo
+        z:front?3994:desktop.belowPasswordBox(systemProfilerWindow,0.79)
+        x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
+        y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/5))
+        onRaised:{
+            let previous=desktop.frontShellWindow
+            if(previous && previous!==systemProfilerWindow && previous.visible)desktop.profilerReturnWindow=previous
+            desktop.bringShellWindowForward(systemProfilerWindow)
+        }
+        onFrontChanged:if(!front && visible)desktop.profilerReturnWindow=null
+        onClosed:{
+            let previous=desktop.profilerReturnWindow
+            desktop.profilerReturnWindow=null
+            if(desktop.shellWindowPending===systemProfilerWindow)desktop.shellWindowPending=null
+            if(previous && previous.visible)desktop.bringShellWindowForward(previous)
+            else desktop.forceActiveFocus()
+        }
+    }
+    property var launcherReturnWindow:null
+    LauncherWindow {
+        id:launcherWindow
+        source:manager
+        z:front?3994:desktop.belowPasswordBox(launcherWindow,0.79)
+        x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
+        y:manager.primaryDisplayRect.y+Math.max(30,manager.primaryDisplayRect.height-height-60)
+        onRaised:{
+            let previous=desktop.frontShellWindow
+            if(previous && previous!==launcherWindow && previous.visible)desktop.launcherReturnWindow=previous
+            desktop.bringShellWindowForward(launcherWindow)
+        }
+        onFrontChanged:if(!front && visible)desktop.launcherReturnWindow=null
+        onClosed:{
+            let previous=desktop.launcherReturnWindow
+            desktop.launcherReturnWindow=null
+            if(desktop.shellWindowPending===launcherWindow)desktop.shellWindowPending=null
+            if(previous && previous.visible)desktop.bringShellWindowForward(previous)
+            else desktop.forceActiveFocus()
+        }
+    }
+    property var sherlockReturnWindow:null
+    SherlockWindow {
+        id:sherlockWindow
+        search:manager.fileSearch
+        z:front?3994:desktop.belowPasswordBox(sherlockWindow,0.79)
+        x:manager.primaryDisplayRect.x+Math.max(8,Math.round((manager.primaryDisplayRect.width-width)/2))
+        y:manager.primaryDisplayRect.y+Math.max(30,Math.round((manager.primaryDisplayRect.height-height)/5))
+        onRaised:{
+            let previous=desktop.frontShellWindow
+            if(previous && previous!==sherlockWindow && previous.visible)desktop.sherlockReturnWindow=previous
+            desktop.bringShellWindowForward(sherlockWindow)
+        }
+        onFrontChanged:if(!front && visible)desktop.sherlockReturnWindow=null
+        onClosed:{
+            let previous=desktop.sherlockReturnWindow
+            desktop.sherlockReturnWindow=null
+            if(manager.fileSearch)manager.fileSearch.cancel()
+            if(desktop.shellWindowPending===sherlockWindow)desktop.shellWindowPending=null
+            if(previous && previous.visible)desktop.bringShellWindowForward(previous)
+            else desktop.forceActiveFocus()
+        }
+    }
     property var scrapbookReturnTo:0
     property var scrapbookReturnWindow:null
     ScrapbookWindow {
@@ -2130,6 +2246,7 @@ Rectangle {
         // Tests substitute bluetoothPanel.service; the alert, strip module and Quick Controls follow it.
         BluetoothPanel {id:bluetoothPanel;service:manager.bluetooth
             onForgetRequested:function(path,name){forgetBluetoothDialog.path=path;forgetBluetoothDialog.name=name;forgetBluetoothDialog.open()}}
+        ControlStripPanel {id:controlStripPanel;settings:desktop.appearance}
         DateTimePanel {id:dateTimePanel;settings:desktop.appearance}
         DesktopPictureDialog {id:desktopPictureDialog;settings:desktop.appearance}
         EnergySaverPanel {id:energyPanel;settings:manager.energy;sessionManager:manager}
@@ -2140,13 +2257,16 @@ Rectangle {
         // Listed only on a computer whose Handheld Daemon can hide its built-in controller.
         HandheldPanel {id:handheldPanel;service:manager ? manager.handheld : null}
         KeyboardPanel {id:keyboardPanel;settings:manager.input}
+        MemoryPanel {id:memoryPanel;info:manager.memoryInfo}
         MonitorsPanel {id:monitorsPanel;sessionManager:manager}
         MousePanel {id:mousePanel;settings:manager.input}
         // Tests substitute wifiAlert.service and quickControls.service; this panel follows both.
         NetworkPanel {id:networkPanel;service:wifiAlert.service;controls:quickControls.service
             onForgetRequested:function(path,name){forgetWifiDialog.path=path;forgetWifiDialog.name=name;forgetWifiDialog.open()}}
+        NumbersPanel {id:numbersPanel;settings:manager.localeSettings}
         QuickControls {id:quickControls;service:manager.systemControls;bluetooth:bluetoothPanel.service}
         SoundPanel {id:soundPanel;service:manager.audio;alertSounds:manager.alertSounds;startupSound:manager.startupSound;systemSounds:manager.systemSounds}
+        TextPanel {id:textPanel;settings:manager.localeSettings}
     }
     // A silent alert (alert volume 0, or no sound player) flashes the menu bar, as Mac OS 9 did.
     Timer {id:menuFlash;interval:140}

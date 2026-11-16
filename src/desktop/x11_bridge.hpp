@@ -1,6 +1,8 @@
 #pragma once
 #include <QObject>
 #include <QProcess>
+#include <QElapsedTimer>
+#include <QList>
 #include <QTimer>
 
 // Owns a private Xwayland/XWM pair. X windows arrive as ordinary xdg surfaces;
@@ -23,6 +25,10 @@ class X11Bridge final : public QObject
     bool ownsWaylandPeer(qint64 pid) const;
     void applyTo(QProcessEnvironment &environment) const;
     static QString helperPath();
+    // The helper's process (tests stop it to check the restart).
+    qint64 processId() const { return m_process.processId(); }
+    // A bridge that stops after it was ready starts again, at most this often in restartWindowMs.
+    static constexpr int maximumRestarts = 3, restartWindowMs = 10 * 60 * 1000;
   signals:
     void changed();
     void failed(QString message);
@@ -34,7 +40,10 @@ class X11Bridge final : public QObject
     QTimer m_deadline;
     QByteArray m_pending;
     QString m_runtime, m_authority, m_display;
-    bool m_starting = false, m_stopping = false, m_failed = false;
+    QByteArray m_socket;
+    bool m_starting = false, m_stopping = false, m_failed = false, m_wasReady = false;
+    QList<qint64> m_restarts; // When each automatic restart happened (m_clock), newest last.
+    QElapsedTimer m_clock;
     qsizetype m_logged = 0;
 };
 

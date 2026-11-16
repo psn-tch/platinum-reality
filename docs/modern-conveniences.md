@@ -33,6 +33,9 @@ screen moves it to the workspace showing there. When a screen goes away, the
 windows it was showing join the workspace showing where they land; ones on its
 hidden workspaces keep their numbers. The Control Strip's **Workspaces** module
 shows the current number, and its menu lists all nine with their applications.
+The Application menu and the Application Switcher palette say where each
+application's windows are, as in "Steam (2)" or "Steam (2, 5)" (update 50; update
+49 said so only for applications away from the workspace showing).
 The rules are `src/policy` (`ShowWorkspace`, `MoveToWorkspace`, `SetScreens`).
 The desktop's own windows (control panels, desk accessories, Info windows) are on
 workspaces too (`WorkspaceMember.qml`); choosing one that waits elsewhere shows its

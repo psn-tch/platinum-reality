@@ -41,6 +41,7 @@
 #include <QTimer>
 #include <QtTest>
 #include "finder/file_labels.hpp"
+#include "finder/favorites.hpp"
 #include "qt_theme_evidence.hpp"
 
 class GuiTests : public QObject
@@ -499,6 +500,68 @@ class GuiTests : public QObject
         QTRY_COMPARE_WITH_TIMEOUT(window->directory(), root.path() + "/Projects", 3000);
         QDragLeaveEvent leave;
         QCoreApplication::sendEvent(icons->viewport(), &leave);
+    }
+    void addToFavoritesMakesALinkInTheFavoritesFolder()
+    {
+        // File ▸ Add To Favorites (9.2.2): the selected item, or with nothing selected this window's
+        // folder, as an alias (a link) in the profile's Favorites folder. Only once each.
+        QTemporaryDir root, profile;
+        {
+            QFile f(root.path() + "/Report.txt");
+            QVERIFY(f.open(QIODevice::WriteOnly) && f.write("report") > 0);
+        }
+        QPointer<FinderWindow> window = new FinderWindow(root.path(), profile.path(), root.path());
+        const auto cleanup = qScopeGuard([&] { delete window; });
+        window->show();
+        auto *icons = window->findChild<FolderIcons *>();
+        auto *model = qobject_cast<QFileSystemModel *>(icons->model());
+        const auto path = root.path() + "/Report.txt";
+        QTRY_VERIFY(model->index(path).isValid());
+        auto *add = window->findChild<QAction *>("addToFavorites");
+        QVERIFY(add);
+        QCOMPARE(add->text(), QString("Add To Favorites"));
+        icons->selectionModel()->select(model->index(path), QItemSelectionModel::ClearAndSelect);
+        add->trigger();
+        add->trigger();
+        auto listed = Favorites::list(profile.path());
+        QCOMPARE(listed.size(), 1);
+        QCOMPARE(listed.first().toMap().value("target").toString(), QFileInfo(path).absoluteFilePath());
+        QVERIFY(QFileInfo(profile.path() + "/Favorites/Report.txt").isSymLink());
+        icons->selectionModel()->clearSelection();
+        add->trigger();
+        listed = Favorites::list(profile.path());
+        QCOMPARE(listed.size(), 2);
+        QVERIFY(std::any_of(listed.cbegin(), listed.cend(), [&](const QVariant &f) {
+            return f.toMap().value("target").toString() == QDir(root.path()).absolutePath() && f.toMap().value("folder").toBool(); }));
+        QVERIFY(QFile::exists(path)); // The item itself is untouched.
+    }
+    void addToLauncherMakesALinkInTheLauncherItemsFolder()
+    {
+        // File ▸ Add To Launcher: as Add To Favorites, into the profile's Launcher Items folder, which
+        // the desktop's Launcher shows.
+        QTemporaryDir root, profile;
+        {
+            QFile f(root.path() + "/Report.txt");
+            QVERIFY(f.open(QIODevice::WriteOnly) && f.write("report") > 0);
+        }
+        QPointer<FinderWindow> window = new FinderWindow(root.path(), profile.path(), root.path());
+        const auto cleanup = qScopeGuard([&] { delete window; });
+        window->show();
+        auto *icons = window->findChild<FolderIcons *>();
+        auto *model = qobject_cast<QFileSystemModel *>(icons->model());
+        const auto path = root.path() + "/Report.txt";
+        QTRY_VERIFY(model->index(path).isValid());
+        auto *add = window->findChild<QAction *>("addToLauncher");
+        QVERIFY(add);
+        QCOMPARE(add->text(), QString("Add To Launcher"));
+        icons->selectionModel()->select(model->index(path), QItemSelectionModel::ClearAndSelect);
+        add->trigger();
+        add->trigger();
+        const auto listed = Aliases::list(LauncherItems::folder(profile.path()));
+        QCOMPARE(listed.size(), 1);
+        QCOMPARE(listed.first().toMap().value("target").toString(), QFileInfo(path).absoluteFilePath());
+        QVERIFY(QFileInfo(profile.path() + "/Launcher Items/Report.txt").isSymLink());
+        QVERIFY(!QFileInfo::exists(profile.path() + "/Favorites/Report.txt"));
     }
     void labelsColourItemsAndShowInGetInfo()
     {

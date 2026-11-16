@@ -322,6 +322,12 @@ work" for the main display only.
 
 - **◆ → Control Panels → Monitors…** opens `src/desktop/MonitorsPanel.qml`, modelled on Mac OS 9's
   Monitors control panel, Arrange view.
+  - Since update 50 it is laid out as 9.2.2's (captured 2026-11-12): a picture of the display and
+    **Monitor** / **Arrange** view buttons. Monitor holds Color Depth (shown fixed at Millions: Wayland
+    has no 256-colour mode), Resolution with **Show: Recommended** (each size once, at its fastest refresh,
+    plus the current mode) or **All**, then Rotation and Size; with two displays on, a pop-up picks which
+    one it is for. Arrange holds everything below, and is offered when more than one display is connected
+    (or, outside a managed session, for "Use all displays").
   - The connected displays are drawn to scale from `NativeManager::displayOutputs` (logical
     rectangles, scale, rotation, primary, and internal for `eDP`/`LVDS`/`DSI`).
   - A small menu bar sits on the main display. **Dragging it to another display makes that one the

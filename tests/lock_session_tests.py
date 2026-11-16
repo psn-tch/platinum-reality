@@ -59,7 +59,12 @@ class LockSessionTests(unittest.TestCase):
             'auth required pam_exec.so expose_authtok quiet %s\naccount required pam_permit.so\n' % check)
         environment = {k: v for k, v in os.environ.items()
                        if k not in ('WAYLAND_DISPLAY', 'DISPLAY', 'SWAYSOCK', 'I3SOCK', 'XDG_SESSION_ID',
-                                    'WAYLAND_SOCKET', 'QT_QPA_PLATFORM', 'QT_PLUGIN_PATH', 'QT_STYLE_OVERRIDE')}
+                                    'WAYLAND_SOCKET', 'QT_QPA_PLATFORM', 'QT_PLUGIN_PATH', 'QT_STYLE_OVERRIDE',
+                                    'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME')}
+        # An owned home: fonts in the real one (Charcoal in ~/.local/share/fonts on Lily's laptop,
+        # 2026-11-15) change the dialog's text, so the bullets miss the row typed_dots reads.
+        (root / 'home').mkdir()
+        environment['HOME'] = str(root / 'home')
         renderer = os.environ.get('PLATINUM_LOCK_TEST_RENDERER', 'software')
         if renderer not in ('software', 'opengl'):
             raise ValueError('PLATINUM_LOCK_TEST_RENDERER must be software or opengl')

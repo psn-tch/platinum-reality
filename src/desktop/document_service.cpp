@@ -74,6 +74,13 @@ bool DesktopDocumentService::EndSession(QString command)
     });
     return true;
 }
+bool DesktopDocumentService::OpenSherlock()
+{
+    if (!ownedPeerPid("frankenstein-finder"))
+        return false;
+    QTimer::singleShot(0, m_manager, [manager = m_manager] { emit manager->controlPanelRequested("sherlock"); });
+    return true;
+}
 bool DesktopDocumentService::PowerAvailable()
 {
     return ownedPeerPid("frankenstein-finder") && m_manager->powerAvailable();

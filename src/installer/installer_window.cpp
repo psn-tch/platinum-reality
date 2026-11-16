@@ -420,7 +420,7 @@ const char *const help[] = {
     "This program installs Platinum Reality in four steps, and asks you about your account on the way. "
     "Nothing is changed on any disk until you click Start on the last step.",
     "Choose the disk to install on from the Destination Disk pop-up menu. The whole disk is erased: "
-    "everything on it is lost. Options lets you choose whether the disk is encrypted.",
+    "everything on it is lost. Encrypt Disk, below it, asks for your password each time the computer starts up.",
     "Read this information before you install. Save keeps a copy of it.",
     "Read the license. When you click Continue, you are asked whether you agree to it.",
     "Your name, short name and password are for the account you log in with. The password also unlocks "
@@ -482,14 +482,13 @@ InstallerWindow::InstallerWindow(EngineClient *engine, QString informationText, 
         b->setAutoDefault(false);
         return b;
     };
-    m_options = button("Options…", "installer-options", 90);
     m_save = button("Save…", "installer-save", 90);
     m_print = button("Print…", "installer-print", 90);
     m_print->setEnabled(false); // As in 9.2.2 here: nothing to print to.
     m_back = button("Go Back", "installer-back", 90);
     m_continue = button("Continue", "installer-continue", 92);
     m_continue->setDefault(true);
-    for (auto *b : {m_options, m_save, m_print})
+    for (auto *b : {m_save, m_print})
         buttons->addWidget(b);
     buttons->addStretch();
     for (auto *b : {m_back, m_continue})
@@ -497,7 +496,6 @@ InstallerWindow::InstallerWindow(EngineClient *engine, QString informationText, 
     layout->addWidget(bar);
     connect(m_back, &QPushButton::clicked, this, &InstallerWindow::goBack);
     connect(m_continue, &QPushButton::clicked, this, &InstallerWindow::goForward);
-    connect(m_options, &QPushButton::clicked, this, &InstallerWindow::showOptions);
     connect(m_save, &QPushButton::clicked, this, &InstallerWindow::saveText);
     connect(helpButton, &QAbstractButton::clicked, this, [this] {
         QMessageBox box(QMessageBox::Information, "Help", help[m_page], QMessageBox::Ok, this);
@@ -632,38 +630,25 @@ QWidget *InstallerWindow::destinationPage()
     rows->addWidget(message, 3, 0, 1, 3);
     message->setFixedHeight(50);
     layout->addWidget(group);
-    layout->addStretch();
-    // Destination Options: whether the disk is encrypted (9.2.2 asked about a clean installation here).
-    m_optionsDialog = new QDialog(this);
-    m_optionsDialog->setWindowTitle("Options");
-    auto *options = new QVBoxLayout(m_optionsDialog);
-    options->setContentsMargins(14, 12, 14, 12);
+    layout->addSpacing(8);
+    // Encryption, on the page rather than behind 9.2.2's Options… button (where 9.2.2 asked about a
+    // clean installation): it decides whether every startup asks for a password before the login
+    // does (Lily Hewitt, 2026-11-15). Off unless chosen, as most installers do.
     m_encrypt = new QCheckBox("Encrypt Disk");
     m_encrypt->setObjectName("installer-encrypt");
-    m_encrypt->setChecked(true);
+    m_encrypt->setChecked(false);
     auto bold = m_encrypt->font();
     bold.setBold(true);
     m_encrypt->setFont(bold);
-    options->addWidget(m_encrypt);
-    auto *explain = wrapped("Locks everything on the disk with your password. The computer asks for it each "
-                            "time it starts up, and without it nobody can read the disk.");
+    layout->addWidget(m_encrypt);
+    auto *explain = wrapped("Locks everything on the disk with your password, so nobody can read it without "
+                            "the password, even with the disk taken out. The computer then asks for the "
+                            "password each time it starts up, before you log in.");
+    explain->setObjectName("installer-encrypt-explanation");
     explain->setFont(smaller(this->font()));
-    explain->setContentsMargins(22, 0, 0, 8);
-    explain->setMinimumWidth(340);
-    options->addWidget(explain);
-    auto *choose = new QHBoxLayout;
-    choose->addStretch();
-    auto *cancel = new QPushButton("Cancel");
-    auto *ok = new QPushButton("OK");
-    ok->setDefault(true);
-    for (auto *b : {cancel, ok})
-    {
-        b->setMinimumWidth(68);
-        choose->addWidget(b);
-    }
-    options->addLayout(choose);
-    connect(ok, &QPushButton::clicked, m_optionsDialog, &QDialog::accept);
-    connect(cancel, &QPushButton::clicked, m_optionsDialog, &QDialog::reject);
+    explain->setContentsMargins(22, 0, 0, 0);
+    layout->addWidget(explain);
+    layout->addStretch();
     connect(m_disks, &QComboBox::currentIndexChanged, this, [this] { describeDisk(); goTo(m_page); });
     return page;
 }
@@ -1045,15 +1030,6 @@ void InstallerWindow::describeDisk()
                                      "erased when you click Start.");
 }
 
-void InstallerWindow::showOptions()
-{
-    if (m_page != Destination)
-        return;
-    const bool before = m_encrypt->isChecked();
-    if (m_optionsDialog->exec() != QDialog::Accepted)
-        m_encrypt->setChecked(before);
-}
-
 void InstallerWindow::saveText()
 {
     auto *browser = m_page == License ? m_license : m_information;
@@ -1078,7 +1054,6 @@ void InstallerWindow::goTo(Page page)
     static_cast<TitleBand *>(m_band)->step = page;
     m_band->update();
     m_licenseLanguage->setVisible(page == License);
-    m_options->setVisible(page == Destination);
     m_save->setVisible(page == Information || page == License);
     m_print->setVisible(page == Information || page == License);
     // While installing and after, the buttons stay where they were, dimmed, as in 9.2.2.

@@ -14,8 +14,13 @@
 #include "camera_switch.hpp"
 #include "system_sounds.hpp"
 #include "startup_items.hpp"
+#include "locale_settings.hpp"
+#include "memory_info.hpp"
+#include "file_search.hpp"
+#include "system_profile.hpp"
 #include "handheld.hpp"
 #include <QElapsedTimer>
+#include <QFileSystemWatcher>
 #include <QAbstractListModel>
 #include <QPointer>
 #include <QProcess>
@@ -175,10 +180,14 @@ class ManagedWindow final : public QObject
     bool authentication = false;
     int z = 0;
     QSize userSize;
+    // Where zoom moved the window from, to fit it on the zoom box's screen; empty if it did not move.
+    std::optional<QPoint> userPosition;
     bool zoomed = false;
     // Triple-click on the title bar: the whole screen (below the menu bar), and back to filledRestore.
     bool filled = false, fillPending = false;
     QRect filledRestore;
+    // Where the click that asked to fill was, for a fill that waits for the shade to roll down.
+    std::optional<QPointF> fillPointer;
     // A client-requested full screen: it covers the desktop without chrome and
     // returns to restoreSize when the client leaves full screen.
     bool fullScreen = false;
@@ -271,6 +280,14 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(QObject *systemSounds READ systemSounds CONSTANT)
     // Extensions Manager: the programs that start at login (startup_items.hpp).
     Q_PROPERTY(QObject *startupItems READ startupItems CONSTANT)
+    // Numbers and Text: the number format and text behavior for programs (locale.conf).
+    Q_PROPERTY(QObject *localeSettings READ localeSettings CONSTANT)
+    // Memory: the page cache, swap and the /tmp RAM disk, as they are.
+    Q_PROPERTY(QObject *memoryInfo READ memoryInfo CONSTANT)
+    // Sherlock's Files channel.
+    Q_PROPERTY(QObject *fileSearch READ fileSearch CONSTANT)
+    // Apple System Profiler's facts.
+    Q_PROPERTY(QObject *systemProfile READ systemProfile CONSTANT)
     // Special ▸ Sleep, Restart and Shut Down: only in the whole session (power_control.hpp).
     Q_PROPERTY(bool powerAvailable READ powerAvailable CONSTANT)
     // Alert sounds (docs/alert-sounds.md); silent outside a real session.
@@ -369,6 +386,24 @@ class NativeManager final : public QAbstractListModel
     QObject *camera() const { return m_camera; }
     QObject *systemSounds() const { return m_systemSounds; }
     QObject *startupItems() const { return m_startupItems; }
+    QObject *localeSettings() const { return m_localeSettings; }
+    QObject *memoryInfo() const { return m_memoryInfo; }
+    QObject *fileSearch() const { return m_fileSearch; }
+    QObject *systemProfile() const { return m_systemProfile; }
+    // Favorites (the Apple menu's submenu; File ▸ Add To Favorites on the desktop and in the Finder).
+    Q_INVOKABLE QVariantList favorites() const;
+    Q_INVOKABLE int addFavorites(const QStringList &paths);
+    Q_INVOKABLE QString favoritesFolder() const;
+    // The Launcher (docs/launcher.md): the aliases in the Launcher Items folder, by name:
+    // [{name, link, target, folder, exists, application}], application being the id of the
+    // application an alias to a listed .desktop file opens. launcherItemsChanged follows the folder.
+    Q_INVOKABLE QVariantList launcherItems();
+    Q_INVOKABLE QString launcherFolder();
+    // File ▸ Add To Launcher (files and folders) and the Applications window's Add To Launcher.
+    Q_INVOKABLE int addToLauncher(const QStringList &paths);
+    Q_INVOKABLE bool addApplicationToLauncher(const QString &id);
+    // Opens what an alias in the Launcher is: its application, folder or document.
+    Q_INVOKABLE void openLauncherItem(const QString &link);
     // Once per login (not after Restart Desktop): starts the startup items that are On.
     void startStartupItems();
     QObject *alertSounds() const { return m_alertSounds; }
@@ -428,8 +463,10 @@ class NativeManager final : public QAbstractListModel
     QRect windowMoveRect() const;
     qulonglong windowMoveGeneration() const;
     Q_INVOKABLE void resizeWindow(qulonglong id, int width, int height);
-    Q_INVOKABLE void zoom(qulonglong id);
-    Q_INVOKABLE void fillScreen(qulonglong id);
+    // pointer: where the zoom box was clicked, in desktop coordinates; the window zooms on that screen.
+    Q_INVOKABLE void zoom(qulonglong id, QPointF pointer = QPointF(qQNaN(), qQNaN()));
+    // pointer: where the click was, in desktop coordinates; its screen is the one filled.
+    Q_INVOKABLE void fillScreen(qulonglong id, QPointF pointer = QPointF(qQNaN(), qQNaN()));
     Q_INVOKABLE void closeWindow(qulonglong id);
     Q_INVOKABLE void closeActiveWindow(qulonglong expected = 0);
     bool canCloseActiveWindow() const;
@@ -577,6 +614,7 @@ class NativeManager final : public QAbstractListModel
     void windowMoveChanged();
     void desktopDropTargetChanged();
     void recentApplicationsChanged();
+    void launcherItemsChanged();
     void pointerCaptureChanged();
     void idleInhibitionChanged();
 
@@ -631,6 +669,10 @@ class NativeManager final : public QAbstractListModel
     CameraSwitch *m_camera = nullptr;
     SystemSounds *m_systemSounds = nullptr;
     StartupItems *m_startupItems = nullptr;
+    LocaleSettings *m_localeSettings = nullptr;
+    MemoryInfo *m_memoryInfo = nullptr;
+    FileSearch *m_fileSearch = nullptr;
+    SystemProfile *m_systemProfile = nullptr;
     std::optional<PowerControl::Action> m_pendingPower;
     void endSession();
     bool m_normalApplicationSettings = false;
@@ -639,6 +681,7 @@ class NativeManager final : public QAbstractListModel
     StatusItems *m_statusItems = nullptr;
     IdleInhibition *m_idle = nullptr;
     QString m_workspace, m_profile, m_stateFile;
+    QFileSystemWatcher *m_launcherWatcher = nullptr;
     bool m_useAllDisplays = false;
     frankenstein::policy::State m_state;
     QPointF m_movePointerOrigin;

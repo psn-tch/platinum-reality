@@ -1,0 +1,6 @@
+# Platinum Software Update's kept releases (docs/software-update.md). Software Update, running as the
+# person logged in, lists "previous" to offer Restore Previous Version; root-only folders hid it.
+# The packages in them are signed public releases, and only root changes them.
+d /var/cache/platinum-update 0755 root root -
+d /var/cache/platinum-update/current 0755 root root -
+d /var/cache/platinum-update/previous 0755 root root -

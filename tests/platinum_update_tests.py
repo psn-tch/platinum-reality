@@ -226,6 +226,20 @@ class InstallTests(unittest.TestCase):
                            pacman, NOW, lambda: '0.40-1', lambda p: [], lock)
         self.assertEqual(pacman.calls, [])
 
+    def test_the_kept_releases_can_be_seen_by_software_update(self):
+        # Software Update runs as the person logged in: a root-only "previous" folder hid Restore
+        # Previous Version even with a release kept there (2026-11-14). Folders made 0700 by older
+        # versions open up at the next update.
+        (self.state / 'previous').mkdir(parents=True, mode=0o700)
+        self.install(bundle(self.root / 'one', self.keys))
+        self.install(bundle(self.root / 'two', self.keys, version='0.42-1'), installed='0.41-1')
+        for name in ('current', 'previous'):
+            self.assertEqual((self.state / name).stat().st_mode & 0o777, 0o755, name)
+        self.assertIsNotNone(update.kept_package(self.state / 'previous'))
+        rules = (Path(__file__).resolve().parent.parent / 'packaging/platinum-update.tmpfiles').read_text()
+        for name in ('current', 'previous'):
+            self.assertIn(f'd /var/cache/platinum-update/{name} 0755 root root -', rules)
+
     def test_nothing_to_restore_before_a_second_update(self):
         with self.assertRaisesRegex(update.UpdateError, 'No previous version'):
             update.restore_previous(self.reports.append, self.keys.keyring, self.state, Pacman())

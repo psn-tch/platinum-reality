@@ -1,4 +1,24 @@
-# Mac OS 9.2.2 fidelity gaps — reference work in progress
+# Mac OS 9.2.2 fidelity gaps
+
+**Status, 2026-11-15 (update 50, Sammy):** the table below is the November 2 snapshot. Since then
+every row has an implementation: the Application Switcher palette, File labels, Calculator, Note
+Pad, Stickies, Key Caps, Scrapbook, pop-up folder tabs, spring-loaded folders, the Special menu and
+About This Computer. Update 50 adds, each from new captures in the reference VM
+(`build/artifacts/sammy-922-reference-20261112/` and `-20261115-sherlock/`): the Monitors, Numbers,
+Text, Memory and Control Strip control panels, **Sherlock 2** ([sherlock.md](sherlock.md)), **Apple System
+Profiler**, Favorites and the **Launcher** ([launcher.md](launcher.md)).
+
+Still missing from 9.2.2's Apple menu and Control Panels, with what each would need here:
+
+| Feature | Linux counterpart | What it needs |
+| --- | --- | --- |
+| Startup Disk | systemd-boot's entries (Linux, the KDE fallback, other systems) | A root helper to set the default entry (`bootctl set-default`). |
+| Chooser | CUPS printers | A printer to qualify against; Platinum has no printing yet. |
+| Location Manager | NetworkManager / iwd profiles | Network sets; the Network panel covers Wi-Fi and TCP/IP today. |
+| Speech | speech-dispatcher | Voices installed; read-aloud would also need the Speakable Items equivalent. |
+| Graphing Calculator, AppleCD Audio Player, Apple DVD Player | Their own applications | Original applications; not desktop features. |
+
+## November 2 snapshot
 
 November 2, 2026. Native source inspected: `4e3922d` (update31).
 **Fresh reference-VM observations are blocked in this executor.** Local Unix

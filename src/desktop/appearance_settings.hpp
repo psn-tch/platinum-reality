@@ -12,6 +12,8 @@ class AppearanceSettings final : public QObject
     Q_PROPERTY(int shadeDuration READ shadeDuration NOTIFY changed)
     Q_PROPERTY(bool controlStripVisible READ controlStripVisible NOTIFY changed)
     Q_PROPERTY(bool controlStripCollapsed READ controlStripCollapsed NOTIFY changed)
+    // Control Strip ▸ Hot key to show/hide: Command-Control-S shows or hides the strip.
+    Q_PROPERTY(bool controlStripHotKey READ controlStripHotKey NOTIFY changed)
     Q_PROPERTY(int controlStripX READ controlStripX NOTIFY changed)
     Q_PROPERTY(int controlStripY READ controlStripY NOTIFY changed)
     // How many modules the strip shows, set by dragging its end tab; 0 shows every one that fits.
@@ -64,6 +66,7 @@ class AppearanceSettings final : public QObject
     {
         return m_stripVisible;
     }
+    bool controlStripHotKey() const { return m_stripHotKey; }
     bool controlStripCollapsed() const
     {
         return m_stripCollapsed;
@@ -141,6 +144,9 @@ class AppearanceSettings final : public QObject
     // offset ("7 hours behind UTC")}.
     Q_INVOKABLE QVariantMap timeZone() const;
     Q_INVOKABLE bool setControlStripCollapsed(bool collapsed);
+    // The Control Strip panel's Show/Hide: "show", "hide" or "hotkey" (shown as it is now, and
+    // Command-Control-S shows or hides it). Anything else is refused.
+    Q_INVOKABLE bool setControlStripMode(QString mode);
     Q_INVOKABLE bool setControlStripPosition(int x, int y);
     // Sets the length (0 = every module) and expands the strip, as releasing a tab drag does.
     Q_INVOKABLE bool setControlStripModules(int modules);
@@ -167,7 +173,7 @@ class AppearanceSettings final : public QObject
     QString m_wallpaperPath, m_wallpaperLayout = "fill";
     QMap<QString, std::pair<QString, QString>> m_monitorPictures; // name → (path, layout)
     int m_duration = 240, m_stripX = 8, m_stripY = -1, m_stripModules = 0;
-    bool m_stripVisible = true, m_stripCollapsed = false;
+    bool m_stripVisible = true, m_stripCollapsed = false, m_stripHotKey = false;
     QString m_accent = "blue";
     QString m_highlight = "Purple";
     bool m_doubleClickCollapse = true;

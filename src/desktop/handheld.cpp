@@ -89,8 +89,9 @@ HandheldDaemon::HandheldDaemon(QUrl base, QString tokenFile, QObject *parent)
 void HandheldDaemon::request(const QString &path, const QByteArray &body,
                              std::function<void(const QJsonObject &)> done)
 {
+    // No token file (disabled, as in tests): no request, and no "No file name specified" warning.
     QFile file(m_tokenFile);
-    const auto token = file.open(QIODevice::ReadOnly) ? file.read(256).trimmed() : QByteArray();
+    const auto token = !m_tokenFile.isEmpty() && file.open(QIODevice::ReadOnly) ? file.read(256).trimmed() : QByteArray();
     if (token.isEmpty())
     {
         done({});

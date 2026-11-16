@@ -120,6 +120,10 @@ target_sources(frankenstein-desktop PRIVATE src/desktop/host_pointer.cpp src/des
                src/desktop/camera_switch.cpp src/desktop/camera_switch.hpp
                src/desktop/system_sounds.cpp src/desktop/system_sounds.hpp
                src/desktop/startup_items.cpp src/desktop/startup_items.hpp
+               src/desktop/locale_settings.cpp src/desktop/locale_settings.hpp
+               src/desktop/memory_info.cpp src/desktop/memory_info.hpp
+               src/desktop/file_search.cpp src/desktop/file_search.hpp
+               src/desktop/system_profile.cpp src/desktop/system_profile.hpp
                src/desktop/scroll_bar_art.cpp src/desktop/scroll_bar_art.hpp
                src/desktop/icon_store.cpp src/desktop/icon_store.hpp
                src/desktop/notifications.cpp src/desktop/notifications.hpp
@@ -197,7 +201,7 @@ target_include_directories(frankenstein-desktop PRIVATE ${CMAKE_CURRENT_BINARY_D
 target_link_libraries(frankenstein-desktop PUBLIC frankenstein-policy frankenstein-applications Qt6::Quick Qt6::Qml Qt6::DBus Qt6::WaylandCompositor PRIVATE PkgConfig::WAYLAND_SERVER PkgConfig::WAYLAND_CLIENT Qt6::GuiPrivate Qt6::WaylandCompositorPrivate Qt6::QuickPrivate Qt6::Network)
 target_include_directories(frankenstein-desktop PRIVATE ${PLATINUM_PROTOCOLS})
 target_compile_options(frankenstein-desktop PRIVATE -Wall -Wextra -Wpedantic)
-qt_add_resources(frankenstein-desktop desktop-assets PREFIX "/desktop" FILES src/desktop/Desktop.qml src/desktop/ClientSurface.qml src/desktop/DesktopIcon.qml src/desktop/MenuGlyph.qml src/desktop/ShellDialog.qml src/desktop/PlatinumButton.qml src/desktop/TitleBox.qml src/desktop/titlebar/close-active.svg src/desktop/titlebar/close-pressed.svg src/desktop/titlebar/close-inactive.svg src/desktop/titlebar/zoom-active.svg src/desktop/titlebar/zoom-pressed.svg src/desktop/titlebar/zoom-inactive.svg src/desktop/titlebar/shade-active.svg src/desktop/titlebar/shade-pressed.svg src/desktop/titlebar/shade-inactive.svg src/desktop/PlatinumCheckBox.qml src/desktop/PlatinumRadioButton.qml src/desktop/ApplicationBrowser.qml src/desktop/NotificationAlerts.qml src/desktop/MonitorsPanel.qml src/desktop/InfoWindow.qml src/desktop/ClipboardWindow.qml src/desktop/HelpWindow.qml src/desktop/ControlPanelsWindow.qml src/desktop/NetworkPanel.qml src/desktop/DateTimePanel.qml src/desktop/KeyboardPanel.qml src/desktop/EnergySaverPanel.qml src/desktop/StickyNote.qml src/desktop/ShellWindowFocus.qml src/desktop/WorkspaceMember.qml src/desktop/MousePanel.qml src/desktop/PlatinumSlider.qml src/desktop/PlatinumGroup.qml src/desktop/GeneralControlsPanel.qml src/desktop/AppleMenuOptionsPanel.qml src/desktop/FileExchangePanel.qml src/desktop/ExtensionsManagerPanel.qml src/desktop/FieldBackground.qml src/desktop/ApplicationSwitcher.qml src/desktop/PlatinumPopup.qml)
+qt_add_resources(frankenstein-desktop desktop-assets PREFIX "/desktop" FILES src/desktop/Desktop.qml src/desktop/ClientSurface.qml src/desktop/DesktopIcon.qml src/desktop/MenuGlyph.qml src/desktop/ShellDialog.qml src/desktop/PlatinumButton.qml src/desktop/TitleBox.qml src/desktop/titlebar/close-active.svg src/desktop/titlebar/close-pressed.svg src/desktop/titlebar/close-inactive.svg src/desktop/titlebar/zoom-active.svg src/desktop/titlebar/zoom-pressed.svg src/desktop/titlebar/zoom-inactive.svg src/desktop/titlebar/shade-active.svg src/desktop/titlebar/shade-pressed.svg src/desktop/titlebar/shade-inactive.svg src/desktop/PlatinumCheckBox.qml src/desktop/PlatinumRadioButton.qml src/desktop/ApplicationBrowser.qml src/desktop/NotificationAlerts.qml src/desktop/MonitorsPanel.qml src/desktop/InfoWindow.qml src/desktop/ClipboardWindow.qml src/desktop/HelpWindow.qml src/desktop/ControlPanelsWindow.qml src/desktop/NetworkPanel.qml src/desktop/DateTimePanel.qml src/desktop/KeyboardPanel.qml src/desktop/EnergySaverPanel.qml src/desktop/StickyNote.qml src/desktop/ShellWindowFocus.qml src/desktop/WorkspaceMember.qml src/desktop/MousePanel.qml src/desktop/PlatinumSlider.qml src/desktop/PlatinumGroup.qml src/desktop/GeneralControlsPanel.qml src/desktop/AppleMenuOptionsPanel.qml src/desktop/FileExchangePanel.qml src/desktop/ExtensionsManagerPanel.qml src/desktop/NumbersPanel.qml src/desktop/TextPanel.qml src/desktop/MemoryPanel.qml src/desktop/SherlockWindow.qml src/desktop/SystemProfilerWindow.qml src/desktop/LauncherWindow.qml src/desktop/ControlStripPanel.qml src/desktop/FieldBackground.qml src/desktop/ApplicationSwitcher.qml src/desktop/PlatinumPopup.qml)
 qt_add_resources(frankenstein-desktop appearance-assets PREFIX "/desktop" FILES src/desktop/WindowRoll.qml src/desktop/PopUpTab.qml src/desktop/AppearanceDialog.qml src/desktop/ControlStrip.qml src/desktop/StripGlyph.qml src/desktop/PlatinumScrollBar.qml)
 qt_add_resources(frankenstein-desktop computer-assets PREFIX "/desktop" FILES src/desktop/AboutComputerWindow.qml)
 qt_add_resources(frankenstein-desktop picture-assets PREFIX "/desktop" FILES src/desktop/DesktopPictureDialog.qml)
@@ -214,7 +218,7 @@ target_link_options(frankenstein PRIVATE "LINKER:--export-dynamic-symbol=eglGetP
 add_executable(frankenstein-drop-receiver src/desktop/drop_receiver.cpp src/desktop/drop_receiver_window.cpp src/desktop/drop_receiver_window.hpp)
 target_include_directories(frankenstein-drop-receiver PRIVATE src)
 target_link_libraries(frankenstein-drop-receiver PRIVATE Qt6::Gui Qt6::DBus)
-add_library(frankenstein-files src/finder/file_operations.cpp src/finder/file_operations.hpp src/finder/file_details.cpp src/finder/file_details.hpp src/finder/file_labels.cpp src/finder/file_labels.hpp)
+add_library(frankenstein-files src/finder/file_operations.cpp src/finder/file_operations.hpp src/finder/file_details.cpp src/finder/file_details.hpp src/finder/file_labels.cpp src/finder/file_labels.hpp src/finder/favorites.cpp src/finder/favorites.hpp)
 target_include_directories(frankenstein-files PUBLIC src)
 # GIO has a struct member named signals; keep Qt's keyword macros out of this
 # backend instead of relying on a fragile include order.
@@ -338,6 +342,8 @@ install(FILES scripts/import-macos9-assets.py scripts/hfs_classic.py DESTINATION
 install(FILES scripts/platinum_update.py scripts/platinum-software-update DESTINATION "${PLATINUM_LIBDIR}")
 install(PROGRAMS scripts/platinum-update-install DESTINATION "${PLATINUM_LIBDIR}")
 install(FILES packaging/org.platinumreality.update.policy DESTINATION "${CMAKE_INSTALL_DATADIR}/polkit-1/actions")
+# Opens the kept-release folders to Software Update; pacman's systemd-tmpfiles hook applies it on install.
+install(FILES packaging/platinum-update.tmpfiles DESTINATION lib/tmpfiles.d RENAME platinum-update.conf)
 install(FILES packaging/release-keys.gpg DESTINATION "${CMAKE_INSTALL_DATADIR}/platinum-reality")
 # Fingerprints control panel (docs/fingerprints.md): the root helper that turns fingerprint login
 # on or off through pkexec, and its polkit action.
@@ -603,6 +609,9 @@ if(BUILD_TESTING)
     pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
     add_executable(relative-mouse-probe tests/relative_mouse_probe.c)
     add_executable(output-race-probe tests/output_race_probe.c)
+    pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb)
+    add_executable(x11-activate-probe tests/x11_activate_probe.c)
+    target_link_libraries(x11-activate-probe PRIVATE PkgConfig::XCB)
     add_executable(activation-probe tests/activation_probe.c
                    ${PLATINUM_PROTOCOLS}/xdg-shell-client.h ${PLATINUM_PROTOCOLS}/xdg-shell-protocol.c
                    ${PLATINUM_PROTOCOLS}/xdg-activation-client.h ${PLATINUM_PROTOCOLS}/xdg-activation-protocol.c)
@@ -639,7 +648,7 @@ if(BUILD_TESTING)
     add_dependencies(native-tests native-probe frankenstein-finder frankenstein-editor frankenstein-style frankenstein-drop-receiver)
     add_dependencies(native-tests frankenstein-puzzle)
     add_dependencies(native-tests vulkan-probe pointer-probe paste-probe virtual-pointer-driver relative-mouse-probe fixture-ptracer activation-probe)
-    add_dependencies(native-tests data-control-probe)
+    add_dependencies(native-tests data-control-probe x11-activate-probe)
     if(GTK3_FOUND AND GTK4_FOUND)
         target_compile_definitions(native-tests PRIVATE FRANKENSTEIN_GTK_PROBES=1)
         add_dependencies(native-tests gtk-appearance-probe3 gtk-appearance-probe4)

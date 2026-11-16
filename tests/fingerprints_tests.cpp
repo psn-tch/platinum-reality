@@ -173,6 +173,7 @@ class FingerprintsTests final : public QObject
                      "elif sys.argv[1] == 'install-support':\n"
                      "    print(json.dumps({'error': 'Could not install fprintd (no network).'})); sys.exit(1)\n"
                      "else:\n"
+                     "    if (here / 'slow-status').exists(): import time; time.sleep(1.5)\n"
                      "    print(json.dumps(s))\n");
     }
     void cleanupTestCase()
@@ -469,6 +470,28 @@ class FingerprintsTests final : public QObject
         QTRY_VERIFY(!fingerprints.changing());
         QCOMPARE(fingerprints.error(), QString("Could not install fprintd (no network)."));
         QVERIFY(helperCalls().contains("install-support"));
+    }
+
+    void aStatusReadBeforeAChangeDoesNotUndoIt()
+    {
+        // A change is followed by a status read; one that read the files before the next change and
+        // finished after it put the old state back for good (seen under load, 2026-11-16).
+        QFile::remove(directory.filePath("helper.log"));
+        QFile::remove(directory.filePath("state.json"));
+        QFile slow(directory.filePath("slow-status"));
+        QVERIFY(slow.open(QIODevice::WriteOnly));
+        slow.close();
+        FingerprintService fingerprints(client, helper(), {});
+        fingerprints.refresh();
+        QTRY_VERIFY(fingerprints.loginAvailable());
+        fingerprints.setLogin(true, false);
+        QTRY_VERIFY(fingerprints.login() && !fingerprints.changing());
+        fingerprints.setLogin(true, true); // While the status read after the first change sleeps.
+        QTRY_VERIFY(fingerprints.sudo() && !fingerprints.changing());
+        QTRY_COMPARE(helperCalls().filter("status").size(), 3); // The stale read is read again.
+        QTest::qWait(2000);
+        QVERIFY(fingerprints.login() && fingerprints.sudo());
+        QFile::remove(slow.fileName());
     }
 };
 

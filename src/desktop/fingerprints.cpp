@@ -37,6 +37,9 @@ FingerprintService::FingerprintService(QDBusConnection bus, QString helper, QStr
 void FingerprintService::helperFinished(QProcess *process, int code, QProcess::ExitStatus status)
 {
     bool reported = false, done = false;
+    if (process == &m_helper)
+        ++m_changes;
+    const bool stale = process == &m_status && m_statusChanges != m_changes;
     for (const auto &line : process->readAllStandardOutput().split('\n'))
     {
         const auto message = QJsonDocument::fromJson(line).object();
@@ -45,7 +48,7 @@ void FingerprintService::helperFinished(QProcess *process, int code, QProcess::E
         reported = true;
         if (message.contains("error"))
             m_error = message.value("error").toString();
-        if (message.contains("available"))
+        if (message.contains("available") && !stale)
         {
             m_loginAvailable = message.value("available").toBool();
             m_login = message.value("login").toBool();
@@ -65,6 +68,10 @@ void FingerprintService::helperFinished(QProcess *process, int code, QProcess::E
     emit changed();
     if (done) // fprintd may have just been installed: look for the reader again.
         refresh();
+    else if (stale && changing())
+        m_statusAgain = true;
+    else if (stale || (process == &m_helper && m_statusAgain))
+        runHelper({"status"}, false);
 }
 
 FingerprintService::~FingerprintService()
@@ -351,6 +358,13 @@ void FingerprintService::runHelper(const QStringList &arguments, bool elevated)
     {
         m_loginAvailable = false;
         return;
+    }
+    if (elevated)
+        ++m_changes;
+    else
+    {
+        m_statusChanges = m_changes;
+        m_statusAgain = false;
     }
     if (elevated && !m_elevate.isEmpty())
         process.start(m_elevate.first(), m_elevate.mid(1) + QStringList{m_helperPath} + arguments);

@@ -138,6 +138,8 @@ class DesktopItems final : public QAbstractListModel
     // Edit > Copy with icons selected, as Mac OS 9.2.2's Finder does: the selected items' names
     // as text, one per line, in reading order (top to bottom, then left to right).
     Q_INVOKABLE QString selectedNames() const;
+    // The selected items' paths (File ▸ Add To Favorites).
+    Q_INVOKABLE QStringList selectedPaths() const;
     // Typing on the desktop selects an icon by name, as the 9.2.2 Finder does (checked in Lily Hewitt's
     // 9.2.2 VM): the first name at or after the typed text, ignoring case, or else the last name.
     Q_INVOKABLE bool typeSelect(const QString &text);
