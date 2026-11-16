@@ -503,7 +503,8 @@ class SourceChecks(unittest.TestCase):
             if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'EXTRAS' for t in node.targets):
                 extras = ast.literal_eval(node.value)
         names = set((HERE/'profile/packages.x86_64').read_text().split())
-        self.assertTrue(set(extras).issubset(names))
+        # The ISO is kept small, as Arch's: a browser and the App Store catalog come from the App Store after installing.
+        self.assertEqual(set(extras) - names, {'firefox', 'archlinux-appstream-data'})
         self.assertTrue({'platinum-reality', 'plymouth', 'udisks2', 'iwd', 'systemd-ukify'}.issubset(names))
         self.assertNotIn('networkmanager', {x.lower() for x in names})
         self.assertFalse((HERE/'profile/airootfs/etc/systemd/network/20-wlan.network').exists())
