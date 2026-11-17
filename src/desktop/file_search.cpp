@@ -1,6 +1,7 @@
 #include "file_search.hpp"
 
 #include <QDateTime>
+#include <algorithm>
 #include <QDir>
 #include <QDirIterator>
 #include <QElapsedTimer>
@@ -8,12 +9,79 @@
 #include <QFileInfo>
 #include <QMimeDatabase>
 #include <QPointer>
+#include <QStorageInfo>
 #include <QtConcurrent/QtConcurrentRun>
 
-FileSearch::FileSearch(QString home, QString diskName, QStringList drives, QObject *parent)
-    : QObject(parent), m_home(QDir(home).absolutePath()), m_diskName(std::move(diskName)), m_drives(std::move(drives))
+FileSearch::FileSearch(QString home, QString diskName, QStringList drives, QObject *parent, QString mounts)
+    : QObject(parent), m_home(QDir(home).absolutePath()), m_diskName(std::move(diskName)), m_mounts(std::move(mounts)),
+      m_drives(std::move(drives))
 {
     refreshVolumes();
+}
+
+namespace
+{
+// mountinfo escapes a space, tab, newline and backslash as \ooo.
+QString unescaped(const QByteArray &field)
+{
+    QByteArray result;
+    for (qsizetype i = 0; i < field.size(); ++i)
+        if (field.at(i) == '\\' && i + 3 < field.size() && field.mid(i + 1, 3).toInt(nullptr, 8) > 0)
+        {
+            result.append(char(field.mid(i + 1, 3).toInt(nullptr, 8)));
+            i += 3;
+        }
+        else
+            result.append(field.at(i));
+    return QFile::decodeName(result);
+}
+bool within(const QString &folder, const QString &path) { return path == folder || path.startsWith(folder + "/"); }
+} // namespace
+
+QStringList FileSearch::dataDisks() const
+{
+    static const QStringList kinds{"ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "jfs", "reiserfs", "bcachefs",
+                                   "ntfs", "ntfs3", "fuseblk", "exfat", "vfat", "hfsplus"};
+    static const QStringList system{"/boot", "/efi", "/usr", "/var", "/opt", "/etc", "/root", "/nix", "/gnu",
+                                    "/snap", "/proc", "/sys", "/dev", "/run", "/tmp"};
+    QFile file(m_mounts);
+    if (m_mounts.isEmpty() || !file.open(QIODevice::ReadOnly))
+        return {};
+    // "36 35 98:0 / /mnt/movies rw,noatime master:1 - ntfs3 /dev/sda2 rw,uid=1000": the mount point
+    // is the fifth field, the type and source follow the "-".
+    struct Mount
+    {
+        QString point, kind, source;
+    };
+    QList<Mount> mounts;
+    QString rootSource;
+    for (const auto &line : file.readAll().split('\n'))
+    {
+        const auto fields = line.split(' ');
+        const auto dash = fields.indexOf("-");
+        if (fields.size() < 5 || dash < 5 || dash + 2 >= fields.size())
+            continue;
+        const Mount mount{unescaped(fields.at(4)), QString::fromUtf8(fields.at(dash + 1)), unescaped(fields.at(dash + 2))};
+        if (mount.point == "/")
+            rootSource = mount.source;
+        mounts.append(mount);
+    }
+    QStringList result, sources;
+    // Shortest mount point first, so a disk mounted twice is offered where it is mounted highest.
+    std::stable_sort(mounts.begin(), mounts.end(), [](const Mount &a, const Mount &b) { return a.point.size() < b.point.size(); });
+    for (const auto &mount : std::as_const(mounts))
+    {
+        if (!kinds.contains(mount.kind) || !mount.source.startsWith("/dev/") || mount.source.startsWith("/dev/loop") ||
+            mount.source == rootSource || mount.point == "/" || sources.contains(mount.source) ||
+            within(mount.point, m_home) || within(m_home, mount.point) ||
+            std::any_of(system.cbegin(), system.cend(), [&](const QString &folder) { return within(folder, mount.point); }) ||
+            std::any_of(m_drives.cbegin(), m_drives.cend(), [&](const QString &folder) { return within(QDir(folder).absolutePath(), mount.point); }) ||
+            !QFileInfo(mount.point).isDir() || !QFileInfo(mount.point).isReadable())
+            continue;
+        sources << mount.source;
+        result << mount.point;
+    }
+    return result;
 }
 
 FileSearch::~FileSearch() { cancel(); }
@@ -29,6 +97,14 @@ void FileSearch::refreshVolumes()
             if (drive.isReadable() && volumes.size() < 32)
                 volumes.append(QVariantMap{{"name", drive.fileName()}, {"path", drive.absoluteFilePath()},
                                            {"on", on.value(drive.absoluteFilePath(), false)}});
+    // Named by the disk's label (Potato's "Movies"), else its folder.
+    for (const auto &disk : dataDisks())
+        if (volumes.size() < 32)
+        {
+            const QStorageInfo storage(disk);
+            const auto name = storage.rootPath() == disk && !storage.name().isEmpty() ? storage.name() : QDir(disk).dirName();
+            volumes.append(QVariantMap{{"name", name}, {"path", disk}, {"on", on.value(disk, false)}});
+        }
     if (volumes != m_volumes)
     {
         m_volumes = volumes;

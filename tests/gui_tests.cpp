@@ -563,6 +563,23 @@ class GuiTests : public QObject
         QVERIFY(QFileInfo(profile.path() + "/Launcher Items/Report.txt").isSymLink());
         QVERIFY(!QFileInfo::exists(profile.path() + "/Favorites/Report.txt"));
     }
+    void aDotFileAddedToFavoritesIsListedOnce()
+    {
+        // With Show Hidden Files a dot file or folder can be chosen. Its alias is named without the
+        // dot: a hidden alias was never listed, so each Add To Favorites made another.
+        QTemporaryDir root, profile;
+        QVERIFY(QDir(root.path()).mkdir(".config"));
+        const auto path = root.path() + "/.config";
+        QCOMPARE(Favorites::add(profile.path(), {path}), 1);
+        QCOMPARE(Favorites::add(profile.path(), {path}), 0);
+        const auto listed = Favorites::list(profile.path());
+        QCOMPARE(listed.size(), 1);
+        QCOMPARE(listed.first().toMap().value("name").toString(), QString("config"));
+        QCOMPARE(listed.first().toMap().value("target").toString(), path);
+        QCOMPARE(LauncherItems::add(profile.path(), {path}), 1);
+        QCOMPARE(Aliases::list(LauncherItems::folder(profile.path())).size(), 1);
+        QCOMPARE(QDir(Favorites::folder(profile.path())).entryList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot).size(), 1);
+    }
     void labelsColourItemsAndShowInGetInfo()
     {
         // File ▸ Label (Mac OS 9): None and seven colours, kept with the file.

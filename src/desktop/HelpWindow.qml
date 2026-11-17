@@ -31,7 +31,8 @@ FocusScope {
             "<p>The menu at the far left of the menu bar is the <b>Apple menu</b>. It has About This " +
             "Computer, Applications…, Calculator, the Control Panels, Key Caps, Note Pad, Puzzle, Scrapbook, Snapshot, " +
             "Recent Applications and Terminal. Control Panels ▸ Apple Menu Options chooses whether its folders have " +
-            "submenus and how many recent applications it remembers.</p>" +
+            "submenus, how many recent applications it remembers, and its icon: the color Apple or " +
+            "System 6's black one.</p>" +
             "<p>The menus next to it belong to the application in front. On the desktop they are File, " +
             "Edit, View, Window, Special and Help.</p>" +
             "<p>The <b>application menu</b> at the far right shows which application is in front. Choose " +
@@ -109,7 +110,8 @@ FocusScope {
             "<h3>Windows</h3>" +
             "<p>Click a window once to bring it forward. Drag the title bar to move it. The close box " +
             "is at the left of the title bar, and the zoom and WindowShade boxes are at the right. With two " +
-            "monitors, the zoom box fills the monitor the window was clicked on.</p>" +
+            "monitors, the zoom box fills the monitor the window was clicked on. Right-click a title bar " +
+            "to fill the screen, and again to put the window back.</p>" +
             "<p>Double-click a title bar to roll the window up into it, and again to roll it down. Set the " +
             "speed in <b>Appearance</b>.</p>" +
             "<p>The <b>Window</b> menu lists the open windows of the application in front.</p>" +
@@ -141,7 +143,8 @@ FocusScope {
             "from the list on the left. Changes take effect as you make them; close the window when " +
             "you are done. The Control Strip's menus open the same window at their panel.</p><ul>" +
             "<li><b>Appearance</b>: highlight colour, sounds, WindowShade and the Control Strip.</li>" +
-            "<li><b>Apple Menu Options</b>: submenus on or off, and how many recent applications to remember.</li>" +
+            "<li><b>Apple Menu Options</b>: submenus on or off, how many recent applications to remember, and " +
+            "the Apple menu's icon.</li>" +
             "<li><b>Bluetooth</b>: pair, connect and forget devices.</li>" +
             "<li><b>Control Strip</b>: show or hide the Control Strip, or choose Hot key to show/hide and " +
             "press Command-Control-S to show or hide it.</li>" +
@@ -169,7 +172,8 @@ FocusScope {
             "and name servers.</li>" +
             "<li><b>Numbers</b>: how programs write numbers and money (separators, currency), from the formats " +
             "installed on this computer. Programs use a new format after you next log in.</li>" +
-            "<li><b>Sound</b>: alert sounds, microphones, speakers, Main Volume and the startup sound. " +
+            "<li><b>Sound</b>: alert sounds, microphones, speakers (each connected screen is one too, for a " +
+            "TV's speakers), Main Volume and the startup sound. " +
             "<b>Mac sounds only</b> removes the Arch and KDE desktop sounds (or downloads them again).</li>" +
             "<li><b>Text</b>: how programs sort text and change its case, from the languages installed on this " +
             "computer. Programs use a new choice after you next log in.</li></ul>"},
@@ -204,7 +208,8 @@ FocusScope {
             "files and folders. Type part of a name and press Return or click the magnifying glass. Choose " +
             "<b>Contents</b> instead to find text files containing what you typed.</p>" +
             "<p>Check the disks to search in the list: the Hard Disk (your home folder) is checked; other " +
-            "disks are not, so a large drive is searched only when you ask. Hidden folders are skipped.</p>" +
+            "disks (flash drives, and data disks the computer mounts when it starts) are not, so a large drive " +
+            "is searched only when you ask. Hidden folders are skipped.</p>" +
             "<p>Click an item to see where it is in the lower pane; double-click it (or press Return) to open it. " +
             "Double-click a folder in the lower pane to open that folder.</p>"},
         {id: "snapshot", title: "Snapshot", body:
@@ -237,7 +242,7 @@ FocusScope {
             "<li>Command-S, O, N, W: Save, Open, New, Close</li>" +
             "<li>Command-Q: Quit. Command-H: Hide</li>" +
             "<li>Command-. (period): Cancel</li>" +
-            "<li>Command-Tab: next application</li>" +
+            "<li>Command-Tab: next application. Command-Shift-Tab: the previous one</li>" +
             "<li>Command-1 to 9: show that workspace. Command-Control-1 to 9: send the front window there</li>" +
             "<li>Alt-Tab: next workspace with windows. Alt-Shift-Tab: the previous one</li>" +
             "<li>Command-Option-Space: next keyboard layout, when more than one is checked</li>" +
@@ -245,8 +250,17 @@ FocusScope {
             "<li>Command-Shift-3: a picture of the whole screen on the clipboard</li>" +
             "<li>Command-Shift-4 or Command-Shift-P: drag across an area for a picture of it on the clipboard</li>" +
             "<li>Command-?: this Help Center</li>" +
+            "<li>Command-F: Sherlock</li>" +
+            "<li>Command-Control-S: show or hide the Control Strip, when its hot key is on in Control Strip</li>" +
+            "<li>F10: open the menu bar from the keyboard (arrows to move, Return to choose)</li>" +
             "<li>Alt-D: Applications…</li>" +
-            "<li>Ctrl-Alt-L: lock the screen</li></ul>" +
+            "<li>Ctrl-Alt-L: lock the screen</li>" +
+            "<li>Ctrl-Alt-Escape: free the pointer from a game that holds on to it</li></ul>" +
+            "<p>On the desktop, with an icon selected:</p><ul>" +
+            "<li>Command-I: Get Info. Command-D: Duplicate</li>" +
+            "<li>Command-Delete: Move to Trash. Command-Shift-Delete: Empty Trash</li>" +
+            "<li>Command-Shift-N: New Folder. F2: rename</li>" +
+            "<li>Command-E: eject the selected disk</li></ul>" +
             "<p>An unassigned Command chord leaves a desktop text field unchanged. Command-N " +
             "creates another sticky note; Command-W closes a note or Control Panels.</p>" +
             "<p>In a terminal, Command-C and Command-V copy and paste, so Ctrl-C still stops a " +
@@ -302,7 +316,7 @@ FocusScope {
     }
     MouseArea {
         anchors.fill: parent
-        onPressed: function(mouse) { help.raised(); help.forceActiveFocus(); mouse.accepted = false }
+        onPressed: { help.raised(); help.forceActiveFocus() }
     }
     Item {
         id: titleBar

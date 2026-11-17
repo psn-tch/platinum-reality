@@ -14,6 +14,7 @@
 #include <QRegularExpression>
 #include <QTimer>
 #include <QtEndian>
+#include <tuple>
 
 namespace
 {
@@ -221,6 +222,7 @@ void StatusItems::fetch(const QString &key)
                 if (it == m_items.end() || reply.type() != QDBusMessage::ReplyMessage || reply.arguments().size() != 1)
                     return;
                 const auto properties = qdbus_cast<QVariantMap>(reply.arguments().first());
+                const auto before = std::make_tuple(it->id, it->title, it->status, it->itemIsMenu, it->icon);
                 it->id = properties.value("Id").toString().left(64);
                 it->title = properties.value("Title").toString().left(64);
                 it->status = properties.value("Status").toString().left(32);
@@ -244,11 +246,12 @@ void StatusItems::fetch(const QString &key)
                     m_icons->remove(iconKey);
                     it->icon.clear();
                 }
-                else
+                else if (image != it->image || it->icon.isEmpty())
                 {
                     m_icons->set(iconKey, image);
                     it->icon = "image://platinum/" + iconKey + "@" + QString::number(++m_iconRevision);
                 }
+                it->image = image;
                 const auto menuPath = properties.value("Menu").value<QDBusObjectPath>().path();
                 if (menuPath != it->menuPath && (menuPath.isEmpty() || validPath(menuPath)))
                 {
@@ -266,7 +269,10 @@ void StatusItems::fetch(const QString &key)
                     it->menu.clear();
                     loadMenu(key);
                 }
-                emit itemsChanged();
+                // A tooltip (a download's speed, every second or two) changes nothing shown here:
+                // announcing it would rebuild the Control Strip's modules each time.
+                if (before != std::make_tuple(it->id, it->title, it->status, it->itemIsMenu, it->icon))
+                    emit itemsChanged();
             });
 }
 

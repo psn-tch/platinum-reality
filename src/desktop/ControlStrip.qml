@@ -15,10 +15,12 @@ Item {
     // the module; releasing sets the level. The volume is {available, value (0-100), muted}.
     property var volume: null
     // The user's own imported assets (scripts/import-macos9-assets.py): a module with an icon in
-    // <personalFolder>/icons/control-strip/<command>.png shows it instead of our drawing.
+    // <personalFolder>/icons/control-strip/<command>.png shows it instead of our drawing. Only the
+    // modules in personalIcons have one; the others are never asked for (no warning for each).
     property string personalFolder: ""
+    property var personalIcons: []
     function personalIcon(command) {
-        return personalFolder !== "" && /^[a-z]+$/.test(command)
+        return personalFolder !== "" && /^[a-z]+$/.test(command) && personalIcons.indexOf(command) >= 0
             ? "file://" + encodeURI(personalFolder + "/icons/control-strip/" + command + ".png") : ""
     }
     signal sliderOpened()
@@ -32,7 +34,11 @@ Item {
     // laid out at the measured size; the strip, its slider and its outline are scaled from there.
     property real zoom: 1
     // In the order 9.2.2 lists its modules (alphabetically by file), with Platinum Reality's own.
-    readonly property var modules: [
+    // A new list recreates every module (and reloads its icon), so it changes only when what it
+    // holds does, not each time a battery or tray item reports something.
+    readonly property string moduleSignature: JSON.stringify(moduleList)
+    readonly property var modules: JSON.parse(moduleSignature)
+    readonly property var moduleList: [
         {command:"applications",name:"Applications"},
         {command:"appearance",name:"Appearance"}]
         .concat(battery && battery.present ? [{command:"battery",name:"Battery"}] : [])

@@ -218,6 +218,20 @@ class ImporterTests(unittest.TestCase):
         # The System file's 'icns' -16386 is the Apple menu's title; the menu bar reads apple-menu-16.png.
         self.assertEqual(importer.ICONS[-16386], 'apple-menu')
 
+    def test_the_black_apple_is_the_families_one_bit_version(self):
+        # Apple Menu Icon ▸ Black reads apple-menu-black-16.png: the 'ics#' bitmap drawn black where
+        # set, white where clear, through its mask, even when the family also has colour versions.
+        self.assertEqual(importer.ONE_BIT_ICONS[-16386], 'apple-menu-black')
+        def element(kind, body):
+            return kind + struct.pack('>I', 8 + len(body)) + body
+        bitmap = bytes([0x80] + [0] * 31)  # The first pixel set.
+        mask = bytes([0xC0] + [0] * 31)  # The first two opaque.
+        family = element(b'ics#', bitmap + mask) + element(b'ics8', bytes([5] * 256))
+        family = b'icns' + struct.pack('>I', 8 + len(family)) + family
+        pixels = importer.one_bit_pixels(family, 16)
+        self.assertEqual(pixels[:12], bytes([0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 0]))
+        self.assertIsNone(importer.one_bit_pixels(family, 32))
+
     def test_palette_is_the_mac_system_palette(self):
         palette = importer.mac_palette()
         self.assertEqual((len(palette), palette[0], palette[214], palette[215], palette[245], palette[255]),

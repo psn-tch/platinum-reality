@@ -1658,6 +1658,65 @@ class NativeTests : public QObject
         api.call("Finish");
         QTRY_COMPARE(probe.state(),QProcess::NotRunning);
     }
+    void x11PrimaryMonitorIsTheMainDisplay()
+    {
+        // Wine and Proton open games on RandR's primary output. It is the main display (the one
+        // with the menu bar), also after it changes, never the monitor of the window focused last.
+        if (X11Bridge::helperPath().isEmpty()) QSKIP("This build explicitly disables X11 support.");
+        const auto ipc=qEnvironmentVariable("FRANKENSTEIN_HEADLESS_IPC");
+        QVERIFY2(ipc.startsWith("/tmp/platinum-headless."),"Requires the owned two-output venue");
+        NativeScene scene;
+        QVERIFY(scene.show());
+        QProcess command;
+        command.start("swaymsg",{"-s",ipc,QString("[pid=%1] fullscreen enable global").arg(QCoreApplication::applicationPid())});
+        QVERIFY(command.waitForFinished(3000));
+        QCOMPARE(command.exitCode(),0);
+        QTRY_COMPARE(scene.view.size(),QSize(2080,760));
+        const auto withMain=[](const QString &main){
+            return DisplayLayout::create({{"HEADLESS-1",{0,0,1120,760},1.5,"normal"},
+                                          {"HEADLESS-2",{1120,0,960,600},2,"90"}},
+                                         main,DisplayLayout::Mode::Extend);
+        };
+        scene.manager->setDisplayLayout(*withMain("HEADLESS-2"));
+        QTRY_VERIFY_WITH_TIMEOUT(scene.x11.ready(),12000);
+        auto &manager=*scene.manager;
+        const auto monitors=[&]{
+            QProcess xrandr;
+            xrandr.setProcessEnvironment(scene.childEnvironment());
+            xrandr.start("/usr/bin/xrandr",{"--listmonitors"});
+            return xrandr.waitForFinished(3000)?QString::fromUtf8(xrandr.readAllStandardOutput()):QString();
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(monitors().startsWith("Monitors: 2"),8000);
+        QProcess probe;
+        auto environment=scene.childEnvironment();
+        environment.insert("QT_QPA_PLATFORM","xcb");
+        probe.setProcessEnvironment(environment);
+        const auto cleanup=qScopeGuard([&]{if(probe.state()!=QProcess::NotRunning){probe.kill();probe.waitForFinished(3000);}});
+        // Each X11 window that comes forward makes the bridge check the primary output.
+        const auto openAndClose=[&]{
+            probe.start(QCoreApplication::applicationDirPath()+"/native-probe",{"X11Screens"});
+            if(!probe.waitForStarted()) { qWarning()<<"X11 probe did not start"; return false; }
+            if(!QTest::qWaitFor([&]{return !first(manager,"Native Probe X11Screens").isEmpty();},10000)) {
+                qWarning()<<"X11 probe window did not appear"; return false;
+            }
+            QDBusInterface api("org.frankenstein.NativeProbeX11Screens","/Probe","org.frankenstein.NativeProbe");
+            if(!QTest::qWaitFor([&]{return api.isValid();},3000)) { qWarning()<<"X11 probe has no D-Bus"; return false; }
+            QTest::qWait(300);
+            api.call("Finish");
+            if(!QTest::qWaitFor([&]{return probe.state()==QProcess::NotRunning;},5000)) {
+                qWarning()<<"X11 probe did not finish"; return false;
+            }
+            return true;
+        };
+        QVERIFY(openAndClose());
+        QTRY_VERIFY2_WITH_TIMEOUT(monitors().contains(QRegularExpression(R"(\+\*HEADLESS-2\b)")),
+                                  qPrintable(monitors()),5000);
+        scene.manager->setDisplayLayout(*withMain("HEADLESS-1"));
+        QVERIFY(openAndClose());
+        QTRY_VERIFY2_WITH_TIMEOUT(monitors().contains(QRegularExpression(R"(\+\*HEADLESS-1\b)")),
+                                  qPrintable(monitors()),5000);
+        QVERIFY2(!monitors().contains("*HEADLESS-2"),qPrintable(monitors()));
+    }
     void fullScreenWithoutAMonitorStaysOnTheWindowsMonitor()
     {
         // GTK, browsers' F11 and video players ask for full screen without naming a monitor:
@@ -3674,6 +3733,21 @@ class NativeTests : public QObject
         QVERIFY(clickItem("desktop-command-status-item-Show Library"));
         QCOMPARE(tray.next("clicked"), QString("clicked Show Library"));
         QTRY_VERIFY(!menu->isVisible());
+        // A tooltip that keeps changing (qBittorrent's download speed) changes nothing shown: the
+        // strip's modules stay as they are instead of being made again, which flickered their icons.
+        const QPointer<QQuickItem> kept(module);
+        QPointer<QQuickItem> builtIn(visualItem(scene.view.contentItem(), "control-strip-sound"));
+        QVERIFY(builtIn);
+        const auto unchangedIcon = entry().value("icon").toString();
+        QSignalSpy changes(items, SIGNAL(itemsChanged()));
+        for (int i = 0; i < 4; ++i) {
+            QVERIFY(tray.send("tooltip", "tooltip sent"));
+            QTest::qWait(400);
+        }
+        QTest::qWait(800);
+        QCOMPARE(changes.count(), 0);
+        QCOMPARE(entry().value("icon").toString(), unchangedIcon);
+        QVERIFY(kept && builtIn);
         // Status changes follow: attention swaps the icon; passive hides the module.
         const auto icon = entry().value("icon").toString();
         QVERIFY(tray.send("attention", "status attention"));
@@ -4051,8 +4125,10 @@ class NativeTests : public QObject
             scene.x11.applyTo(environment);
             sender.setProcessEnvironment(environment);
             sender.start(QCoreApplication::applicationDirPath()+"/x11-activate-probe",{title});
-            return sender.waitForFinished(5000) && sender.exitCode()==0 &&
-                   QString::fromUtf8(sender.readAllStandardOutput()).startsWith("sent ");
+            const bool finished=sender.waitForFinished(5000);
+            const auto output=QString::fromUtf8(sender.readAllStandardOutput()).trimmed();
+            qInfo().noquote()<<"x11-activate-probe"<<title<<":"<<output;
+            return finished && sender.exitCode()==0 && output.startsWith("sent ");
         };
         QTest::qWait(300);
         QVERIFY(clientB->hasActiveFocus() && !clientA->hasActiveFocus());
@@ -6967,10 +7043,10 @@ class NativeTests : public QObject
         QTRY_VERIFY(first(*scene.manager, "Native Probe Boxes").value("collapsed").toBool());
         QDBusInterface("org.frankenstein.NativeProbeBoxes", "/Probe", "org.frankenstein.NativeProbe").call("Finish");
     }
-    void tripleClickingTheTitleBarFillsTheScreenAndBack()
+    void rightClickingTheTitleBarFillsTheScreenAndBack()
     {
-        // Lily Hewitt, 2026-10-23: two clicks on the title bar are WindowShade (at once, as before); a
-        // third fills the screen below the menu bar; three again put the window back.
+        // Lily Hewitt, 2026-10-23: a title bar click fills the screen below the menu bar and puts the
+        // window back. 2026-11-16: a right-click does it, not a third click after WindowShade's two.
         NativeScene scene;
         QVERIFY(scene.show());
         QProcess probe;
@@ -6990,21 +7066,25 @@ class NativeTests : public QObject
         QTest::qWait(200);
         before = window();
         const auto click = [&] { return bar->mapToScene(QPointF(60, bar->height() / 2)).toPoint(); };
+        // Two clicks still shade; a third no longer fills, it only begins and ends a move.
         QTest::mouseDClick(&scene.view, Qt::LeftButton, {}, click());
         QTRY_VERIFY(window().value("collapsed").toBool());
         QTest::mouseClick(&scene.view, Qt::LeftButton, {}, click());
+        QTest::qWait(600);
+        QVERIFY(window().value("collapsed").toBool());
+        QCOMPARE(window().value("width").toInt(), before.value("width").toInt());
+        // A right-click on the shaded window rolls it down and fills the screen.
+        QTest::mouseClick(&scene.view, Qt::RightButton, {}, click());
         const auto screen = scene.manager->primaryDisplayRect();
         QTRY_VERIFY_WITH_TIMEOUT(!window().value("collapsed").toBool() &&
                                  window().value("width").toInt() == screen.width() - 6, 5000);
         QTRY_COMPARE(window().value("x").toInt(), screen.x());
         QTRY_COMPARE(window().value("y").toInt(), screen.y() + 20);
         QTRY_COMPARE(window().value("height").toInt(), screen.height() - 20 - 27);
-        QVERIFY(capture(scene.view, "title-bar-triple-click-filled.png"));
-        // Three again: back where and how big it was.
+        QVERIFY(capture(scene.view, "title-bar-right-click-filled.png"));
+        // A right-click again: back where and how big it was.
         QTRY_VERIFY(!window().value("shadeAnimating").toBool());
-        QTest::mouseDClick(&scene.view, Qt::LeftButton, {}, click());
-        QTRY_VERIFY(window().value("collapsed").toBool());
-        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, click());
+        QTest::mouseClick(&scene.view, Qt::RightButton, {}, click());
         QTRY_VERIFY_WITH_TIMEOUT(!window().value("collapsed").toBool() &&
                                  window().value("width").toInt() == before.value("width").toInt(), 5000);
         QTRY_COMPARE(window().value("height").toInt(), before.value("height").toInt());
@@ -9618,6 +9698,17 @@ class NativeTests : public QObject
         QTRY_VERIFY(manager.desktopActive());
         QTRY_VERIFY(sherlock->property("front").toBool());
         QVERIFY(capture(scene.view, "native-finder-find-sherlock.png"));
+        // A click on Sherlock clear of its controls stays with Sherlock. Lily Hewitt, 2026-11-16: it
+        // went on to the window behind, which came forward instead.
+        const auto behind = client->mapRectToScene(QRectF(0, 0, client->width(), client->height()));
+        sherlock->setPosition(sherlock->parentItem()->mapFromScene(behind.topLeft() + QPointF(20, 10)));
+        const auto edge = sherlock->mapToScene(QPointF(1, 30)).toPoint();
+        QVERIFY(behind.contains(edge));
+        QTest::mouseClick(&scene.view, Qt::LeftButton, {}, edge);
+        QTest::qWait(300);
+        QVERIFY(sherlock->property("front").toBool());
+        QVERIFY(manager.desktopActive());
+        QVERIFY(!client->hasActiveFocus());
     }
     void finderPopUpWindowsOpenFromTabsAtTheScreenBottom()
     {
@@ -9644,14 +9735,19 @@ class NativeTests : public QObject
                     return value.toMap().value("id").toULongLong();
             return 0;
         }()));
-        // Right of the Control Strip, which covers a closed tab beneath it (as in 9.2.2).
-        manager.moveWindow(id, 560, 120);
-        manager.resizeWindow(id, 300, 260);
+        // Right of the Control Strip, which covers a closed tab beneath it (as in 9.2.2). Resized first,
+        // which waits for the Finder: a new window's first placement (a zero-delay timer) fits it whole
+        // on the screen, and a move before it ran became x 474 at the first size, 640 wide (4 in 11
+        // runs on Potato, 2026-11-16).
         auto *window = manager.findChild<ManagedWindow *>(QString(), Qt::FindDirectChildrenOnly);
         for (auto *candidate : manager.findChildren<ManagedWindow *>())
             if (candidate->id() == id) window = candidate;
         QVERIFY(window && window->id() == id);
-        QTRY_VERIFY(window->width() == 300 && window->height() == 260 && window->x() == 560);
+        manager.resizeWindow(id, 300, 260);
+        QTRY_VERIFY(window->width() == 300 && window->height() == 260);
+        manager.moveWindow(id, 560, 120);
+        QTRY_VERIFY2(window->x() == 560 && window->y() == 120,
+                     qPrintable(QString("at %1,%2").arg(window->x()).arg(window->y())));
         QVERIFY(window->canPopUp());
         const auto screen = manager.primaryDisplayRect();
         // Frame: tab and edge 23, grip strip 13, bottom edge 4.
@@ -9792,21 +9888,20 @@ class NativeTests : public QObject
         QTRY_VERIFY(state(right).value("loaded").toBool() && windowId(right));
         const auto rightId = windowId(right);
         QVERIFY(rightId != leftId);
-        manager.moveWindow(rightId, 600, 65);
+        // Resized before the move, which waits for the Finder: a new window's first placement fits it
+        // whole on the screen, and a move before it ran became x 474 (as in finderPopUpWindowsOpenFromTabsAtTheScreenBottom).
         manager.resizeWindow(rightId, 370, 300);
+        const auto window = [&](qulonglong id)
+        {
+            for (const auto &value : manager.snapshot().value("windows").toList())
+                if (value.toMap().value("id").toULongLong() == id)
+                    return value.toMap();
+            return QVariantMap();
+        };
         for (auto id : {leftId, rightId})
-            QTRY_VERIFY(
-                [&]
-                {
-                    for (const auto &value : manager.snapshot().value("windows").toList())
-                    {
-                        const auto w = value.toMap();
-                        if (w.value("id").toULongLong() == id)
-                            return w.value("width").toInt() == 370 &&
-                                   w.value("height").toInt() == 300;
-                    }
-                    return false;
-                }());
+            QTRY_VERIFY(window(id).value("width").toInt() == 370 && window(id).value("height").toInt() == 300);
+        manager.moveWindow(rightId, 600, 65);
+        QTRY_COMPARE(window(rightId).value("x").toInt(), 600);
         auto *rightClient = qobject_cast<QWaylandQuickItem *>(
             visualItem(scene.view.contentItem(), "client-" + QString::number(rightId)));
         QVERIFY(rightClient);
@@ -9983,10 +10078,12 @@ class NativeTests : public QObject
         manager.launchFinder(beta);
         QTRY_VERIFY_WITH_TIMEOUT(!first(manager, "Beta").isEmpty(), 10000);
         const auto betaId = first(manager, "Beta").value("id").toULongLong();
-        manager.moveWindow(betaId, 600, 65);
+        // Resized before the move, after the window's first placement (see the pop-up test).
         manager.resizeWindow(betaId, 400, 320);
         QTRY_VERIFY(state(beta).value("loaded").toBool());
         QTRY_COMPARE(first(manager, "Beta").value("width").toInt(), 400);
+        manager.moveWindow(betaId, 600, 65);
+        QTRY_COMPARE(first(manager, "Beta").value("x").toInt(), 600);
         const auto evidence = qScopeGuard([&] {
             if (QTest::currentTestFailed())
             {
@@ -10292,10 +10389,12 @@ class NativeTests : public QObject
         manager.launchFinder(to);
         QTRY_VERIFY_WITH_TIMEOUT(!first(manager, "Destination").isEmpty(), 10000);
         const auto destinationId = first(manager, "Destination").value("id").toULongLong();
-        manager.moveWindow(destinationId, 600, 65);
+        // Resized before the move, after the window's first placement (see the pop-up test).
         manager.resizeWindow(destinationId, 370, 300);
         QTRY_VERIFY(state(to).value("loaded").toBool());
         QTRY_COMPARE(first(manager, "Destination").value("width").toInt(), 370);
+        manager.moveWindow(destinationId, 600, 65);
+        QTRY_COMPARE(first(manager, "Destination").value("x").toInt(), 600);
         const auto filePoint = [&](const QString &name)
         {
             auto *client = qobject_cast<QWaylandQuickItem *>(

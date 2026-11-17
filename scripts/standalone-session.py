@@ -355,6 +355,10 @@ def connected_display_names(outputs, lid=None):
     return sorted(external if lid is True and external else names)
 
 
+class DisplaysChanged(ValueError):
+    """A display was unplugged while being arranged (a quick unplug/replug)."""
+
+
 def extended_connected_arrangement(outputs, seed, preferred, lid=None, wanted=None):
     """Fit all chosen, already-enabled outputs without overlap, using actual logical sizes.
 
@@ -364,6 +368,9 @@ def extended_connected_arrangement(outputs, seed, preferred, lid=None, wanted=No
     """
     wanted = connected_display_names(outputs, lid) if wanted is None else sorted(wanted)
     by_name = {o["name"]: o for o in outputs if isinstance(o, dict) and o.get("name") in wanted}
+    gone = [n for n in wanted if n not in by_name]
+    if gone:
+        raise DisplaysChanged("Unplugged while being arranged: " + ", ".join(gone))
     seeded_primary = next((n for n in wanted if seed.get(n, {}).get("primary")), preferred)
     primary, _ = choose_primary_output([by_name[n] for n in wanted], seeded_primary)
     placed = {}
@@ -1294,6 +1301,11 @@ def run(options):
                                               for name, place in plan.items()}}
                         else:
                             arrangement = extended_connected_arrangement(outputs, arrangement, preferred_primary, lid, wanted)
+                    except DisplaysChanged as error:
+                        # The old layout includes the screen that left, so it cannot be restored.
+                        # Keep arranged_for: the next poll arranges what is connected then.
+                        note("display: " + str(error))
+                        raise
                     except (ValueError, OSError) as error:
                         # Reject unusable seed/canvas geometry without stranding the desktop
                         # on the newly activated output. Retry only after an inventory/lid
@@ -1678,9 +1690,10 @@ def run(options):
                         description["pending"] = display_pending is not None
                         description["modes"] = {o["name"]: display_modes(o) for o in outputs
                                                 if o.get("name") in description["labels"]}
-                except ValueError as error:
+                except (ValueError, KeyError, StopIteration) as error:
                     # Unplugging every display must not kill applications. Keep
-                    # the last valid layout until usable outputs return.
+                    # the last valid layout until usable outputs return. A display that
+                    # leaves mid-update (KeyError/StopIteration on its name) waits for the next poll.
                     message = str(error)
                     if state.get("display_error") != message:
                         state["display_error"] = message

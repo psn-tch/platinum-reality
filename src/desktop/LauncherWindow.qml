@@ -76,14 +76,16 @@ DesktopWindow {
                     }
                 }
             }
-            Text {
-                objectName: "launcher-empty"
-                visible: launcher.items.length === 0
-                anchors.centerIn: parent; width: parent.width - 40
-                horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
-                text: "To add an item, select it and choose File ▸ Add To Launcher, or choose Add To Launcher in the Applications window."
-                font.pixelSize: 11; color: "#777"
-            }
+        }
+        // Centred in the pane, not in the Flickable's content, which is a 16 px strip while empty
+        // (Lily Hewitt, 2026-11-16: the hint's first line was cut off above the pane).
+        Text {
+            objectName: "launcher-empty"
+            visible: launcher.items.length === 0
+            anchors.centerIn: parent; width: parent.width - 40
+            horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+            text: "To add an application, choose File ▸ Add Application…. To add a file or folder, select it and choose File ▸ Add To Launcher."
+            font.pixelSize: 11; color: "#777"
         }
     }
 }

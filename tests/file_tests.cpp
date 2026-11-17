@@ -1,6 +1,8 @@
 #include "finder/file_operations.hpp"
 #include <QTemporaryDir>
 #include <QtTest>
+#include <memory>
+#include <sys/stat.h>
 
 class FileTests : public QObject
 {
@@ -217,6 +219,49 @@ class FileTests : public QObject
         QVERIFY(kept.open(QIODevice::ReadOnly));
         QCOMPARE(kept.readAll(), QByteArray("keep me"));
         QVERIFY(QFileInfo(root.filePath("Trash/files")).isDir());
+    }
+    void aFolderOnAnotherDiskGoesToTrashAndBack()
+    {
+        // A folder on a flash drive (another filesystem than the Trash) failed to go to the Trash with
+        // "Can't recursively copy directory" and stayed on the drive (found on Potato, 2026-11-16).
+        QTemporaryDir home;
+        std::unique_ptr<QTemporaryDir> drive;
+        for (const auto &place : {QString("/dev/shm"), QCoreApplication::applicationDirPath()})
+        {
+            struct stat a {}, b {};
+            if (::stat(QFile::encodeName(place).constData(), &a) == 0 &&
+                ::stat(QFile::encodeName(home.path()).constData(), &b) == 0 && a.st_dev != b.st_dev)
+            {
+                drive = std::make_unique<QTemporaryDir>(place + "/file-tests-drive-XXXXXX");
+                break;
+            }
+        }
+        if (!drive || !drive->isValid())
+            QSKIP("No second filesystem to stand for a flash drive");
+        QDir stick(drive->path());
+        QVERIFY(stick.mkpath("Photos/2026") && QDir(home.path()).mkpath("keep"));
+        write(stick.filePath("Photos/2026/beach.jpg"), "picture");
+        write(home.path() + "/keep/precious.txt", "keep me");
+        QVERIFY(QFile::link(home.path() + "/keep", stick.filePath("Photos/link")));
+        FileOperations ops(home.path(), home.path() + "/Trash", {drive->path()});
+        QVERIFY(!FileOperations::sameVolume({stick.filePath("Photos")}, home.path()));
+        const auto trashed = ops.trash(stick.filePath("Photos"));
+        QVERIFY2(trashed.ok, qPrintable(trashed.error));
+        QVERIFY(!QFileInfo::exists(stick.filePath("Photos")));
+        QFile copied(trashed.path + "/2026/beach.jpg");
+        QVERIFY(copied.open(QIODevice::ReadOnly));
+        QCOMPARE(copied.readAll(), QByteArray("picture"));
+        QVERIFY(QFileInfo(trashed.path + "/link").isSymLink()); // Copied as a link, never followed.
+        QVERIFY(QFileInfo::exists(home.path() + "/keep/precious.txt"));
+        QVERIFY(QFileInfo::exists(home.path() + "/Trash/info/Photos.trashinfo"));
+        QVERIFY(stick.entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot).isEmpty());
+        // Put Away: back to the drive.
+        const auto restored = ops.restore(trashed.path);
+        QVERIFY2(restored.ok, qPrintable(restored.error));
+        QCOMPARE(restored.path, stick.filePath("Photos"));
+        QVERIFY(QFileInfo::exists(stick.filePath("Photos/2026/beach.jpg")));
+        QVERIFY(ops.trashedItems().isEmpty());
+        QVERIFY(QDir(home.path() + "/Trash/info").entryList(QDir::Files).isEmpty());
     }
     void trashCannotConsumeItself()
     {

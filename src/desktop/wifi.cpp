@@ -4,6 +4,7 @@
 #include <QDBusPendingCallWatcher>
 #include <QDBusServiceWatcher>
 #include <QFile>
+#include <QFileInfo>
 #include <QNetworkInterface>
 #include <QRegularExpression>
 #include <QSet>
@@ -539,6 +540,11 @@ void WifiService::propertiesChanged(const QString &interface, const QVariantMap 
         scheduleChanged();
 }
 
+bool WifiService::wireless(const QString &interface, const QString &classNet)
+{
+    return !interface.isEmpty() && !interface.contains('/') && QFileInfo::exists(classNet + "/" + interface + "/phy80211");
+}
+
 QHash<QString, QString> WifiService::routers(const QString &routeFile)
 {
     // Iface Destination Gateway Flags ...: the default route (destination 0) has the router,
@@ -611,7 +617,7 @@ QVariantList WifiService::connections() const
         const auto type = interface.type();
         result.append(QVariantMap{{"name", interface.humanReadableName()},
                                   {"router", routers().value(interface.name())},
-                                  {"kind", type == QNetworkInterface::Wifi ? "Wi-Fi"
+                                  {"kind", wireless(interface.name()) || type == QNetworkInterface::Wifi ? "Wi-Fi"
                                            : type == QNetworkInterface::Ethernet ? "Ethernet" : "Other"},
                                   {"hardware", interface.hardwareAddress()},
                                   {"addresses", addresses}});

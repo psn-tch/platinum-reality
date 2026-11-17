@@ -76,9 +76,11 @@ FocusScope {
         Rectangle { x:1; y:parent.height-2; width:parent.width-2; height:1; color:"#888" }
     }
     Rectangle { visible: !frame.classicFrame; z:-1; x:3; y:3; width:parent.width; height:parent.height; color:"#50000000" }
+    // A press anywhere in the window brings it forward and stops there: passed on, it reached the
+    // window behind, which came forward instead (Lily Hewitt, 2026-11-16, clicking in Sherlock's list).
     MouseArea {
         anchors.fill: parent
-        onPressed: function(mouse) { frame.raised(); frame.forceActiveFocus(); mouse.accepted = false }
+        onPressed: { frame.raised(); frame.forceActiveFocus() }
     }
     Item {
         id: titleBar

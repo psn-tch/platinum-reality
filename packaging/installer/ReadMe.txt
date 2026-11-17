@@ -15,7 +15,9 @@ Before you install
 What you get
 
 • Arch Linux with the Platinum Reality desktop, chosen automatically when you log in.
-• Firefox, Konsole and the usual Arch tools. KDE Plasma is not installed.
+• Konsole and the usual Arch tools, kept as small as Arch's own. There is no web
+  browser until you add one: the App Store installs Firefox once you are online.
+  KDE Plasma is not installed.
 • Apple's own icons, sounds and fonts are not included. Platinum Reality draws its own.
   If you own a Mac OS 9 installation, the Appearance control panel can import its
   pictures and sounds for your own use.

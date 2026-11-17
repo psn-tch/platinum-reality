@@ -24,6 +24,9 @@ class X11Bridge final : public QObject
     // X11 application's claimed ID or process metadata.
     bool ownsWaylandPeer(qint64 pid) const;
     void applyTo(QProcessEnvironment &environment) const;
+    // The main display's output name. The helper makes it X11's primary output, where Wine and
+    // Proton games open, instead of the output of the window focused last.
+    void setMainOutput(const QString &name);
     static QString helperPath();
     // The helper's process (tests stop it to check the restart).
     qint64 processId() const { return m_process.processId(); }
@@ -36,10 +39,11 @@ class X11Bridge final : public QObject
     void readOutput();
     void fail(const QString &message);
     void cleanRuntime();
+    void writeMainOutput() const;
     QProcess m_process;
     QTimer m_deadline;
     QByteArray m_pending;
-    QString m_runtime, m_authority, m_display;
+    QString m_runtime, m_authority, m_display, m_mainOutput;
     QByteArray m_socket;
     bool m_starting = false, m_stopping = false, m_failed = false, m_wasReady = false;
     QList<qint64> m_restarts; // When each automatic restart happened (m_clock), newest last.

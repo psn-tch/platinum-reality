@@ -4,6 +4,9 @@ Platinum Dreams changes to xwayland-satellite 0.8.3 (MPL-2.0), applied with patc
   set_fullscreen names the output under the window's (requested) centre instead of None.
 - Minimize (2026-10-22): WM_CHANGE_STATE IconicState (XIconifyWindow, e.g. Steam's minimize button)
   becomes xdg_toplevel.set_minimized; the desktop hides the application.
+- Main display (2026-11-17): PLATINUM_X11_MAIN_OUTPUT_FILE holds the desktop's main display; RandR's primary
+  output follows it (not the last focused window), so Wine/Proton games open there. An unknown name re-reads
+  RandR's outputs first (Xwayland renames them once xdg-output reports the name).
 
 --- a/src/server/event.rs
 +++ b/src/server/event.rs
@@ -213,3 +216,93 @@ Platinum Dreams changes to xwayland-satellite 0.8.3 (MPL-2.0), applied with patc
          wm_s0 => b"WM_S0" only_if_exists = false,
          net_wm_cm_s0 => b"_NET_WM_CM_S0" only_if_exists = false,
          wm_check => b"_NET_SUPPORTING_WM_CHECK" only_if_exists = false,
+@@ -1277,6 +1294,9 @@
+     connection: Rc<xcb::Connection>,
+     outputs: HashMap<String, xcb::randr::Output>,
+     primary_output: xcb::randr::Output,
++    // Platinum Reality: a file holding the main display's output name (the desktop rewrites it).
++    main_output_file: Option<std::path::PathBuf>,
++    main_output_missing: Option<String>,
+ }
+ 
+ impl RealConnection {
+@@ -1286,10 +1306,58 @@
+             connection,
+             outputs: Default::default(),
+             primary_output: Xid::none(),
++            main_output_file: std::env::var_os("PLATINUM_X11_MAIN_OUTPUT_FILE")
++                .filter(|path| !path.is_empty())
++                .map(Into::into),
++            main_output_missing: None,
+         }
+     }
+ 
+     fn update_outputs(&mut self, root: x::Window) {
++        self.read_outputs(root);
++        if let Some(name) = self.main_output_name() {
++            self.set_primary_output(root, &name);
++        }
++    }
++
++    fn main_output_name(&self) -> Option<String> {
++        let name = std::fs::read_to_string(self.main_output_file.as_ref()?).ok()?;
++        let name = name.trim();
++        (!name.is_empty()).then(|| name.to_owned())
++    }
++
++    // Platinum Reality: games (Wine/Proton) open on the primary output, so it is always the
++    // desktop's main display rather than the output of whichever window was focused last.
++    fn set_primary_output(&mut self, root: x::Window, name: &str) {
++        if !self.outputs.contains_key(name) {
++            // Xwayland names an output once xdg-output reports its name, after RandR announced
++            // it under a placeholder name: read the names again before giving up.
++            self.read_outputs(root);
++        }
++        let Some(output) = self.outputs.get(name).copied() else {
++            // Once per name: focus changes ask again each time.
++            if self.main_output_missing.as_deref() != Some(name) {
++                warn!("Couldn't find main display {name}, primary output will be wrong");
++                self.main_output_missing = Some(name.to_owned());
++            }
++            return;
++        };
++        self.main_output_missing = None;
++        if output == self.primary_output {
++            return;
++        }
++        if let Err(e) = self
++            .connection
++            .send_and_check_request(&xcb::randr::SetOutputPrimary { window: root, output })
++        {
++            warn!("Couldn't set output {name} as primary: {e:?}");
++        } else {
++            debug!("set main display {name} as primary output");
++            self.primary_output = output;
++        }
++    }
++
++    fn read_outputs(&mut self, root: x::Window) {
+         self.outputs.clear();
+         let reply = self
+             .connection
+@@ -1407,6 +1475,10 @@
+             debug!("ChangeProperty failed ({window:?}: {e:?})");
+         }
+ 
++        if let Some(name) = self.main_output_name() {
++            self.set_primary_output(self.root_window(), &name);
++            return;
++        }
+         if let Some(name) = output_name {
+             let Some(output) = self.outputs.get(&name).copied() else {
+                 warn!("Couldn't find output {name}, primary output will be wrong");
+@@ -1438,6 +1510,9 @@
+     }
+ 
+     fn send_take_focus(&mut self, window: x::Window) {
++        if let Some(name) = self.main_output_name() {
++            self.set_primary_output(self.root_window(), &name);
++        }
+         let resource_id = self.atoms.wm_take_focus.resource_id();
+         let data = [resource_id, x::CURRENT_TIME, 0, 0, 0];
+         let event = &x::ClientMessageEvent::new(

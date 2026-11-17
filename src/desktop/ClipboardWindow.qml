@@ -34,7 +34,7 @@ FocusScope {
     }
     MouseArea {
         anchors.fill: parent
-        onPressed: function(mouse) { window.raised(); window.forceActiveFocus(); mouse.accepted = false }
+        onPressed: { window.raised(); window.forceActiveFocus() }
     }
     Item {
         id: titleBar

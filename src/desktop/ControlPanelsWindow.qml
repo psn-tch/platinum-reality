@@ -86,7 +86,7 @@ FocusScope {
     Rectangle {z: -1; x: 3; y: 3; width: parent.width; height: parent.height; color: "#50000000"}
     MouseArea {
         anchors.fill: parent
-        onPressed: function(mouse) { window.raised(); window.forceActiveFocus(); mouse.accepted = false }
+        onPressed: { window.raised(); window.forceActiveFocus() }
     }
     Item {
         id: titleBar

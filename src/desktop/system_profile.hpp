@@ -16,6 +16,9 @@ class SystemProfile final : public QObject
     //  speed}, network: [{name, kind, addresses}], usb: [{bus, name}], storage: [{name, model, size,
     //  removable, usb, volumes: [{name, mountPoint, fileSystem, size}]}], video: [{card, connectors}]}
     Q_INVOKABLE QVariantMap profile() const;
+    // The device files whose volumes are on a disk ("sda"): it, its partitions and the
+    // device-mapper volumes made from them (/dev/dm-0 and /dev/mapper/cryptroot).
+    QStringList devices(const QString &disk) const;
 
   private:
     QString read(const QString &path) const;

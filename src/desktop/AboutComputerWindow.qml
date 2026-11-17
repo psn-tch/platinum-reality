@@ -57,7 +57,7 @@ DesktopWindow {
                 objectName: "about-imported-logo"
                 anchors.verticalCenter: parent.verticalCenter
                 visible: status === Image.Ready
-                source: window.sessionManager.personalAssets ? "file://" + window.sessionManager.personalAssets + "/icons/about-logo.png" : ""
+                source: window.sessionManager.personalAsset ? window.sessionManager.personalAsset("icons/about-logo.png") : ""
                 smooth: false; cache: false
             }
             Mark { visible: !importedLogo.visible; size: 68; anchors.verticalCenter: parent.verticalCenter }

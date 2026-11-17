@@ -289,5 +289,68 @@ class AudioControlsTests(unittest.TestCase):
         self.assertEqual(output["volume"], -1)
 
 
+class DisplayAudioTests(unittest.TestCase):
+    """A graphics card plays through one HDMI/DisplayPort screen at a time, as PipeWire reports it:
+    no sink "card" number, only its card's name; each port names its screen and its profiles."""
+
+    def setUp(self):
+        self.fake = FakeAudio()
+        self.fake.outputs = [endpoint(1, "speakers", "Internal Speakers"), self.sink(0)]
+        self.fake.default_output = "gpu.hdmi-stereo"
+        self.fake.streams = [{"index": 10, "sink": 30}, {"index": 11, "sink": 1}]
+        port = lambda number, screen, profiles: {
+            "description": "HDMI / DisplayPort", "type": "HDMI", "availability": "available",
+            "profiles": profiles, "properties": {"device.product.name": screen}}
+        self.fake.cards = [{"index": 44, "name": "gpu", "properties": {"device.description": "Graphics Audio"},
+                            "active_profile": "output:hdmi-stereo", "profiles": {
+                                "output:hdmi-stereo": {"description": "Digital Stereo (HDMI)", "available": "yes"},
+                                "output:hdmi-surround": {"description": "Digital Surround (HDMI)", "available": "yes"},
+                                "output:hdmi-stereo-extra1": {"description": "Digital Stereo (HDMI 2)", "available": "yes"},
+                                "output:hdmi-stereo-extra2": {"description": "Digital Stereo (HDMI 3)", "available": "no"}},
+                            "ports": {"hdmi-output-0": port(0, "TOSHIBA-TV", ["output:hdmi-stereo", "output:hdmi-surround"]),
+                                      "hdmi-output-1": port(1, "U28E590", ["output:hdmi-stereo-extra1"]),
+                                      "hdmi-output-2": {**port(2, "Unplugged", ["output:hdmi-stereo-extra2"]),
+                                                        "availability": "not available"}}}]
+        original = self.fake.__call__
+        def switching(arguments):
+            reply = original(arguments)
+            if arguments[0] == "set-card-profile":  # The old port's sink goes; the new one appears.
+                self.fake.outputs = [row for row in self.fake.outputs if not row["name"].startswith("gpu.")]
+                self.fake.outputs.append(self.sink(1))
+            return reply
+        self.audio = AudioControls(switching, settle_timeout=0.2)
+
+    @staticmethod
+    def sink(port):
+        row = endpoint(30 + port, "gpu.hdmi-stereo" + ("-extra1" if port else ""), "Graphics Audio Digital Stereo")
+        del row["card"]
+        return {**row, "active_port": f"hdmi-output-{port}", "properties": {"device.name": "gpu"}}
+
+    def test_each_connected_screen_is_an_output_named_after_it(self):
+        outputs = {row["name"]: row for row in self.audio.snapshot()["outputs"]}
+        self.assertEqual(outputs["gpu.hdmi-stereo"]["description"], "TOSHIBA-TV (Display)")
+        self.assertEqual(outputs["gpu.hdmi-stereo"]["card"], 44)
+        self.assertEqual(outputs["gpu:output:hdmi-stereo-extra1"]["description"], "U28E590 (Display)")
+        self.assertEqual(outputs["gpu:output:hdmi-stereo-extra1"]["volume"], -1)
+        self.assertNotIn("Unplugged (Display)", [row["description"] for row in outputs.values()])
+        self.assertEqual(len(outputs), 3)
+        self.assertFalse(self.fake.mutations())
+
+    def test_choosing_another_screen_switches_the_port_and_moves_its_streams(self):
+        result = self.audio.select("output", "gpu:output:hdmi-stereo-extra1")
+        self.assertEqual(result["state"]["defaultOutput"], "gpu.hdmi-stereo-extra1")
+        self.assertEqual(self.fake.mutations(), [["set-card-profile", "gpu", "output:hdmi-stereo-extra1"],
+            ["set-default-sink", "gpu.hdmi-stereo-extra1"], ["move-sink-input", "10", "gpu.hdmi-stereo-extra1"]])
+        outputs = {row["name"]: row["description"] for row in result["state"]["outputs"]}
+        self.assertEqual(outputs["gpu.hdmi-stereo-extra1"], "U28E590 (Display)")
+        self.assertEqual(outputs["gpu:output:hdmi-stereo"], "TOSHIBA-TV (Display)")
+
+    def test_a_screen_whose_port_never_starts_is_reported(self):
+        self.fake.ignore_profile = True
+        self.audio.run = self.fake
+        with self.assertRaisesRegex(RuntimeError, "display's sound could not be turned on"):
+            self.audio.select("output", "gpu:output:hdmi-stereo-extra1")
+
+
 if __name__ == "__main__":
     unittest.main()

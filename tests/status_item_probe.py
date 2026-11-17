@@ -2,7 +2,7 @@
 """A tray application built on libappindicator3, as Steam, blueman and many others are.
 
 Prints one event per line: ready, clicked LABEL, activated. Commands on stdin:
-attention, active, passive, title TEXT, quit.
+attention, active, passive, tooltip, title TEXT, quit.
 """
 import sys
 
@@ -10,7 +10,7 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("AppIndicator3", "0.1")
-from gi.repository import AppIndicator3, GLib, Gtk  # noqa: E402
+from gi.repository import AppIndicator3, Gio, GLib, Gtk  # noqa: E402
 
 
 def say(text):
@@ -60,6 +60,12 @@ def command(channel, condition):
     elif line == "passive":
         indicator.set_status(AppIndicator3.IndicatorStatus.PASSIVE)
         say("status passive")
+    elif line == "tooltip":
+        # libappindicator has no tooltip; send the signal as qBittorrent does with each speed change.
+        Gio.bus_get_sync(Gio.BusType.SESSION).emit_signal(
+            None, "/org/ayatana/NotificationItem/platinum_status_probe", "org.kde.StatusNotifierItem",
+            "NewToolTip", None)
+        say("tooltip sent")
     elif line.startswith("title "):
         indicator.set_title(line[6:])
         say("title set")

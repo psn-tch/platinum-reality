@@ -60,6 +60,9 @@ ICONS = {-4000: 'document', -3999: 'folder', -3997: 'folder-open', -3996: 'appli
          # Alert icons (Icons.h kAlertStopIconResource and its neighbours): the stop hand, the caution
          # triangle and the note face, for the desktop's and the applications' alerts.
          -3822: 'alert-stop', -3821: 'alert-caution', -3820: 'alert-note'}
+# Icons also kept in their black-and-white version, as a 1-bit screen drew them: the Apple menu's is
+# System 6's solid black Apple (Apple Menu Options ▸ Apple Menu Icon ▸ Black).
+ONE_BIT_ICONS = {-16386: 'apple-menu-black'}
 MAX_BYTES = 4 * 1024 * 1024  # The desktop skips larger personal sounds.
 
 
@@ -194,6 +197,17 @@ def icon_pixels(data, size=32):
     else:
         return None
     return bytes(channel for (r, g, b), a in zip(rgb, alpha) for channel in (r, g, b, a))
+
+
+def one_bit_pixels(data, size=16):
+    """The family's black-and-white version only ('ics#' at 16 px, 'ICN#' at 32): bitmap then mask."""
+    found = elements(data)
+    kind = b'ICN#' if size == 32 else b'ics#'
+    if kind not in found:
+        return None
+    pixels = size * size
+    bits, alpha = one_bit(found[kind], size, 0), one_bit(found[kind], size, pixels // 8)
+    return bytes(channel for value, a in zip(bits, alpha) for channel in ((0, 0, 0, a) if value else (255, 255, 255, a)))
 
 
 def classic_icon(fork, identity, size):
@@ -632,6 +646,16 @@ def main():
     for identity, name in ICONS.items():
         for size, suffix in ((32, ''), (16, '-16')):
             pixels = identity in families and icon_pixels(families[identity], size)
+            if not pixels:
+                skipped += 1
+                continue
+            if write(icons / f'{name}{suffix}.png', png(size, size, pixels), options.replace):
+                written += 1
+            else:
+                kept += 1
+    for identity, name in ONE_BIT_ICONS.items():
+        for size, suffix in ((32, ''), (16, '-16')):
+            pixels = identity in families and one_bit_pixels(families[identity], size)
             if not pixels:
                 skipped += 1
                 continue

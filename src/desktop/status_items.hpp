@@ -1,6 +1,7 @@
 #pragma once
 #include <QDBusContext>
 #include <QHash>
+#include <QImage>
 #include <QObject>
 #include <QStringList>
 #include <QVariantList>
@@ -90,6 +91,7 @@ class StatusItems final : public QObject
     struct Item
     {
         QString service, path, menuPath, id, title, status, icon;
+        QImage image; // What icon shows: an unchanged picture keeps its address.
         quint64 serial = 0;
         bool itemIsMenu = false;
         QVariantList menu;

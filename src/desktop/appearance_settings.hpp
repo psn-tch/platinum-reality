@@ -19,7 +19,11 @@ class AppearanceSettings final : public QObject
     // How many modules the strip shows, set by dragging its end tab; 0 shows every one that fits.
     Q_PROPERTY(int controlStripModules READ controlStripModules NOTIFY changed)
     Q_PROPERTY(QString fontFamily READ fontFamily CONSTANT)
-    Q_PROPERTY(QUrl menuEmblem READ menuEmblem CONSTANT)
+    // The Apple menu's title: the colour emblem, or its black version (appleMenu.icon).
+    Q_PROPERTY(QUrl menuEmblem READ menuEmblem NOTIFY changed)
+    // Both, for Apple Menu Options' choice.
+    Q_PROPERTY(QUrl colorMenuEmblem READ colorMenuEmblem CONSTANT)
+    Q_PROPERTY(QUrl blackMenuEmblem READ blackMenuEmblem CONSTANT)
     Q_PROPERTY(QUrl wallpaper READ wallpaper NOTIFY changed)
     Q_PROPERTY(QString wallpaperPath READ wallpaperPath NOTIFY changed)
     Q_PROPERTY(QString wallpaperLayout READ wallpaperLayout NOTIFY changed)
@@ -50,7 +54,8 @@ class AppearanceSettings final : public QObject
     // 2 fast), barSize (the menu bar, its menus and the Control Strip, 100-150 percent; not in
     // 9.2.2, Lily Hewitt's request 2026-11-09)}.
     Q_PROPERTY(QVariantMap general READ general NOTIFY changed)
-    // Apple Menu Options: {submenus, rememberRecent, recentApplications} (AppleMenuOptionsPanel.qml).
+    // Apple Menu Options: {submenus, rememberRecent, recentApplications, icon: "color" or "black"}
+    // (AppleMenuOptionsPanel.qml).
     Q_PROPERTY(QVariantMap appleMenu READ appleMenu NOTIFY changed)
     // The insertion point's full on-and-off cycle in milliseconds, from caretBlink.
     Q_PROPERTY(int caretFlashTime READ caretFlashTime NOTIFY changed)
@@ -89,7 +94,15 @@ class AppearanceSettings final : public QObject
     }
     QUrl menuEmblem() const
     {
+        return m_appleIcon == "black" ? m_blackEmblem : m_emblem;
+    }
+    QUrl colorMenuEmblem() const
+    {
         return m_emblem;
+    }
+    QUrl blackMenuEmblem() const
+    {
+        return m_blackEmblem;
     }
     QUrl wallpaper() const
     {
@@ -122,7 +135,8 @@ class AppearanceSettings final : public QObject
     QVariantMap clock() const;
     QVariantMap general() const;
     QVariantMap appleMenu() const;
-    // One of appleMenu()'s keys: submenus and rememberRecent on or off, recentApplications 1-99.
+    // One of appleMenu()'s keys: submenus and rememberRecent on or off, recentApplications 1-99,
+    // icon "color" or "black".
     Q_INVOKABLE bool setAppleMenuOption(QString key, QVariant value);
     QVariantMap switcher() const;
     int caretFlashTime() const;
@@ -169,7 +183,7 @@ class AppearanceSettings final : public QObject
     bool save(int duration, bool visible, bool collapsed, int x, int y, const QString &picture,
               const QString &layout);
     QString m_profile;
-    QUrl m_emblem, m_wallpaper;
+    QUrl m_emblem, m_blackEmblem, m_wallpaper;
     QString m_wallpaperPath, m_wallpaperLayout = "fill";
     QMap<QString, std::pair<QString, QString>> m_monitorPictures; // name → (path, layout)
     int m_duration = 240, m_stripX = 8, m_stripY = -1, m_stripModules = 0;
@@ -183,6 +197,7 @@ class AppearanceSettings final : public QObject
     bool m_showDesktop = true;
     bool m_appleSubmenus = true, m_rememberRecent = true;
     int m_recentApplications = 10;
+    QString m_appleIcon = "color";
     int m_menuBlinks = 3, m_caretBlink = 1;
     int m_barSize = 100;
     bool m_switcherVisible = false;

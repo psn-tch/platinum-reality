@@ -56,6 +56,14 @@ class DisplaySnapshotTests(unittest.TestCase):
         outputs[1]['non_desktop'] = True
         self.assertEqual(session.connected_display_names(outputs, True), ['eDP-1'])
 
+    def test_a_display_unplugged_while_being_arranged_is_a_retryable_display_error(self):
+        # 11-16 crash: a quick unplug/replug left DP-11 in "wanted" but not in Sway's new reply.
+        outputs = inventory()
+        wanted = [o['name'] for o in outputs] + ['DP-11']
+        with self.assertRaisesRegex(session.DisplaysChanged, 'DP-11'):
+            session.extended_connected_arrangement(outputs, {}, 'HEADLESS-1', wanted=wanted)
+        self.assertTrue(issubclass(session.DisplaysChanged, ValueError))
+
     def test_extend_plan_rejects_an_oversized_canvas_before_position_commands(self):
         outputs = inventory()
         for o in outputs:

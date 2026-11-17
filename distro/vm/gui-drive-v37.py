@@ -12,9 +12,7 @@ spec=importlib.util.spec_from_file_location('legacy_gui',Path(__file__).with_nam
 gui=importlib.util.module_from_spec(spec);spec.loader.exec_module(gui)
 # Update 44 4bc3ffd: since 6f37afd src/installer changed only a comment and the ReadMe's credit line
 # (psn_tch -> Lily Hewitt); the pages, buttons and their geometry are the same code.
-# Update 50 6a6bfbb: 510e319 moved Encrypt Disk from the Options… dialog onto the Destination page,
-# unchecked unless chosen; the footer's Select/Continue/Start and the later pages are unchanged.
-NATIVE='6a6bfbb8eb3dddb921b4a3cd2d628674623954cd'
+NATIVE='4bc3ffddb923921295fed5ea307e645139b3d73d'
 FULL=(70,60,1050,650)
 # Measured on the actual update37 image (install-20261107T045614Z, gui-01-welcome): the default
 # button's label spans x 569-620, y 462-471 inside a ring at x 553-637, y 455-480. Read the
@@ -188,11 +186,6 @@ def drive(guest,password,receipt,remote,key,type_text):
     gui.wait(guest,'gui-02-destination-value','/dev/vda',region=(120,196,500,24),psm='7')
     # There is one usable virtual target; the actual pop-up must already show
     # its path. Clicking its text as though it were the old list opens a menu.
-    if receipt['encrypted']:
-        # Off unless chosen (510e319): an encrypted proof ticks the page's own box; the summary confirms it.
-        _,points=gui.wait(guest,'gui-02-encrypt','Encrypt Disk',region=FULL)
-        if len(points)!=1:raise RuntimeError('Actual Encrypt Disk box ambiguous; no click sent')
-        gui.click(guest,points[0]['x'],points[0]['y'])
     button(guest,'gui-03-destination-selected','Select')
     gui.wait(guest,'gui-04-information','Important Information');button(guest,'gui-04-information','Continue')
     gui.wait(guest,'gui-05-license','Software License Agreement');button(guest,'gui-05-license','Continue');agree(guest)
@@ -213,7 +206,7 @@ def drive(guest,password,receipt,remote,key,type_text):
     receipt['gui_selected_choices']={'locale':'en_GB.UTF-8','timezone':'Europe/London','keymap':'uk'}
     button(guest,'gui-08-account-complete','Continue')
     words,_=gui.wait(guest,'gui-09-summary','tester',region=FULL)
-    if not gui.matches(words,'Click Start to install') or receipt['encrypted']!=('diskwillbeencrypted' in gui.normalized(' '.join(w['text'] for w in words))):
+    if not gui.matches(words,'Click Start to install') or 'diskwillbeencrypted' not in gui.normalized(' '.join(w['text'] for w in words)):
         raise RuntimeError('Actual Start summary/account/encryption not recognized')
     button(guest,'gui-10-summary-install','Start')
     if not confirm_erase(guest,receipt,remote,key):return

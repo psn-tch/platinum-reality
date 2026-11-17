@@ -183,7 +183,7 @@ class ManagedWindow final : public QObject
     // Where zoom moved the window from, to fit it on the zoom box's screen; empty if it did not move.
     std::optional<QPoint> userPosition;
     bool zoomed = false;
-    // Triple-click on the title bar: the whole screen (below the menu bar), and back to filledRestore.
+    // Right-click on the title bar: the whole screen (below the menu bar), and back to filledRestore.
     bool filled = false, fillPending = false;
     QRect filledRestore;
     // Where the click that asked to fill was, for a fill that waits for the shade to roll down.
@@ -297,6 +297,9 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(QObject *battery READ battery CONSTANT)
     // The user's own assets (icons/, sounds/), e.g. imported from their Mac OS 9; never bundled.
     Q_PROPERTY(QString personalAssets READ personalAssets CONSTANT)
+    // The Control Strip modules with their own icon there (icons/control-strip/<module>.png), read
+    // again after an import, so the strip never asks for an icon that is not there.
+    Q_PROPERTY(QStringList personalStripIcons READ personalStripIcons NOTIFY personalStripIconsChanged)
     Q_PROPERTY(QObject *clipboard READ clipboard CONSTANT)
     // One of the desktop's own menus is open (set by Desktop.qml): a key closes it.
     Q_PROPERTY(bool shellMenuOpen MEMBER m_shellMenuOpen)
@@ -411,6 +414,10 @@ class NativeManager final : public QAbstractListModel
     QObject *startupSound() const { return m_startupSound; }
     QObject *battery() const { return m_battery; }
     QString personalAssets() const { return m_personalAssets; }
+    QStringList personalStripIcons() const;
+    // A file of the user's own assets ("icons/about-logo.png") as a URL, or empty when it is not there,
+    // so an optional picture is never asked for (each missing one is a warning in the journal).
+    Q_INVOKABLE QUrl personalAsset(const QString &name) const;
     QObject *clipboard() const { return m_clipboard; }
     bool readableDocument(const QString &path) const;
     Q_INVOKABLE void requestOpenDocument(QString path, bool chooseApplication = false);
@@ -615,6 +622,7 @@ class NativeManager final : public QAbstractListModel
     void desktopDropTargetChanged();
     void recentApplicationsChanged();
     void launcherItemsChanged();
+    void personalStripIconsChanged();
     void pointerCaptureChanged();
     void idleInhibitionChanged();
 

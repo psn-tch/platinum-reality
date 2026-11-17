@@ -81,6 +81,9 @@ class WifiService final : public QObject
     Q_INVOKABLE QVariantMap nameServers() const;
     // The default route's router per interface, from the kernel's IPv4 routing table.
     static QHash<QString, QString> routers(const QString &routeFile = "/proc/net/route");
+    // A Wi-Fi interface, as cfg80211 links it to its radio. Not QNetworkInterface::type(): that
+    // asks wireless extensions, which the kernel refuses for Wi-Fi 7 devices, and calls them Ethernet.
+    static bool wireless(const QString &interface, const QString &classNet = "/sys/class/net");
     static QVariantMap readResolvConf(const QStringList &files);
 
   signals:

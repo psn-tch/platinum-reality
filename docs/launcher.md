@@ -14,12 +14,14 @@ Script Editor and SimpleText in it). Capture: canonical
 - **Items:** as 9.2.2's were aliases in the System Folder's Launcher Items folder, ours are links (what
   the Finder's Make Alias makes) in the session profile's `Launcher Items` folder (`src/finder/favorites.*`,
   shared with Favorites). At most 64; each item once.
-  - An application: Apple menu ▸ Applications…, then **Add To Launcher**. The link points at the
+  - An application: Apple menu ▸ Applications… (or, with the Launcher in front, File ▸ Add Application…),
+    then **Add To Launcher**. The link points at the
     application's `.desktop` file and is named as the application. The desktop's own applications
     (Finder, Editor, Bluetooth, Control Panels) have no file and cannot be added.
   - A file or folder: **File ▸ Add To Launcher** on the desktop or in a Finder window (there, with
     nothing selected, that window's folder).
   - Renaming or removing: with the Launcher in front, File ▸ Open Launcher Items opens the folder.
+  - Neither adds from a file chooser: the desktop has none of its own yet.
 - **Opening an item** (`NativeManager::openLauncherItem`): only a link in the Launcher Items folder. A
   link to a `.desktop` file that is a listed application (`ApplicationCatalog::applicationForFile`,
   compared by canonical path) opens that application; any other `.desktop` file is a document and

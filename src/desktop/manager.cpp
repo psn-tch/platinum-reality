@@ -187,8 +187,10 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
         const auto fixture = qEnvironmentVariable("FRANKENSTEIN_MEMORY_ROOT");
         m_memoryInfo = new MemoryInfo(fixture.isEmpty() ? QString() : fixture, "/tmp", this);
     }
-    // Sherlock: the Finder's own disk (the workspace) and its mounted drives.
-    m_fileSearch = new FileSearch(m_workspace, FinderPlaces::diskName(m_profile), FinderPlaces::volumes, this);
+    // Sherlock: the Finder's own disk (the workspace) and its mounted drives; in the whole session,
+    // where the Finder opens items anywhere, also the data disks mounted from fstab.
+    m_fileSearch = new FileSearch(m_workspace, FinderPlaces::diskName(m_profile), FinderPlaces::volumes, this,
+                                  FinderPlaces::wholeComputer ? QString("/proc/self/mountinfo") : QString());
     // Apple System Profiler. Tests name a folder of etc/, proc/ and sys/ fixtures.
     m_systemProfile = new SystemProfile(qEnvironmentVariable("FRANKENSTEIN_PROFILE_ROOT"), this);
     m_power = new PowerControl(hostBluetooth ? QDBusConnection::systemBus() : QDBusConnection(QString()), this);
@@ -215,8 +217,10 @@ NativeManager::NativeManager(QWaylandQuickCompositor *c, QQuickView *v, QString 
     if (!QDir::isAbsolutePath(data))
         data = QDir::homePath() + "/.local/share";
     m_personalAssets = data + "/platinum-reality/assets";
-    m_assetImporter = new AssetImporter(QCoreApplication::applicationDirPath() + "/import-macos9-assets.py",
-                                        m_personalAssets, this);
+    auto *importer = new AssetImporter(QCoreApplication::applicationDirPath() + "/import-macos9-assets.py",
+                                       m_personalAssets, this);
+    connect(importer, &AssetImporter::finished, this, &NativeManager::personalStripIconsChanged);
+    m_assetImporter = importer;
     // The release key: the installed package's, or the copy beside a development build.
     const auto appDir = QCoreApplication::applicationDirPath();
     const auto keyring = QFileInfo::exists(appDir + "/release-keys.gpg")
@@ -2013,7 +2017,7 @@ void NativeManager::setShadeInMotion(qulonglong id, bool running)
         return;
     window->shadeInMotion = running;
     synchronize();
-    // A triple-click undid the double-click's WindowShade; fill the screen once it has rolled down.
+    // A right-click on a shaded window rolls it down first; fill the screen once it has.
     if (!running && window->fillPending)
     {
         window->fillPending = false;
@@ -2799,6 +2803,10 @@ void NativeManager::setX11Bridge(X11Bridge *bridge)
     Q_ASSERT(!m_x11);
     m_x11 = bridge;
     connect(bridge, &X11Bridge::failed, this, &NativeManager::errorOccurred);
+    // Games through X11 (Wine, Proton) open on its primary output: the main display, with the menu bar.
+    const auto followMainDisplay = [this] { m_x11->setMainOutput(effectiveDisplayLayout().primary()); };
+    connect(this, &NativeManager::displayLayoutChanged, bridge, followMainDisplay);
+    followMainDisplay();
     connect(bridge, &X11Bridge::changed, this, [this] {
         if (m_x11->starting())
             return;
@@ -3333,6 +3341,20 @@ QString NativeManager::favoritesFolder() const
 {
     QDir().mkpath(Favorites::folder(m_profile));
     return Favorites::folder(m_profile);
+}
+QStringList NativeManager::personalStripIcons() const
+{
+    QStringList modules;
+    for (const auto &icon : QDir(m_personalAssets + "/icons/control-strip").entryInfoList({"*.png"}, QDir::Files | QDir::Readable))
+        modules << icon.completeBaseName();
+    return modules;
+}
+QUrl NativeManager::personalAsset(const QString &name) const
+{
+    const QFileInfo file(m_personalAssets + "/" + name);
+    if (name.split('/').contains("..") || !file.isFile() || !file.isReadable())
+        return {};
+    return QUrl::fromLocalFile(file.absoluteFilePath());
 }
 QString NativeManager::launcherFolder()
 {

@@ -6,6 +6,7 @@
 #include "desktop/interface_sounds.hpp"
 #include "desktop/command_keys.hpp"
 #include "desktop/computer_info.hpp"
+#include "desktop/system_profile.hpp"
 #include "desktop/audio_service.hpp"
 #include "desktop/desktop_items.hpp"
 #include "desktop/display_layout.hpp"
@@ -421,6 +422,14 @@ class DesktopTests : public QObject
         QTRY_COMPARE(appearance->appleMenu().value("rememberRecent").toBool(), false);
         QVERIFY(!apple().contains("Recent Applications"));
         QVERIFY(!item("apple-menu-recent-applications")->isEnabled());
+        // Apple Menu Icon ▸ Black: the menu bar's Apple follows at once.
+        QVERIFY(item("apple-menu-icon-color")->property("checked").toBool());
+        click(item("apple-menu-icon-black"));
+        QTRY_COMPARE(appearance->appleMenu().value("icon").toString(), QString("black"));
+        QVERIFY(!item("apple-menu-icon-color")->property("checked").toBool());
+        QCOMPARE(appearance->menuEmblem(), appearance->blackMenuEmblem());
+        if (auto *emblem = visualItem(view.contentItem(), "menu-emblem"))
+            QTRY_COMPARE(emblem->property("source").toUrl(), appearance->blackMenuEmblem());
         // Kept in appearance.json.
         QFile saved(root.filePath("profile/appearance.json"));
         QVERIFY(saved.open(QIODevice::ReadOnly));
@@ -428,12 +437,15 @@ class DesktopTests : public QObject
         QCOMPARE(options.value("submenus").toBool(true), true);
         QCOMPARE(options.value("rememberRecent").toBool(true), false);
         QCOMPARE(options.value("recentApplications").toInt(), 2);
+        QCOMPARE(options.value("icon").toString(), QString("black"));
         // Out-of-range values are refused, on a second instance (an error alert would block this view).
         AppearanceSettings other(root.filePath("other-profile"));
         QVERIFY(!other.setAppleMenuOption("recentApplications", 0));
         QVERIFY(!other.setAppleMenuOption("recentApplications", 100));
         QVERIFY(!other.setAppleMenuOption("submenus", 1));
         QVERIFY(!other.setAppleMenuOption("servers", 5));
+        QVERIFY(!other.setAppleMenuOption("icon", QString("purple")));
+        QVERIFY(!other.setAppleMenuOption("icon", 1));
         QVERIFY(other.setAppleMenuOption("recentApplications", 99));
     }
     // Extensions Manager (Lily Hewitt, 2026-11-14): the freedesktop autostart items that apply to
@@ -616,6 +628,60 @@ class DesktopTests : public QObject
         QVERIFY(!search->searching());
         QVERIFY(search->results().isEmpty());
     }
+    void sherlockOffersDataDisksButNotTheSystemsOwnMounts()
+    {
+        // Lily Hewitt, 2026-11-16: Sherlock offered only /run/media drives, so Potato's data disks mounted
+        // from fstab (/mnt/movies, /srv/platinum-dev-4tb) could not be searched. They are offered now,
+        // unchecked; the system's own mounts never are. (Not under /tmp, which is a system folder.)
+        QTemporaryDir root(QCoreApplication::applicationDirPath() + "/sherlock-disks-XXXXXX");
+        QVERIFY(root.isValid());
+        const auto base = root.path();
+        for (const auto *folder : {"home/Inside", "media/USB", "mnt/Movies", "mnt/TV Shows", "data", "again", "subvolume", "ram", "snap"})
+            QVERIFY(QDir().mkpath(base + "/" + folder));
+        {
+            QFile notes(base + "/mnt/Movies/film-notes.txt");
+            QVERIFY(notes.open(QIODevice::WriteOnly));
+            notes.write("credits\n");
+        }
+        const auto escaped = QString(base).replace(" ", "\\040").toUtf8();
+        QFile table(base + "/mountinfo");
+        QVERIFY(table.open(QIODevice::WriteOnly));
+        const auto mount = [&](const QByteArray &point, const QByteArray &kind, const QByteArray &source) {
+            table.write("40 1 8:1 / " + point + " rw,relatime shared:1 - " + kind + " " + source + " rw\n");
+        };
+        mount("/", "btrfs", "/dev/nvme0n1p2");
+        mount("/boot", "vfat", "/dev/nvme0n1p1");
+        mount("/proc", "proc", "proc");
+        mount("/run/media/someone/STICK", "vfat", "/dev/sdx1");
+        mount(escaped + "/subvolume", "btrfs", "/dev/nvme0n1p2"); // A subvolume of the system's disk.
+        mount(escaped + "/home/Inside", "ext4", "/dev/sdb1");       // Inside the home folder: searched with it.
+        mount(escaped + "/media/USB", "vfat", "/dev/sdc1");         // Listed as a drive already.
+        mount(escaped + "/ram", "tmpfs", "tmpfs");
+        mount(escaped + "/snap", "squashfs", "/dev/loop3");
+        mount(escaped + "/again", "btrfs", "/dev/sdd1");             // The same disk twice: offered once.
+        mount(escaped + "/mnt/Movies", "ntfs3", "/dev/sda2");
+        mount((escaped + "/mnt/TV Shows").replace(" ", "\\040"), "ntfs3", "/dev/sdb2");
+        mount(escaped + "/data", "btrfs", "/dev/sdd1");
+        table.close();
+        FileSearch search(base + "/home", "Hard Disk", {base + "/media"}, nullptr, table.fileName());
+        QCOMPARE(search.dataDisks(), QStringList({base + "/data", base + "/mnt/Movies", base + "/mnt/TV Shows"}));
+        QStringList names;
+        for (const auto &volume : search.volumes())
+        {
+            names << volume.toMap().value("name").toString();
+            if (names.size() > 1) QVERIFY(!volume.toMap().value("on").toBool());
+        }
+        QCOMPARE(names, QStringList({"Hard Disk", "USB", "data", "Movies", "TV Shows"}));
+        search.setVolumeOn(base + "/home", false);
+        search.setVolumeOn(base + "/mnt/Movies", true);
+        search.search("film", false);
+        QTRY_VERIFY(!search.searching());
+        QCOMPARE(search.results().size(), 1);
+        QCOMPARE(search.location(base + "/mnt/Movies/film-notes.txt").first().toMap().value("name").toString(), QString("Movies"));
+        // Without a mount table, only the drives.
+        FileSearch plain(base + "/home", "Hard Disk", {base + "/media"}, nullptr, QString());
+        QCOMPARE(plain.volumes().size(), 2);
+    }
     void systemProfilerShowsTheComputer()
     {
         // Apple System Profiler, as 9.2.2's (captured 2026-11-15): System Profile's overviews and
@@ -690,6 +756,42 @@ class DesktopTests : public QObject
         click(item("profiler-tab-devices"));
         QTRY_VERIFY(item("profiler-devices")->isVisible() && item("profiler-disk-sdz"));
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/system-profiler-devices.png"));
+    }
+    void systemProfilerNamesABuiltComputerAndFindsEncryptedVolumes()
+    {
+        // A computer built from parts (Potato, 2026-11-16): its firmware says "System manufacturer
+        // System Product Name", so the profiler names the motherboard instead. An encrypted disk's
+        // volume is mounted from /dev/mapper/cryptroot, a holder of its partition, and is still its.
+        QTemporaryDir root;
+        const auto write = [&](const QString &name, const QByteArray &text) {
+            QDir().mkpath(QFileInfo(root.filePath(name)).path());
+            QFile file(root.filePath(name));
+            return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
+        };
+        QVERIFY(write("sys/class/dmi/id/product_name", "System Product Name\n"));
+        QVERIFY(write("sys/class/dmi/id/sys_vendor", "System manufacturer\n"));
+        QVERIFY(write("sys/class/dmi/id/board_name", "EXAMPLE B350 BOARD\n"));
+        QVERIFY(write("sys/class/dmi/id/board_vendor", "Example Boards Inc.\n"));
+        QVERIFY(write("sys/block/sdz/size", "500118192\n"));
+        QVERIFY(write("sys/block/sdz/sdz1/partition", "1\n"));
+        QVERIFY(write("sys/block/sdz/sdz2/partition", "2\n"));
+        QVERIFY(write("sys/block/sdz/sdz2/holders/dm-0", ""));
+        QVERIFY(write("sys/block/dm-0/dm/name", "cryptroot\n"));
+        QVERIFY(write("sys/block/dm-0/holders/dm-1", "")); // LVM inside the encrypted volume.
+        QVERIFY(write("sys/block/dm-1/dm/name", "vg-home\n"));
+        QVERIFY(write("sys/block/sdza/size", "500118192\n")); // Not sdz's, though its name begins the same.
+        QVERIFY(write("sys/block/sdza/sdza1/partition", "1\n"));
+        SystemProfile profile(root.path());
+        const auto hardware = profile.profile().value("hardware").toMap();
+        QCOMPARE(hardware.value("vendor").toString(), QString("Example Boards Inc."));
+        QCOMPARE(hardware.value("model").toString(), QString("EXAMPLE B350 BOARD"));
+        QCOMPARE(profile.devices("sdz"), QStringList({"/dev/sdz", "/dev/sdz1", "/dev/sdz2", "/dev/dm-0", "/dev/mapper/cryptroot",
+                                                      "/dev/dm-1", "/dev/mapper/vg-home"}));
+        QCOMPARE(profile.devices("sdza"), QStringList({"/dev/sdza", "/dev/sdza1"}));
+        // A maker's own names are kept; a placeholder vendor alone is left out.
+        QVERIFY(write("sys/class/dmi/id/product_name", "Example Handheld 1\n"));
+        QCOMPARE(profile.profile().value("hardware").toMap().value("model").toString(), QString("Example Handheld 1"));
+        QVERIFY(profile.profile().value("hardware").toMap().value("vendor").toString().isEmpty());
     }
     void favoritesAreAddedAndListedInTheAppleMenu()
     {
@@ -787,6 +889,10 @@ class DesktopTests : public QObject
         QVERIFY(window); QTRY_VERIFY(window->isVisible());
         auto *empty = window->findChild<QQuickItem *>("launcher-empty");
         QVERIFY(empty); QVERIFY(empty->isVisible());
+        // The hint lies inside the white pane (it was centred on the empty grid's 16 px strip, its first line cut off).
+        QTRY_VERIFY(empty->height() > 20);
+        QVERIFY(empty->parentItem());
+        QVERIFY(empty->y() >= 0 && empty->y() + empty->height() <= empty->parentItem()->height());
         // The Applications window's Add To Launcher: once, named as the application; never the desktop's own.
         QVERIFY(manager.addApplicationToLauncher("example-paint.desktop"));
         QVERIFY(!manager.addApplicationToLauncher("example-paint.desktop"));
@@ -818,7 +924,7 @@ class DesktopTests : public QObject
         QTRY_VERIFY(visualItem(window, "launcher-item-Example Paint"));
         QTRY_VERIFY(visualItem(window, "launcher-item-report.txt"));
         QTRY_VERIFY(!empty->isVisible());
-        // With the Launcher in front, File has Open Launcher Items.
+        // With the Launcher in front, File has Add Application… and Open Launcher Items.
         QVariant fileMenu;
         QVariantList bar;
         QMetaObject::invokeMethod(desktop, "makeBarEntries", Q_RETURN_ARG(QVariant, fileMenu));
@@ -831,6 +937,8 @@ class DesktopTests : public QObject
         QStringList commands;
         for (const auto &e : fileMenu.toList()) commands << e.toMap().value("text").toString();
         QVERIFY2(commands.contains("Open Launcher Items"), qPrintable(commands.join(", ")));
+        QVERIFY2(commands.indexOf("Add Application…") >= 0 && commands.indexOf("Add Application…") < commands.indexOf("Open Launcher Items"),
+                 qPrintable(commands.join(", ")));
         // A gone item says so; an alias from anywhere but the Launcher Items folder opens nothing.
         QSignalSpy errors(&manager, &NativeManager::errorOccurred);
         QVERIFY(QFile::remove(root.filePath("Desktop/report.txt")));
@@ -2440,6 +2548,47 @@ class DesktopTests : public QObject
         const auto own = profile.filePath("assets/apple-menu.png");
         QVERIFY(picture(own, Qt::blue));
         QCOMPARE(AppearanceSettings(profile.path()).menuEmblem(), QUrl::fromLocalFile(own));
+    }
+    void theBlackAppleIsImportedElseTheColourAppleFilledBlack()
+    {
+        // Apple Menu Icon ▸ Black (Lily Hewitt, 2026-11-16): System 6's solid Apple, which Asset Importer
+        // takes from the System file's black-and-white icon; without it, the colour Apple's shape in black.
+        QTemporaryDir data, profile;
+        const auto previous = qgetenv("XDG_DATA_HOME");
+        qputenv("XDG_DATA_HOME", data.path().toUtf8());
+        const auto restore = qScopeGuard([&] { qputenv("XDG_DATA_HOME", previous); });
+        const auto icons = data.filePath("platinum-reality/assets/icons/");
+        QDir().mkpath(icons);
+        // A colour Apple whose left half is clear.
+        QImage colour(16, 16, QImage::Format_ARGB32);
+        colour.fill(Qt::transparent);
+        for (int y = 0; y < 16; ++y)
+            for (int x = 8; x < 16; ++x)
+                colour.setPixel(x, y, qRgba(255, 0, 0, 255));
+        QVERIFY(colour.save(icons + "apple-menu-16.png"));
+        {
+            AppearanceSettings settings(profile.path());
+            QCOMPARE(settings.menuEmblem(), QUrl::fromLocalFile(icons + "apple-menu-16.png"));
+            const auto black = settings.blackMenuEmblem().toString();
+            QVERIFY(black.startsWith("data:image/png;base64,"));
+            const auto shape = QImage::fromData(QByteArray::fromBase64(black.section(',', 1).toLatin1()), "PNG");
+            QCOMPARE(shape.size(), QSize(16, 16));
+            QCOMPARE(shape.pixel(12, 4), qRgba(0, 0, 0, 255));
+            QCOMPARE(qAlpha(shape.pixel(3, 4)), 0);
+            QSignalSpy changed(&settings, &AppearanceSettings::changed);
+            QVERIFY(settings.setAppleMenuOption("icon", QString("black")));
+            QCOMPARE(changed.count(), 1);
+            QCOMPARE(settings.menuEmblem().toString(), black);
+        }
+        // Remembered, and the imported black-and-white Apple is preferred to the filled shape.
+        QImage imported(16, 16, QImage::Format_ARGB32);
+        imported.fill(Qt::black);
+        QVERIFY(imported.save(icons + "apple-menu-black-16.png"));
+        AppearanceSettings again(profile.path());
+        QCOMPARE(again.appleMenu().value("icon").toString(), QString("black"));
+        QCOMPARE(again.menuEmblem(), QUrl::fromLocalFile(icons + "apple-menu-black-16.png"));
+        QVERIFY(again.setAppleMenuOption("icon", QString("color")));
+        QCOMPARE(again.menuEmblem(), QUrl::fromLocalFile(icons + "apple-menu-16.png"));
     }
     void appearanceChoicesPersistAndInvalidValuesPreserveTheLastSettings()
     {
@@ -4900,6 +5049,8 @@ class DesktopTests : public QObject
     }
     void stickyNotesAreMadeTypedInSavedRolledUpAndDeleted()
     {
+        // A note's colors are its own, not Qt Quick's palette, which its menu's controls inherit.
+        QTest::failOnWarning(QRegularExpression("Member palette of the object StickyNote"));
         QTemporaryDir root;
         QQuickView view;
         view.resize(1120, 760);
@@ -5058,7 +5209,9 @@ class DesktopTests : public QObject
         QVERIFY(manager.personalAssets().startsWith(root.path()));
         auto *settings = qobject_cast<AppearanceSettings *>(manager.appearance());
         QVERIFY(settings);
-        // An icon imported from the user's own Mac OS 9 (here a stand-in) replaces our drawing.
+        // An icon imported from the user's own Mac OS 9 (here a stand-in) replaces our drawing. The
+        // modules without one are never asked for: Potato's journal had a warning for each (0.49).
+        QTest::failOnWarning(QRegularExpression("Cannot open: .*/icons/(control-strip/|about-logo)"));
         QVERIFY(QDir().mkpath(manager.personalAssets() + "/icons/control-strip"));
         {
             QImage icon(16, 16, QImage::Format_ARGB32);
@@ -5320,6 +5473,18 @@ class DesktopTests : public QObject
             QTRY_VERIFY(imported && imported->isVisible());
             auto *sound = visualItem(view.contentItem(), "control-strip-sound");
             QVERIFY(!visualItem(sound, "control-strip-personal-icon")->isVisible());
+            // One imported later shows once the import finishes.
+            QImage icon(16, 16, QImage::Format_ARGB32);
+            icon.fill(QColor("#993366"));
+            QVERIFY(icon.save(manager.personalAssets() + "/icons/control-strip/sound.png"));
+            QVERIFY(QMetaObject::invokeMethod(manager.assetImporter(), "finished"));
+            QTRY_VERIFY(visualItem(sound, "control-strip-personal-icon")->isVisible());
+            // About This Computer's logo, likewise, only when it was imported.
+            QVERIFY(manager.personalAsset("icons/about-logo.png").isEmpty());
+            QVERIFY(icon.save(manager.personalAssets() + "/icons/about-logo.png"));
+            QCOMPARE(manager.personalAsset("icons/about-logo.png"),
+                     QUrl::fromLocalFile(manager.personalAssets() + "/icons/about-logo.png"));
+            QVERIFY(manager.personalAsset("icons/../icons/about-logo.png").isEmpty());
         }
         QVERIFY(click("control-strip-energy"));
         QTRY_VERIFY(menu->isVisible());

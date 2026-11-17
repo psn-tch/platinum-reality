@@ -103,6 +103,22 @@ class WifiTests final : public QObject
         dns = WifiService::readResolvConf({root.filePath("no-resolved"), root.filePath("stub")});
         QCOMPARE(dns.value("servers").toStringList(), (QStringList{"127.0.0.53"}));
     }
+    // A Wi-Fi 7 card is still Wi-Fi: the kernel refuses it wireless extensions, so Qt's interface
+    // type calls it Ethernet; cfg80211's link to its radio says what it is.
+    void aConnectionIsWifiByItsRadioNotByWirelessExtensions()
+    {
+        QTemporaryDir root;
+        QVERIFY(QDir(root.path()).mkpath("phy0"));
+        QVERIFY(QDir(root.path()).mkpath("net/wlp9s0"));
+        QVERIFY(QDir(root.path()).mkpath("net/enp4s0"));
+        QVERIFY(QFile::link(root.filePath("phy0"), root.filePath("net/wlp9s0/phy80211")));
+        const auto classNet = root.filePath("net");
+        QVERIFY(WifiService::wireless("wlp9s0", classNet));
+        QVERIFY(!WifiService::wireless("enp4s0", classNet));
+        QVERIFY(!WifiService::wireless("missing", classNet));
+        QVERIFY(!WifiService::wireless("", classNet));
+        QVERIFY(!WifiService::wireless("../net/wlp9s0", classNet));
+    }
     void initTestCase()
     {
         QGuiApplication::setFont(classicInterfaceFont());

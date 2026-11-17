@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QRandomGenerator>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QTemporaryDir>
 #include <cstring>
 #include <utility>
@@ -127,6 +128,7 @@ void X11Bridge::start(const QByteArray &waylandSocket)
         cleanRuntime();
         return;
     }
+    writeMainOutput();
     auto environment = QProcessEnvironment::systemEnvironment();
     for (const auto &key : {"DISPLAY", "XAUTHORITY", "WAYLAND_SOCKET", "LD_PRELOAD", "RUST_LOG"})
         environment.remove(key);
@@ -134,6 +136,7 @@ void X11Bridge::start(const QByteArray &waylandSocket)
     environment.insert("WAYLAND_DISPLAY", QDir::isAbsolutePath(display) ? display
                                           : QDir(parentRuntime).filePath(display));
     environment.insert("XDG_RUNTIME_DIR", m_runtime);
+    environment.insert("PLATINUM_X11_MAIN_OUTPUT_FILE", m_runtime + "/main-output");
     // Installed Xwayland, never an app wrapper, started through our launcher
     // that keeps X11 clients on implicit sync (xwayland_implicit_sync.c).
     const auto launcher = QCoreApplication::applicationDirPath() + "/xwayland";
@@ -187,6 +190,22 @@ void X11Bridge::applyTo(QProcessEnvironment &environment) const
         environment.insert("XAUTHORITY", m_authority);
     }
 }
+void X11Bridge::setMainOutput(const QString &name)
+{
+    if (name == m_mainOutput)
+        return;
+    m_mainOutput = name;
+    writeMainOutput();
+}
+void X11Bridge::writeMainOutput() const
+{
+    // The helper reads it at each focus change and output change; replaced whole, never half-written.
+    if (m_runtime.isEmpty())
+        return;
+    QSaveFile file(m_runtime + "/main-output");
+    if (!file.open(QIODevice::WriteOnly) || file.write(m_mainOutput.toUtf8() + '\n') < 0 || !file.commit())
+        qWarning().noquote() << "X11: could not record the main display for X11 applications";
+}
 void X11Bridge::fail(const QString &message)
 {
     m_deadline.stop();
@@ -229,7 +248,7 @@ void X11Bridge::cleanRuntime()
         const bool ownedSocket = match.hasMatch() && match.captured(1).toInt() <= 128;
         // These are the only files we create or ask the pinned helper to create.
         // QFile::remove unlinks a socket; it never traverses a directory.
-        if (name == "authority" || (ownedSocket &&
+        if (name == "authority" || name == "main-output" || (ownedSocket &&
             (!name.endsWith(".lock") || (file.isFile() && file.size() == 0))))
             QFile::remove(file.absoluteFilePath());
     }

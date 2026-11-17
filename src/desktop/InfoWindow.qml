@@ -35,9 +35,10 @@ FocusScope {
         Rectangle {x: 1; y: parent.height - 2; width: parent.width - 2; height: 1; color: "#888"}
     }
     MouseArea {
-        // A click anywhere brings the window forward and gives it the keyboard.
+        // A click anywhere brings the window forward and gives it the keyboard, and stops there:
+        // passed on, it reached the window behind, which came forward instead.
         anchors.fill: parent
-        onPressed: function(mouse) { info.raised(); info.forceActiveFocus(); mouse.accepted = false }
+        onPressed: { info.raised(); info.forceActiveFocus() }
     }
     Item {
         id: titleBar

@@ -20,6 +20,11 @@ failed-before evidence are in `experiments/audio-routing-hardening/README.md`).
   - Choosing a device moves only the streams on the previous default, so applications routed
     elsewhere stay put.
   - It waits up to two seconds for the session manager to apply the new default or profile.
+  - **Screens:** each connected HDMI/DisplayPort screen is its own output, named after the screen
+    ("TOSHIBA-TV (Display)"), in the panel and the Control Strip's Sound Source menu. A graphics
+    card plays through one port at a time, so choosing another screen switches the card's profile
+    to that port, then makes its new output the default and moves the playing streams there.
+    PipeWire's pactl gives a sink no card number, so its card comes from `device.name`.
   - It runs in its own process group with a 2 MiB reply cap.
 - **Audio server:** the login session names it (`PULSE_SERVER`). When Platinum Reality runs as a
   window inside another desktop, the helper falls back to the user's own
@@ -28,7 +33,7 @@ failed-before evidence are in `experiments/audio-routing-hardening/README.md`).
 
 ## Tests
 
-- **`audio-controls`** (22): Python with fake `pactl`, including the fallback to the user's own
+- **`audio-controls`** (25): Python with fake `pactl`, including the fallback to the user's own
   audio socket.
 - **`audio-service`** and **`sound-integration`:** offscreen QML with fake helpers. Screenshots
   are in `build/artifacts/audio-service/`.

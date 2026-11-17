@@ -39,12 +39,20 @@ int add(const QString &where, const QList<std::pair<QString, QString>> &items, i
             std::any_of(existing.cbegin(), existing.cend(),
                         [&](const QVariant &f) { return f.toMap().value("target").toString() == target; }))
             continue;
-        // A name is a single file name: never a path, never hidden.
-        auto base = QString(givenName).replace('/', '-').trimmed();
-        while (base.startsWith('.'))
-            base.remove(0, 1);
+        // A name is a single file name: never a path, never hidden, also for a dot file's own name
+        // (a hidden alias is never listed, so it was added again each time).
+        const auto plain = [](QString name)
+        {
+            name = name.replace('/', '-').trimmed();
+            while (name.startsWith('.'))
+                name.remove(0, 1);
+            return name;
+        };
+        auto base = plain(givenName);
         if (base.isEmpty())
-            base = item.fileName().isEmpty() ? QString("Hard Disk") : item.fileName();
+            base = plain(item.fileName());
+        if (base.isEmpty())
+            base = item.fileName().isEmpty() ? QString("Hard Disk") : QString("Alias");
         auto name = base;
         for (int n = 2; QFileInfo(where + "/" + name).exists() || QFileInfo(where + "/" + name).isSymLink(); ++n)
             name = base + " " + QString::number(n);

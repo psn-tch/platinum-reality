@@ -20,9 +20,14 @@ result; the Find menu). Captures: canonical `build/artifacts/sammy-922-reference
   Contents the text of files up to 4 MB with no NUL in their first kilobyte. Results arrive in batches
   every 150 ms; a new search or closing the window cancels the old one. At most 1000 are listed.
 - **Disks:** the Finder's disk (the workspace, named as on the desktop), checked, and each mounted
-  drive (`FinderPlaces::volumes`), unchecked.
+  drive (`FinderPlaces::volumes`), unchecked. In the whole session (`--whole-computer`) also each data
+  disk mounted from fstab, unchecked, named by its label (Lily Hewitt, 2026-11-16: Potato's /mnt/movies,
+  /mnt/tvshows, /mnt/overflow and /srv/platinum-dev-4tb). `FileSearch::dataDisks` reads
+  /proc/self/mountinfo: a disk filesystem (/dev/…, not a loop device) of a kind that holds files, never
+  /, /boot, /efi, /usr, /var, /opt, /run, /tmp and the like, nor anything on the root filesystem's
+  device (btrfs subvolumes), nor the home folder or a mount inside it; each disk once.
 
 While Sherlock is in front its Find menu offers Find Files (⌘F) and Find by Content (⌘G).
 Not done: the Internet and People commands (no such channels), Index Volumes, Custom
 searches and Find Similar Files.
-Tests: `DesktopTests::sherlockFindsItemsByNameAndContents`, `NativeTests::finderFindOpensSherlock`.
+Tests: `DesktopTests::sherlockFindsItemsByNameAndContents`, `DesktopTests::sherlockOffersDataDisksButNotTheSystemsOwnMounts`, `NativeTests::finderFindOpensSherlock`.

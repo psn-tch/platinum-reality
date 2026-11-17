@@ -185,6 +185,47 @@ void removeCreatedStage(const QString &p)
     else
         QFile::remove(p);
 }
+bool removeBelow(int parent, const char *name, dev_t device, QString &error);
+// Moves an item to Trash or back, which may be on another disk. g_file_move copies a file across
+// disks but refuses a folder ("Can't recursively copy directory"): a folder put in the Trash from a
+// flash drive stayed where it was. Such a folder is copied whole beside the target, renamed into
+// place, and only then removed from its disk. If some of it cannot be removed, the copy stays (ok
+// is false, path is the copy): nothing is lost.
+FileResult moveAcrossDisks(const QString &source, const QString &target)
+{
+    const QFileInfo item(source);
+    if (!item.isDir() || item.isSymLink() || FileOperations::sameVolume({source}, QFileInfo(target).absolutePath()))
+        return moveEntry(source, target);
+    if (exists(target))
+        return failure("An item with that name already exists.");
+    const auto stage = QFileInfo(target).absolutePath() + "/.frankenstein-move-" + QUuid::createUuid().toString(QUuid::Id128);
+    GCancellable *token = g_cancellable_new();
+    QString error;
+    const bool copied = copyTree(source, stage, token, {}, error);
+    g_object_unref(token);
+    if (!copied)
+    {
+        removeCreatedStage(stage);
+        return failure(error);
+    }
+    auto result = moveEntry(stage, target);
+    if (!result.ok)
+    {
+        removeCreatedStage(stage);
+        return result;
+    }
+    const int parent = open(QFile::encodeName(item.absolutePath()).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    struct stat original {};
+    const bool removed = parent >= 0 &&
+                         fstatat(parent, QFile::encodeName(item.fileName()).constData(), &original, AT_SYMLINK_NOFOLLOW) == 0 &&
+                         removeBelow(parent, QFile::encodeName(item.fileName()).constData(), original.st_dev, error);
+    if (parent >= 0)
+        close(parent);
+    if (!removed)
+        return {false, target, "“" + item.fileName() + "” was copied, but not all of it could be removed from its disk" +
+                                   (error.isEmpty() ? QString(".") : ": " + error)};
+    return result;
+}
 } // namespace
 FileOperations::FileOperations(QString root, QString trashBase, QStringList extraRoots)
     : m_root(QFileInfo(root).canonicalFilePath()),
@@ -374,8 +415,8 @@ FileResult FileOperations::trash(const QString &source) const
         "\n");
     if (!metadata.commit())
         return failure(metadata.errorString());
-    auto result = moveEntry(source, target);
-    if (!result.ok)
+    auto result = moveAcrossDisks(source, target);
+    if (!result.ok && !exists(target))
         QFile::remove(info);
     return result;
 }
@@ -396,7 +437,7 @@ FileResult FileOperations::restore(const QString &trashedPath) const
     }
     if (!writableEntry(target) || !QFileInfo(QFileInfo(target).absolutePath()).isDir())
         return failure("The original folder is unavailable or outside the workspace.");
-    auto result = moveEntry(trashedPath, target);
+    auto result = moveAcrossDisks(trashedPath, target);
     if (result.ok)
         QFile::remove(info);
     return result;

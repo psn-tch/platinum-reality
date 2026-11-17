@@ -4,7 +4,8 @@ import QtQuick.Controls
 // Apple Menu Options, a panel of the Control Panels window, laid out as 9.2.2's (captured in the
 // reference VM, 2026-11-12): Submenus On or Off, each with a small picture of a menu, and
 // Remember recently used items. Ours remembers applications only (there are no recent documents or
-// servers to count), from 1 to 99, and remembering off records nothing new. Saved in
+// servers to count), from 1 to 99, and remembering off records nothing new. Apple Menu Icon is ours,
+// not 9.2.2's (Lily Hewitt, 2026-11-16): the colour Apple or System 6's black one. Saved in
 // appearance.json (AppearanceSettings.appleMenu); the Apple menu follows it at once.
 Item {
     id: panel
@@ -121,6 +122,38 @@ Item {
                 text: panel.options.rememberRecent === false
                       ? "Recent Applications is left out of the Apple menu, and nothing new is remembered."
                       : "The Apple menu's Recent Applications lists this many, newest first."
+            }
+        }
+        PlatinumGroup {
+            title: "Apple Menu Icon"
+            Row {
+                spacing: 36
+                Repeater {
+                    model: [{ value: "color", label: "Color", picture: panel.settings.colorMenuEmblem },
+                            { value: "black", label: "Black", picture: panel.settings.blackMenuEmblem }]
+                    Row {
+                        required property var modelData
+                        spacing: 10
+                        PlatinumRadioButton {
+                            objectName: "apple-menu-icon-" + parent.modelData.value
+                            autoExclusive: false
+                            text: parent.modelData.label
+                            anchors.verticalCenter: parent.verticalCenter
+                            readonly property string value: parent.modelData.value
+                            checked: (panel.options.icon || "color") === value
+                            onClicked: { checked = Qt.binding(function() { return (panel.options.icon || "color") === value })
+                                         panel.settings.setAppleMenuOption("icon", value) }
+                        }
+                        Image {
+                            width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter
+                            source: parent.modelData.picture; smooth: false; fillMode: Image.PreserveAspectFit
+                        }
+                    }
+                }
+            }
+            Text {
+                width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 11; color: "#444"; textFormat: Text.PlainText
+                text: "Black is the solid Apple of System 6 and of black-and-white screens."
             }
         }
     }

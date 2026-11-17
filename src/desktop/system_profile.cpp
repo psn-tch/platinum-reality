@@ -50,7 +50,39 @@ QString sizeText(qint64 bytes)
     return gb >= 1000 ? QString::number(gb / 1000, 'f', 1) + " TB" : gb >= 10 ? QString::number(qRound(gb)) + " GB"
                                                                               : QString::number(gb, 'f', 1) + " GB";
 }
+// What firmware leaves in the DMI names when the maker did not fill them in (ASUS boards say
+// "System manufacturer" and "System Product Name").
+bool placeholder(const QString &name)
+{
+    static const QStringList placeholders{"system manufacturer", "system product name", "to be filled by o.e.m.",
+                                          "default string", "not applicable", "not specified", "o.e.m.", "oem", "none"};
+    return name.isEmpty() || placeholders.contains(name.toLower());
+}
 } // namespace
+
+QStringList SystemProfile::devices(const QString &disk) const
+{
+    // The disk, its partitions, and what device-mapper makes of them (an encrypted disk's
+    // /dev/mapper/cryptroot, LVM on top of it), as /sys/block lists their holders.
+    QStringList result{"/dev/" + disk};
+    QStringList blocks{"/sys/block/" + disk};
+    for (const auto &partition : QDir(m_root + "/sys/block/" + disk).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+        if (QFileInfo::exists(m_root + "/sys/block/" + disk + "/" + partition + "/partition"))
+        {
+            result << "/dev/" + partition;
+            blocks << "/sys/block/" + disk + "/" + partition;
+        }
+    for (qsizetype i = 0; i < blocks.size() && blocks.size() < 64; ++i)
+        for (const auto &holder : QDir(m_root + blocks.at(i) + "/holders").entryList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::Name))
+            if (holder.startsWith("dm-") && !result.contains("/dev/" + holder))
+            {
+                result << "/dev/" + holder;
+                if (const auto name = read("/sys/block/" + holder + "/dm/name"); !name.isEmpty())
+                    result << "/dev/mapper/" + name;
+                blocks << "/sys/block/" + holder;
+            }
+    return result;
+}
 
 QVariantMap SystemProfile::profile() const
 {
@@ -77,8 +109,16 @@ QVariantMap SystemProfile::profile() const
             processor = line.section(':', 1).trimmed();
     }
     const auto khz = read("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").toLongLong();
-    result.insert("hardware", QVariantMap{{"model", read("/sys/class/dmi/id/product_name")},
-                                          {"vendor", read("/sys/class/dmi/id/sys_vendor")},
+    // A computer built from parts has only its motherboard's names.
+    auto model = read("/sys/class/dmi/id/product_name"), vendor = read("/sys/class/dmi/id/sys_vendor");
+    if (placeholder(model))
+    {
+        model = placeholder(read("/sys/class/dmi/id/board_name")) ? QString() : read("/sys/class/dmi/id/board_name");
+        vendor = placeholder(read("/sys/class/dmi/id/board_vendor")) ? QString() : read("/sys/class/dmi/id/board_vendor");
+    }
+    else if (placeholder(vendor))
+        vendor.clear();
+    result.insert("hardware", QVariantMap{{"model", model}, {"vendor", vendor},
                                           {"processor", processor}, {"cores", cores},
                                           {"speed", khz > 0 ? QString::number(khz / 1000) + " MHz" : QString()}});
     // Network: each interface that is up, but not the loopback.
@@ -124,10 +164,11 @@ QVariantMap SystemProfile::profile() const
             continue;
         QVariantList volumes;
         QStringList seen;
+        const auto own = devices(name);
         for (const auto &volume : mounted)
         {
             const auto device = QString::fromUtf8(volume.device());
-            if (!device.startsWith("/dev/" + name) || seen.contains(device))
+            if (!own.contains(device) || seen.contains(device))
                 continue;
             seen << device;
             const auto label = volume.name().isEmpty() ? (volume.rootPath() == "/" ? QString("System") : QDir(volume.rootPath()).dirName())

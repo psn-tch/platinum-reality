@@ -611,9 +611,11 @@ Rectangle {
         if(kind==="app-file")return [{text:"Close Window",key:"⌘W",action:"close-active-window",name:"file-close-window",
             id:manager.desktopActive ? currentShellWindow() : manager.activeWindowId,
             enabled:manager.desktopActive ? canCloseShellWindow() : manager.canCloseActiveWindow}]
-            // With the Launcher in front, its items' folder, where they are rearranged or removed.
+            // With the Launcher in front: the Applications window, whose Add To Launcher adds one (Lily
+            // Hewitt, 2026-11-16: no way to add from here), and its items' folder, to rearrange or remove them.
             .concat(manager.desktopActive && launcherWindow.visible && launcherWindow.front
-                    ? [{separator:true,action:"separator"},{text:"Open Launcher Items",action:"launcher-items",name:"file-launcher-items"}] : [])
+                    ? [{separator:true,action:"separator"},{text:"Add Application…",action:"applications",name:"file-launcher-add-application"},
+                       {text:"Open Launcher Items",action:"launcher-items",name:"file-launcher-items"}] : [])
         if(kind==="sherlock-find")return [
             {text:"Find Files",key:"⌘F",action:"sherlock-files",name:"sherlock-find-files"},
             {text:"Find by Content",key:"⌘G",action:"sherlock-contents",name:"sherlock-find-contents"}]
@@ -1411,28 +1413,26 @@ Rectangle {
                 MouseArea {
                     objectName:"title-bar-"+record.id
                     anchors.fill: parent
-                    // Two clicks: WindowShade, at once. A third: the shade rolls back and the window
-                    // fills the screen (or returns to where it was).
-                    property double doubleClickAt:0;property bool shadedByDoubleClick:false
+                    // Two clicks: WindowShade, at once. A right-click (Lily Hewitt, 2026-11-16; it was a
+                    // third click): the window fills the screen, or returns to where it was.
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onPressed: function(mouse) {
                         manager.activate(record.id)
-                        if(doubleClickAt && Date.now()-doubleClickAt<=Qt.styleHints.mouseDoubleClickInterval){
-                            doubleClickAt=0
-                            if(shadedByDoubleClick)manager.shade(record.id)
+                        if(mouse.button===Qt.RightButton){
                             manager.fillScreen(record.id,mapToItem(desktop,mouse.x,mouse.y))
                             return
                         }
                         manager.beginWindowMove(record.id,mapToItem(desktop,mouse.x,mouse.y))
                     }
                     // Released at the very bottom of the screen, a Finder window becomes a pop-up.
-                    onReleased:function(mouse){manager.finishWindowMove(record.id)
+                    onReleased:function(mouse){if(mouse.button!==Qt.LeftButton)return
+                        manager.finishWindowMove(record.id)
                         manager.dropAtScreenBottom(record.id,mapToItem(desktop,mouse.x,mouse.y))}
                     onCanceled:manager.finishWindowMove(record.id,false)
-                    onDoubleClicked: {
+                    onDoubleClicked:function(mouse){
+                        if(mouse.button!==Qt.LeftButton)return
                         manager.finishWindowMove(record.id,false)
-                        doubleClickAt=Date.now()
-                        shadedByDoubleClick=record.canShade && desktop.appearance.doubleClickCollapse
-                        if(shadedByDoubleClick)manager.shade(record.id)
+                        if(record.canShade && desktop.appearance.doubleClickCollapse)manager.shade(record.id)
                     }
                 }
                 Rectangle {
@@ -2342,7 +2342,7 @@ Rectangle {
             for(let y=0;y<height;y+=2){c.fillRect(0,y,1,1);c.fillRect(width-1,y,1,1)}}
     }
     ControlStrip {id:desktopControlStrip;z:8000;sessionManager:manager;settings:desktop.appearance;openModule:desktop.stripModule;zoom:desktop.barScale
-        personalFolder:manager.personalAssets
+        personalFolder:manager.personalAssets;personalIcons:manager.personalStripIcons
         extraModules:manager.statusItems ? manager.statusItems.items.map(function(i){return {command:"status:"+i.key,name:i.title,icon:i.icon,statusId:i.id}}) : []
         onModuleRequested:function(module,anchor){desktop.openStripModule(module,anchor)}
         // Sound Volume's slider sets the level through Quick Controls, unmuting first.

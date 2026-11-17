@@ -141,9 +141,14 @@ class AudioControls:
                 if isinstance(channel, dict) and type(channel.get("value")) is int and channel["value"] >= 0:
                     levels.append(channel["value"])
         card = row.get("card")
+        card_name = properties.get("device.name")
+        port = row.get("active_port")
         return {"name": device_name, "index": device_index,
                 "description": label(row.get("description"), device_name),
                 "card": card if type(card) is int and 0 <= card < 4294967295 else -1,
+                # PipeWire's pactl reports no "card"; its card is named in the properties instead.
+                "cardName": card_name if isinstance(card_name, str) and re.fullmatch(r"[A-Za-z0-9_.:+-]{1,512}", card_name) else "",
+                "port": port if isinstance(port, str) else "",
                 "muted": row.get("mute") is True,
                 "volume": min(100, round(sum(levels) / len(levels) * 100 / 65536)) if levels else -1,
                 "bluetooth": properties.get("device.bus") == "bluetooth" or device_name.startswith("bluez_"),
@@ -171,7 +176,39 @@ class AudioControls:
             active = active.get("name", "")
         return {"name": name(row.get("name")), "index": index(row.get("index")),
                 "description": label(properties.get("device.description"), row["name"]),
-                "activeProfile": active if isinstance(active, str) else "", "profiles": choices}
+                "activeProfile": active if isinstance(active, str) else "", "profiles": choices,
+                "screens": AudioControls.screens(row, choices)}
+
+    @staticmethod
+    def screens(row, profiles):
+        """Connected HDMI/DisplayPort screens, named after the screen. A graphics card's sound
+        plays through one port at a time (its profile), so the others have no output until chosen."""
+        ports = row.get("ports", [])
+        if isinstance(ports, dict):
+            ports = [{**data, "name": key} for key, data in ports.items() if isinstance(data, dict)]
+        if not isinstance(ports, list):
+            return []
+        available = [profile["name"] for profile in profiles if profile["available"]]
+        found = []
+        for port in ports[:16]:
+            if not isinstance(port, dict) or port.get("availability") == "not available":
+                continue
+            properties = port.get("properties", {})
+            if not isinstance(properties, dict):
+                properties = {}
+            if port.get("type") not in ("HDMI", "DisplayPort") and properties.get("port.type") not in ("hdmi", "displayport"):
+                continue
+            listed = port.get("profiles", [])
+            listed = [profile for profile in listed if profile in available] if isinstance(listed, list) else []
+            try:
+                port_name = name(port.get("name"))
+            except ValueError:
+                continue
+            if listed:  # Its first profile is plain stereo, as the port lists them.
+                found.append({"port": port_name, "profiles": listed,
+                              "description": label(properties.get("device.product.name"),
+                                                   label(port.get("description"), port_name)) + " (Display)"})
+        return found
 
     def snapshot(self):
         try:
@@ -183,6 +220,23 @@ class AudioControls:
         for collection in (outputs, inputs, cards):
             if len({row["name"] for row in collection}) != len(collection) or len({row["index"] for row in collection}) != len(collection):
                 raise RuntimeError("The sound service reported ambiguous devices.")
+        by_name = {card["name"]: card for card in cards}
+        for row in outputs + inputs:
+            if row["card"] < 0 and row["cardName"] in by_name:
+                row["card"] = by_name[row["cardName"]]["index"]
+        for card in cards:
+            for screen in card["screens"]:
+                playing = next((row for row in outputs if row["card"] == card["index"] and row["port"] == screen["port"]
+                                and card["activeProfile"] in screen["profiles"]), None)
+                if playing is not None:
+                    playing["description"] = screen["description"]
+                elif not any(row["name"] == card["name"] + ":" + screen["profiles"][0] for row in outputs):
+                    # Not playing yet: choosing it switches the card to this screen's port.
+                    outputs.append({"name": card["name"] + ":" + screen["profiles"][0], "index": -1,
+                                    "description": screen["description"], "card": card["index"],
+                                    "cardName": card["name"], "port": screen["port"], "muted": False, "volume": -1,
+                                    "bluetooth": False, "monitor": False,
+                                    "switch": {"card": card["name"], "profile": screen["profiles"][0]}})
         return {"outputs": sorted(outputs, key=lambda row: row["description"].casefold()),
                 "inputs": sorted((row for row in inputs if not row["monitor"]), key=lambda row: row["description"].casefold()),
                 "cards": cards, "defaultOutput": self.default("sink"), "defaultInput": self.default("source")}
@@ -208,6 +262,16 @@ class AudioControls:
         for stream in playing:
             if type(stream.get(field)) is int and stream[field] == previous["index"]:
                 moves.append(index(stream.get("index")))
+        switch = selected.get("switch")
+        if switch:
+            # A screen's port has no output until its card plays there; the old one goes away.
+            self.run(["set-card-profile", switch["card"], switch["profile"]])
+            def screen_output(state):
+                return next((row for row in state[collection] if not row.get("switch") and row["card"] == selected["card"]
+                             and row["port"] == selected["port"]), None)
+            state = self.settled(lambda state: screen_output(state) is not None,
+                                 "That display's sound could not be turned on. Refresh and try again.")
+            target = screen_output(state)["name"]
         self.run(["set-default-" + endpoint, target])
         failed = 0
         for stream in moves:

@@ -38,11 +38,11 @@ FocusScope {
     // Body, then its darker shade (the front note's border, strip pattern and boxes), as 9.2.2's
     // Stickies draws them (measured in the reference VM, 2026-11-04: yellow, green, pink; purple,
     // blue and gray by the same rule).
-    readonly property var palette: ({
+    readonly property var colorSets: ({
         yellow: ["#ffff99", "#ffcc00"], blue: ["#ccffff", "#66cccc"], green: ["#ccffcc", "#66ff66"],
         pink: ["#ffcccc", "#ff9999"], purple: ["#ccccff", "#9999ff"], gray: ["#eeeeee", "#aaaaaa"]
     })
-    readonly property var colors: palette[noteColor] || palette.yellow
+    readonly property var colors: colorSets[noteColor] || colorSets.yellow
     readonly property int fontSize: noteTextSize === "small" ? 11 : noteTextSize === "large" ? 16 : 13
     function bringForward() { notes.raise(noteId); raised() }
     ShellWindowFocus { id: focusTracker; window: note }
@@ -71,8 +71,7 @@ FocusScope {
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         onPressed: function(mouse) {
             note.bringForward(); note.forceActiveFocus()
-            if (mouse.button === Qt.RightButton) { menu.popup(); mouse.accepted = true }
-            else mouse.accepted = false
+            if (mouse.button === Qt.RightButton) menu.popup()
         }
     }
     Rectangle {

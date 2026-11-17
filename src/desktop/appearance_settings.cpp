@@ -1,4 +1,5 @@
 #include "appearance_settings.hpp"
+#include <QBuffer>
 #include <QDateTime>
 #include <QGuiApplication>
 #include <QStyleHints>
@@ -42,18 +43,16 @@ bool valid(int duration, int x, int y)
 {
     return duration >= 0 && duration <= 1200 && x >= 0 && x <= 65536 && y >= -1 && y <= 65536;
 }
-QUrl localEmblem(const QString &profile)
+QString importedIcons()
 {
-    // The user's own: a picture in the profile, else the rainbow Apple that Asset Importer takes from
-    // their Mac OS 9 System file (<data>/platinum-reality/assets, as the desktop reads its sounds).
     auto data = qEnvironmentVariable("XDG_DATA_HOME");
     if (!QDir::isAbsolutePath(data))
         data = QDir::homePath() + "/.local/share";
-    const auto imported = data + "/platinum-reality/assets/icons/apple-menu";
-    const QStringList candidates{
-        profile + "/assets/apple-menu.png", imported + "-16.png", imported + ".png",
-        QStandardPaths::locate(QStandardPaths::GenericDataLocation,
-                               "icons/NineIcons/places/16/distributor-logo.png")};
+    return data + "/platinum-reality/assets/icons/";
+}
+// The first readable PNG of at most 512 x 512 pixels and 1 MB.
+QUrl firstEmblem(const QStringList &candidates)
+{
     for (const auto &path : candidates)
     {
         if (path.isEmpty() || QFileInfo(path).size() > 1024 * 1024)
@@ -65,6 +64,43 @@ QUrl localEmblem(const QString &profile)
             return QUrl::fromLocalFile(QFileInfo(path).absoluteFilePath());
     }
     return {};
+}
+QUrl localEmblem(const QString &profile)
+{
+    // The user's own: a picture in the profile, else the rainbow Apple that Asset Importer takes from
+    // their Mac OS 9 System file (<data>/platinum-reality/assets, as the desktop reads its sounds).
+    const auto imported = importedIcons() + "apple-menu";
+    return firstEmblem({profile + "/assets/apple-menu.png", imported + "-16.png", imported + ".png",
+                        QStandardPaths::locate(QStandardPaths::GenericDataLocation,
+                                               "icons/NineIcons/places/16/distributor-logo.png")});
+}
+QUrl blackEmblem(const QString &profile, const QUrl &colour)
+{
+    // Apple Menu Icon ▸ Black (Lily Hewitt, 2026-11-16: "the black one thats on like system 6"): the
+    // user's own black picture, else the System file's black-and-white Apple that Asset Importer takes,
+    // else the colour emblem's shape filled black (an import from before that version, or no Apple).
+    const auto imported = importedIcons() + "apple-menu-black";
+    if (const auto own = firstEmblem({profile + "/assets/apple-menu-black.png", imported + "-16.png",
+                                      imported + ".png"});
+        !own.isEmpty())
+        return own;
+    if (!colour.isLocalFile())
+        return colour;
+    QImage image(colour.toLocalFile());
+    if (image.isNull())
+        return colour;
+    image = image.convertToFormat(QImage::Format_ARGB32);
+    for (int y = 0; y < image.height(); ++y)
+    {
+        auto *line = reinterpret_cast<QRgb *>(image.scanLine(y));
+        for (int x = 0; x < image.width(); ++x)
+            line[x] = qAlpha(line[x]) >= 128 ? qRgba(0, 0, 0, 255) : qRgba(0, 0, 0, 0);
+    }
+    QByteArray png;
+    QBuffer buffer(&png);
+    if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG"))
+        return colour;
+    return QUrl("data:image/png;base64," + QString::fromLatin1(png.toBase64()));
 }
 QString absolutePicturePath(QString path)
 {
@@ -108,6 +144,7 @@ const QRegularExpression &monitorName()
 } // namespace
 AppearanceSettings::AppearanceSettings(QString profile, QObject *parent)
     : QObject(parent), m_profile(QDir(profile).absolutePath()), m_emblem(localEmblem(m_profile)),
+      m_blackEmblem(blackEmblem(m_profile, m_emblem)),
       m_wallpaperPath(defaultWallpaperPath())
 {
     m_wallpaper = pictureUrl(m_wallpaperPath);
@@ -181,6 +218,8 @@ AppearanceSettings::AppearanceSettings(QString profile, QObject *parent)
         m_rememberRecent = apple.value("rememberRecent").toBool();
     if (const auto count = apple.value("recentApplications").toInt(-1); count >= 1 && count <= 99)
         m_recentApplications = count;
+    if (const auto icon = apple.value("icon").toString(); icon == "color" || icon == "black")
+        m_appleIcon = icon;
     const auto switcher = object.value("switcher").toObject();
     if (const auto x = switcher.value("x").toInt(-1), y = switcher.value("y").toInt(-1);
         switcher.value("visible").isBool() && x >= 0 && x <= 65536 && y >= 0 && y <= 65536)
@@ -232,7 +271,8 @@ bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x,
                                                                          {"barSize", m_barSize}}},
                                                  {"appleMenu", QJsonObject{{"submenus", m_appleSubmenus},
                                                                            {"rememberRecent", m_rememberRecent},
-                                                                           {"recentApplications", m_recentApplications}}},
+                                                                           {"recentApplications", m_recentApplications},
+                                                                           {"icon", m_appleIcon}}},
                                                  {"switcher", QJsonObject{{"visible", m_switcherVisible},
                                                                           {"x", m_switcherX},
                                                                           {"y", m_switcherY}}}})
@@ -400,29 +440,33 @@ void AppearanceSettings::applyCaretFlash() const
 QVariantMap AppearanceSettings::appleMenu() const
 {
     return {{"submenus", m_appleSubmenus}, {"rememberRecent", m_rememberRecent},
-            {"recentApplications", m_recentApplications}};
+            {"recentApplications", m_recentApplications}, {"icon", m_appleIcon}};
 }
 bool AppearanceSettings::setAppleMenuOption(QString key, QVariant value)
 {
     const auto number = value.toInt();
     const bool whole = value.typeId() != QMetaType::Bool && value.canConvert<int>() && value.toDouble() == number;
     const bool valid = key == "submenus" || key == "rememberRecent" ? value.typeId() == QMetaType::Bool
+                     : key == "icon" ? value.typeId() == QMetaType::QString &&
+                                           (value.toString() == "color" || value.toString() == "black")
                      : key == "recentApplications" && whole && number >= 1 && number <= 99;
     if (!valid)
     {
         emit errorOccurred("That Apple Menu Options setting is not available.");
         return false;
     }
-    const auto previous = std::tuple{m_appleSubmenus, m_rememberRecent, m_recentApplications};
+    const auto previous = std::tuple{m_appleSubmenus, m_rememberRecent, m_recentApplications, m_appleIcon};
     if (key == "submenus")
         m_appleSubmenus = value.toBool();
     else if (key == "rememberRecent")
         m_rememberRecent = value.toBool();
+    else if (key == "icon")
+        m_appleIcon = value.toString();
     else
         m_recentApplications = number;
     if (save(m_duration, m_stripVisible, m_stripCollapsed, m_stripX, m_stripY, m_wallpaperPath, m_wallpaperLayout))
         return true;
-    std::tie(m_appleSubmenus, m_rememberRecent, m_recentApplications) = previous;
+    std::tie(m_appleSubmenus, m_rememberRecent, m_recentApplications, m_appleIcon) = previous;
     return false;
 }
 bool AppearanceSettings::setGeneralOption(QString key, QVariant value)

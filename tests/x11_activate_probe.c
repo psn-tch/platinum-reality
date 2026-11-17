@@ -4,7 +4,7 @@
 //   x11-activate-probe TITLE                    _NET_ACTIVE_WINDOW (come forward)
 //   x11-activate-probe TITLE move|size-br X Y   _NET_WM_MOVERESIZE with button 1 held at root X,Y
 //                                               (a drag on its own title bar or bottom-right edge)
-// Prints "sent 0xWINDOW" or "not-found".
+// Prints "sent 0xWINDOW", "error CODE" or "not-found".
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -97,9 +97,17 @@ int main(int argc, char **argv)
         event.data.data32[0] = 1; // Source: an application.
         event.data.data32[1] = XCB_CURRENT_TIME;
     }
-    xcb_send_event(c, 0, screen->root, XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY,
-                   (const char *)&event);
-    xcb_flush(c);
+    // Checked, so the server has handled the request before this client disconnects: sent and
+    // disconnected at once, Xwayland dropped it now and then and the window manager never saw it
+    // (x11WindowsComeForwardWhenTheirApplicationAsks failed 4 in 10 runs, 2026-11-16).
+    xcb_generic_error_t *error = xcb_request_check(c, xcb_send_event_checked(c, 0, screen->root,
+        XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY, (const char *)&event));
+    if (error) {
+        printf("error %d\n", error->error_code);
+        free(error);
+        xcb_disconnect(c);
+        return 1;
+    }
     printf("sent 0x%x\n", target);
     xcb_disconnect(c);
     return 0;
