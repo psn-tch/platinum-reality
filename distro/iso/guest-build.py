@@ -82,7 +82,7 @@ def main():
         raise RuntimeError('Native pin predates the real installer GUI')
     desktop = profile/'airootfs/home/liveuser/Desktop'
     desktop.mkdir(parents=True)
-    shutil.copyfile(launcher, desktop/'Install Platinum Reality.desktop')
+    shutil.copyfile(launcher, desktop/'Install Platinum Dreams.desktop')
     theme = profile/'airootfs/usr/share/plymouth/themes/platinum-reality'
     # Use the native pin's complete generator: the template has dialog,
     # rotation, scale and bullet substitutions beyond the original four.

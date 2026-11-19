@@ -178,7 +178,7 @@ def drive(guest,password,receipt,remote,key,type_text):
     _,points=gui.wait(guest,'gui-00-desktop','Install',region=gui.SHORTCUT_REGION)
     if len(points)!=1:raise RuntimeError('Actual installer shortcut ambiguous; no launch sent')
     p=points[0];gui.click(guest,p['x'],p['y']);gui.click(guest,p['x'],p['y'])
-    gui.wait(guest,'gui-01-title','Install Platinum Reality Software',region=FULL)
+    gui.wait(guest,'gui-01-title','Install Platinum Dreams Software',region=FULL)
     button(guest,'gui-01-welcome','Continue')
     gui.wait(guest,'gui-02-destination','Destination Disk',region=FULL)
     # The whole "Destination Disk: <name> (<path>) — <size>" line (window at x 110, y 93 on the actual

@@ -3,8 +3,8 @@
 
 iso_name="platinum-reality"
 iso_label="ARCH_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
-iso_publisher="Platinum Reality experimental project"
-iso_application="Platinum Reality Live Desktop (VM prototype)"
+iso_publisher="Platinum Dreams experimental project"
+iso_application="Platinum Dreams Live Desktop (VM prototype)"
 iso_version="$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y.%m.%d)"
 install_dir="arch"
 bootmodes=('bios.syslinux'
@@ -17,7 +17,7 @@ kernel_params_aarch64="clk_ignore_unused pd_ignore_unused arm64.nopauth"
 file_permissions=(
   ["/home/liveuser"]="1000:1000:750"
   ["/home/liveuser/Desktop"]="1000:1000:755"
-  ["/home/liveuser/Desktop/Install Platinum Reality.desktop"]="1000:1000:755"
+  ["/home/liveuser/Desktop/Install Platinum Dreams.desktop"]="1000:1000:755"
   ["/usr/bin/platinum-reality-install"]="0:0:755"
   ["/usr/lib/platinum-reality/installer-engine"]="0:0:644"
   ["/home/liveuser/.profile"]="1000:1000:644"

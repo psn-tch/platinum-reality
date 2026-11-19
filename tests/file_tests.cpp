@@ -1,8 +1,76 @@
+#include <gio/gio.h>
 #include "finder/file_operations.hpp"
+#include "finder/recent_documents.hpp"
 #include <QTemporaryDir>
 #include <QtTest>
+#include <QScopeGuard>
+#include <functional>
+#include <fcntl.h>
 #include <memory>
 #include <sys/stat.h>
+#include <unistd.h>
+
+namespace
+{
+QString mutateAfterCopying;
+std::function<void()> afterCopy, afterPublish;
+QString mutateDuringMoving;
+std::function<void()> duringMove;
+}
+
+extern "C" gboolean __real_g_file_copy(GFile *, GFile *, GFileCopyFlags, GCancellable *,
+                                       GFileProgressCallback, gpointer, GError **);
+extern "C" gboolean __real_g_file_move(GFile *, GFile *, GFileCopyFlags, GCancellable *,
+                                       GFileProgressCallback, gpointer, GError **);
+
+// Execute real GIO operations. These test-only link wrappers place an edit at an exact
+// boundary, without sleeps, large payloads, or a production callback/test bypass.
+extern "C" gboolean __wrap_g_file_copy(GFile *source, GFile *target, GFileCopyFlags flags,
+                                       GCancellable *cancel, GFileProgressCallback progress,
+                                       gpointer data, GError **error)
+{
+    const auto ok = __real_g_file_copy(source, target, flags, cancel, progress, data, error);
+    if (ok && afterCopy)
+    {
+        char *path = g_file_get_path(source);
+        const bool matches = QFile::decodeName(path) == mutateAfterCopying;
+        g_free(path);
+        if (matches)
+        {
+            auto edit = std::move(afterCopy);
+            afterCopy = {};
+            edit();
+        }
+    }
+    return ok;
+}
+
+extern "C" gboolean __wrap_g_file_move(GFile *source, GFile *target, GFileCopyFlags flags,
+                                       GCancellable *cancel, GFileProgressCallback progress,
+                                       gpointer data, GError **error)
+{
+    char *path = g_file_get_path(source);
+    const bool publishing = QFileInfo(QFile::decodeName(path)).fileName().startsWith(".frankenstein-move-");
+    const bool watching = QFile::decodeName(path) == mutateDuringMoving && bool(duringMove);
+    g_free(path);
+    const auto hook = [](goffset current, goffset total, gpointer) {
+        if (current >= total && total > 0 && duringMove)
+        {
+            auto edit = std::move(duringMove);
+            duringMove = {};
+            edit();
+        }
+    };
+    const auto ok = __real_g_file_move(source, target, flags, cancel, watching ? hook : progress,
+                                      watching ? nullptr : data, error);
+    if (ok && publishing && afterPublish)
+    {
+        auto edit = std::move(afterPublish);
+        afterPublish = {};
+        edit();
+    }
+    return ok;
+}
 
 class FileTests : public QObject
 {
@@ -14,6 +82,125 @@ class FileTests : public QObject
         QCOMPARE(f.write(bytes), bytes.size());
     }
   private slots:
+    void recentDocumentsKeepOrderAndTrimOnlyAliases()
+    {
+        QTemporaryDir root;
+        const auto profile = root.filePath("profile");
+        QDir().mkpath(root.filePath("other"));
+        const auto first = root.filePath("Report.txt"), second = root.filePath("other/Report.txt"),
+                   hidden = root.filePath(".env");
+        for (const auto &path : {first, second, hidden}) write(path, "document contents");
+        QVERIFY(RecentDocuments::remember(profile, first, 2));
+        QVERIFY(RecentDocuments::remember(profile, second, 2));
+        auto list = RecentDocuments::list(profile);
+        QCOMPARE(list.size(), 2);
+        QCOMPARE(list[0].toMap().value("target").toString(), second);
+        QVERIFY(list[0].toMap().value("link") != list[1].toMap().value("link"));
+        QVERIFY(RecentDocuments::remember(profile, first, 2));
+        const auto trimmedAlias = RecentDocuments::list(profile)[1].toMap().value("link").toString();
+        QVERIFY(RecentDocuments::remember(profile, hidden, 2));
+        list = RecentDocuments::list(profile);
+        QCOMPARE(list.size(), 2);
+        QCOMPARE(list[0].toMap().value("name").toString(), QString(".env"));
+        QVERIFY(!QFileInfo(list[0].toMap().value("link").toString()).fileName().startsWith('.'));
+        QCOMPARE(list[1].toMap().value("target").toString(), first);
+        QVERIFY(!QFileInfo(trimmedAlias).isSymLink());
+        for (const auto &path : {first, second, hidden}) QVERIFY(QFileInfo(path).isFile());
+    }
+    void recentDocumentsCanBeForgottenWithoutDeletingDocuments()
+    {
+        QTemporaryDir root;
+        const auto profile = root.filePath("profile"), first = root.filePath("One"), second = root.filePath("Two");
+        write(first, "one"); write(second, "two");
+        QVERIFY(RecentDocuments::remember(profile, first, 10));
+        QVERIFY(RecentDocuments::remember(profile, second, 10));
+        QVERIFY(QFile::remove(RecentDocuments::list(profile)[1].toMap().value("link").toString()));
+        QCOMPARE(RecentDocuments::list(profile).size(), 1);
+        // A missing target remains visible but disabled, and its dangling alias can be cleared.
+        QVERIFY(QFile::remove(second));
+        const auto list = RecentDocuments::list(profile);
+        QCOMPARE(list.size(), 1);
+        QVERIFY(!list[0].toMap().value("exists").toBool());
+        const auto custom = RecentDocuments::folder(profile) + "/Keep Me";
+        write(custom, "custom file");
+        QVERIFY(RecentDocuments::clear(profile));
+        QVERIFY(RecentDocuments::list(profile).isEmpty());
+        QVERIFY(!QFileInfo(list[0].toMap().value("link").toString()).isSymLink());
+        QVERIFY(QFileInfo(first).isFile());
+        QVERIFY(QFileInfo(custom).isFile());
+    }
+    void recentDocumentsRejectInvalidItemsAndRollBackFailedSaves()
+    {
+        QTemporaryDir root;
+        const auto profile = root.filePath("profile"), document = root.filePath("Report");
+        write(document, "report");
+        QVERIFY(!RecentDocuments::remember(profile, document, 0));
+        QVERIFY(!RecentDocuments::remember(profile, document, 100));
+        QVERIFY(!RecentDocuments::remember(profile, root.path(), 10));
+        QVERIFY(!RecentDocuments::remember(profile, root.filePath("missing"), 10));
+        // A directory occupying the JSON path forces a real atomic-save failure.
+        QVERIFY(QDir().mkpath(profile + "/recent-documents.json"));
+        QVERIFY(!RecentDocuments::remember(profile, document, 10));
+        QVERIFY(QDir(RecentDocuments::folder(profile)).entryList(QDir::Files | QDir::System).isEmpty());
+        QVERIFY(QFileInfo(document).isFile());
+    }
+    void recentDocumentsPreserveUserAliasesForTheSameTarget()
+    {
+        QTemporaryDir root;
+        const auto document = root.filePath("Report"), profile = root.filePath("profile");
+        write(document, "contents");
+        QVERIFY(QDir().mkpath(RecentDocuments::folder(profile)));
+        const auto existing = RecentDocuments::folder(profile) + "/My Alias";
+        QVERIFY(QFile::link(document, existing));
+        QVERIFY(RecentDocuments::remember(profile, document, 10));
+        QVERIFY(RecentDocuments::clear(profile));
+        QVERIFY(QFileInfo(existing).isSymLink());
+        // A second alias added after recording must not be mistaken for the managed one.
+        const auto other = root.filePath("other-profile");
+        QVERIFY(RecentDocuments::remember(other, document, 10));
+        const auto managed = RecentDocuments::list(other)[0].toMap().value("link").toString();
+        const auto custom = RecentDocuments::folder(other) + "/ZZZ Custom Alias";
+        QVERIFY(QFile::link(document, custom));
+        QVERIFY(RecentDocuments::clear(other));
+        QVERIFY(!QFileInfo(managed).isSymLink());
+        QVERIFY(QFileInfo(custom).isSymLink());
+        QVERIFY(QFileInfo(document).isFile());
+    }
+    void duplicateKeepsDotfilesHidden()
+    {
+        QTemporaryDir dir;
+        write(dir.filePath(".env"), "private settings");
+        FileOperations ops(dir.path(), dir.filePath("Trash"));
+        const auto copied = ops.duplicate(dir.filePath(".env"));
+        QVERIFY2(copied.ok, qPrintable(copied.error));
+        QCOMPARE(QFileInfo(copied.path).fileName(), QString(".env copy"));
+        QFile content(copied.path);
+        QVERIFY(content.open(QIODevice::ReadOnly));
+        QCOMPARE(content.readAll(), QByteArray("private settings"));
+        const auto again = ops.duplicate(dir.filePath(".env"));
+        QVERIFY2(again.ok, qPrintable(again.error));
+        QCOMPARE(QFileInfo(again.path).fileName(), QString(".env copy 2"));
+        write(dir.filePath(".settings.json"), "{}");
+        const auto withSuffix = ops.duplicate(dir.filePath(".settings.json"));
+        QVERIFY2(withSuffix.ok, qPrintable(withSuffix.error));
+        QCOMPARE(QFileInfo(withSuffix.path).fileName(), QString(".settings copy.json"));
+    }
+    void newDotfilesKeepTheirLeadingDotWhenTheNameAlreadyExists()
+    {
+        QTemporaryDir dir;
+        write(dir.filePath(".env"), "keep this");
+        FileOperations ops(dir.path(), dir.filePath("Trash"));
+        const auto made = ops.createFile(dir.path(), ".env");
+        QVERIFY2(made.ok, qPrintable(made.error));
+        QCOMPARE(QFileInfo(made.path).fileName(), QString(".env 2"));
+        QFile original(dir.filePath(".env"));
+        QVERIFY(original.open(QIODevice::ReadOnly));
+        QCOMPARE(original.readAll(), QByteArray("keep this"));
+        write(dir.filePath(".settings.json"), "{}");
+        const auto withSuffix = ops.createFile(dir.path(), ".settings.json");
+        QVERIFY2(withSuffix.ok, qPrintable(withSuffix.error));
+        QCOMPARE(QFileInfo(withSuffix.path).fileName(), QString(".settings 2.json"));
+    }
     void duplicateKeepsDocumentAssociationSuffixAndExistingCopies()
     {
         QTemporaryDir dir;
@@ -262,6 +449,192 @@ class FileTests : public QObject
         QVERIFY(QFileInfo::exists(stick.filePath("Photos/2026/beach.jpg")));
         QVERIFY(ops.trashedItems().isEmpty());
         QVERIFY(QDir(home.path() + "/Trash/info").entryList(QDir::Files).isEmpty());
+    }
+    void crossDriveSingleFilePreservesConcurrentEdit_data()
+    {
+        QTest::addColumn<QString>("operation");
+        QTest::addColumn<bool>("published");
+        for (const auto *operation : {"trash", "restore", "move"})
+            for (const bool published : {false, true})
+                QTest::newRow(qPrintable(QString(operation) + (published ? "-published" : "-copying")))
+                    << QString(operation) << published;
+    }
+    void crossDriveSingleFilePreservesConcurrentEdit()
+    {
+        QFETCH(QString, operation);
+        QFETCH(bool, published);
+        QTemporaryDir home;
+        const auto build = QFileInfo(QFile::symLinkTarget("/proc/self/exe")).absolutePath();
+        QTemporaryDir drive(build + "/file-tests-drive-XXXXXX");
+        QVERIFY(home.isValid() && drive.isValid());
+        if (FileOperations::sameVolume({drive.path()}, home.path()))
+            QSKIP("No second writable filesystem for cross-drive single-file checks");
+        auto source = drive.filePath("notes.txt");
+        write(source, "original version");
+        FileOperations ops(home.path(), home.filePath("Trash"), {drive.path()});
+        if (operation == "restore")
+        {
+            const auto initial = ops.trash(source);
+            QVERIFY2(initial.ok, qPrintable(initial.error));
+            source = initial.path;
+        }
+        const auto reset = qScopeGuard([] {
+            duringMove = {}; mutateDuringMoving.clear(); afterCopy = {}; afterPublish = {}; mutateAfterCopying.clear();
+        });
+        bool edited = false;
+        const auto edit = [&] { write(source, "newer version"); edited = true; };
+        if (published)
+            afterPublish = edit;
+        else
+        {
+            mutateDuringMoving = mutateAfterCopying = source;
+            duringMove = afterCopy = edit;
+        }
+        const auto result = operation == "restore" ? ops.restore(source) :
+                            operation == "move" ? ops.move(source, home.path()) : ops.trash(source);
+        QVERIFY(edited);
+        QFile latest(source);
+        QVERIFY2(latest.open(QIODevice::ReadOnly), "A newer individual source file was deleted after copying");
+        QCOMPARE(latest.readAll(), QByteArray("newer version"));
+        QVERIFY(!result.ok);
+        if (published)
+        {
+            QFile copy(result.path);
+            QVERIFY(copy.open(QIODevice::ReadOnly));
+            QCOMPARE(copy.readAll(), QByteArray("original version"));
+        }
+    }
+    void crossDriveSingleFilesAndLinksMoveWithoutFollowingTargets()
+    {
+        QTemporaryDir home;
+        const auto build = QFileInfo(QFile::symLinkTarget("/proc/self/exe")).absolutePath();
+        QTemporaryDir drive(build + "/file-tests-drive-XXXXXX");
+        QVERIFY(home.isValid() && drive.isValid());
+        if (FileOperations::sameVolume({drive.path()}, home.path()))
+            QSKIP("No second writable filesystem for cross-drive file/link checks");
+        write(drive.filePath("notes.txt"), "contents");
+        FileOperations ops(home.path(), home.filePath("Trash"), {drive.path()});
+        const auto trash = ops.trash(drive.filePath("notes.txt"));
+        QVERIFY2(trash.ok, qPrintable(trash.error));
+        const auto restore = ops.restore(trash.path);
+        QVERIFY2(restore.ok, qPrintable(restore.error));
+        QFile content(restore.path);
+        QVERIFY(content.open(QIODevice::ReadOnly));
+        QCOMPARE(content.readAll(), QByteArray("contents"));
+        QVERIFY(QFile::link(drive.filePath("notes.txt"), drive.filePath("alias")));
+        const auto moved = ops.move(drive.filePath("alias"), home.path());
+        QVERIFY2(moved.ok, qPrintable(moved.error));
+        QVERIFY(QFileInfo(moved.path).isSymLink());
+        QCOMPARE(QFileInfo(moved.path).symLinkTarget(), drive.filePath("notes.txt"));
+        QVERIFY(QFileInfo(restore.path).isFile());
+        QVERIFY(!QFileInfo(drive.filePath("alias")).isSymLink());
+    }
+    void crossDriveTrashCanMoveHardLinkedFiles()
+    {
+        QTemporaryDir home;
+        const auto build = QFileInfo(QFile::symLinkTarget("/proc/self/exe")).absolutePath();
+        QTemporaryDir drive(build + "/file-tests-drive-XXXXXX");
+        QVERIFY(home.isValid() && drive.isValid());
+        if (FileOperations::sameVolume({drive.path()}, home.path()))
+            QSKIP("No second writable filesystem for cross-drive hard-link checks");
+        const auto source = drive.filePath("Documents");
+        QVERIFY(QDir().mkdir(source));
+        write(source + "/first.txt", "shared contents");
+        QVERIFY(::link(QFile::encodeName(source + "/first.txt").constData(),
+                       QFile::encodeName(source + "/second.txt").constData()) == 0);
+        QVERIFY(::link(QFile::encodeName(source + "/first.txt").constData(),
+                       QFile::encodeName(drive.filePath("outside.txt")).constData()) == 0);
+        FileOperations ops(home.path(), home.filePath("Trash"), {drive.path()});
+        const auto result = ops.trash(source);
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QVERIFY(!QFileInfo::exists(source));
+        for (const auto &path : {result.path + "/first.txt", result.path + "/second.txt", drive.filePath("outside.txt")})
+        {
+            QFile content(path);
+            QVERIFY(content.open(QIODevice::ReadOnly));
+            QCOMPARE(content.readAll(), QByteArray("shared contents"));
+        }
+        const auto restored = ops.restore(result.path);
+        QVERIFY2(restored.ok, qPrintable(restored.error));
+        QVERIFY(QFileInfo::exists(source + "/first.txt") && QFileInfo::exists(source + "/second.txt"));
+        QVERIFY(QFileInfo::exists(drive.filePath("outside.txt")));
+    }
+    void crossDriveTrashPreservesSourceChanges_data()
+    {
+        QTest::addColumn<QString>("change");
+        QTest::addColumn<bool>("restore");
+        for (const bool restore : {false, true})
+            for (const auto &change : {QString("during"), QString("edit"), QString("same-time"), QString("add"), QString("replace")})
+                QTest::newRow(qPrintable((restore ? QString("restore-") : QString("trash-")) + change)) << change << restore;
+    }
+    void crossDriveTrashPreservesSourceChanges()
+    {
+        QFETCH(QString, change);
+        QFETCH(bool, restore);
+        QTemporaryDir home;
+        const auto build = QFileInfo(QFile::symLinkTarget("/proc/self/exe")).absolutePath();
+        QTemporaryDir drive(build + "/file-tests-drive-XXXXXX");
+        QVERIFY(home.isValid() && drive.isValid());
+        if (FileOperations::sameVolume({drive.path()}, home.path()))
+            QSKIP("No second writable filesystem for cross-drive mutation checks");
+        auto source = drive.filePath("Documents");
+        QVERIFY(QDir().mkdir(source));
+        write(source + "/notes.txt", "original version");
+        FileOperations ops(home.path(), home.filePath("Trash"), {drive.path()});
+        if (restore)
+        {
+            const auto initial = ops.trash(source);
+            QVERIFY2(initial.ok, qPrintable(initial.error));
+            source = initial.path;
+        }
+        const auto reset = qScopeGuard([] { afterCopy = {}; afterPublish = {}; mutateAfterCopying.clear(); });
+        bool edited = false;
+        const auto edit = [&] {
+            if (change == "replace")
+            {
+                QVERIFY(QDir().rename(source, QFileInfo(source).dir().filePath("Original Documents")));
+                QVERIFY(QDir().mkdir(source));
+                write(source + "/notes.txt", "replacement folder");
+            }
+            else if (change == "add")
+                write(source + "/new.txt", "new file");
+            else if (change == "same-time")
+            {
+                const auto path = QFile::encodeName(source + "/notes.txt");
+                struct stat before {};
+                QVERIFY(::stat(path.constData(), &before) == 0);
+                write(source + "/notes.txt", "modified version");
+                const struct timespec times[] = {before.st_atim, before.st_mtim};
+                QVERIFY(utimensat(AT_FDCWD, path.constData(), times, 0) == 0);
+            }
+            else
+                write(source + "/notes.txt", "newer version");
+            edited = true;
+        };
+        if (change == "during")
+        {
+            mutateAfterCopying = source + "/notes.txt";
+            afterCopy = edit;
+        }
+        else
+            afterPublish = edit;
+        const auto result = restore ? ops.restore(source) : ops.trash(source);
+        QVERIFY(edited);
+        const auto kept = source + (change == "add" ? "/new.txt" : "/notes.txt");
+        QFile latest(kept);
+        QVERIFY2(latest.open(QIODevice::ReadOnly), "New source data was removed after copying an older version");
+        QCOMPARE(latest.readAll(), change == "add" ? QByteArray("new file") :
+                                 change == "replace" ? QByteArray("replacement folder") :
+                                 change == "same-time" ? QByteArray("modified version") : QByteArray("newer version"));
+        QVERIFY2(!result.ok, "A changing source must not be reported as a fully completed move");
+        if (change != "during")
+        {
+            QVERIFY(!result.path.isEmpty());
+            QFile copied(result.path + "/notes.txt");
+            QVERIFY(copied.open(QIODevice::ReadOnly));
+            QCOMPARE(copied.readAll(), QByteArray("original version"));
+            QVERIFY(QFileInfo::exists(home.filePath("Trash/info/Documents.trashinfo")));
+        }
     }
     void trashCannotConsumeItself()
     {

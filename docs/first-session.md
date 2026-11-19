@@ -1,6 +1,6 @@
 # Your first session
 
-Choose **Platinum Reality** in your login screen's session menu and log in. You get the desktop,
+Choose **Platinum Dreams** in your login screen's session menu and log in. You get the desktop,
 a Finder window, the menu bar across the top and the Control Strip in the bottom-left corner.
 
 **Help ▸ Help Center** (Command-?) has this guide inside the desktop. It opens by itself the first
@@ -118,4 +118,4 @@ with your fingerprint where your system is set up for that.
 
 If you own a Mac OS 9 installation, `scripts/import-macos9-assets.py` copies its sounds, icons,
 desktop pictures and cursors into your own `~/.local/share/platinum-reality/assets`, where
-Platinum Reality uses them in place of its own drawings. See the README.
+Platinum Dreams uses them in place of its own drawings. See the README.

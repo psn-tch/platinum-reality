@@ -32,7 +32,7 @@ AUR_PAGE = 'https://aur.archlinux.org/packages/{}'
 # or yay, "just the nice thing to do"), in the order used when the person hasn't chosen.
 AUR_HELPERS = {'yay': 'https://aur.archlinux.org/yay-bin.git', 'paru': 'https://aur.archlinux.org/paru-bin.git'}
 AUR_MAX = 256 * 1024 * 1024
-USER_AGENT = 'PlatinumReality-AppStore/1'
+USER_AGENT = 'PlatinumDreams-AppStore/1'
 NAME = re.compile(r'^[a-z0-9@_+][a-z0-9@._+-]*$')
 LANG = '{http://www.w3.org/XML/1998/namespace}lang'
 # The App Store's categories, from the freedesktop main categories (the first one that matches).
@@ -40,7 +40,7 @@ CATEGORIES = [('AudioVideo', 'Audio & Video'), ('Audio', 'Audio & Video'), ('Vid
               ('Development', 'Development'), ('Education', 'Education'), ('Game', 'Games'),
               ('Graphics', 'Graphics'), ('Network', 'Internet'), ('Office', 'Office'), ('Science', 'Science'),
               ('Settings', 'System'), ('System', 'System'), ('Utility', 'Utilities')]
-# Removing these would leave the computer unable to start or Platinum Reality unable to run.
+# Removing these would leave the computer unable to start or Platinum Dreams unable to run.
 PROTECTED = {'base', 'bash', 'coreutils', 'cryptsetup', 'filesystem', 'glibc', 'grub', 'iwd', 'linux',
              'linux-firmware', 'linux-hardened', 'linux-lts', 'linux-zen', 'mkinitcpio', 'pacman', 'pam',
              'platinum-reality', 'polkit', 'python', 'qt6-base', 'sddm', 'sudo', 'sway', 'systemd', 'util-linux'}

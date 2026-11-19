@@ -148,7 +148,7 @@ bool FinderService::OpenDirectory(QString path)
                 {
                     QMessageBox::information(
                         safe, "Open Document",
-                        "Open documents inside the Platinum Reality desktop session.");
+                        "Open documents inside the Platinum Dreams desktop session.");
                     return;
                 }
                 auto message =

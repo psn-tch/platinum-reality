@@ -325,11 +325,11 @@ class ApplicationTests : public QObject
         }
         // A file written before the rename (its old header) is still ours: replaced, no warning.
         const auto older = profile.filePath("config/gtk-3.0/platinum-dreams.css");
-        QVERIFY(write(older, "/* Platinum Dreams application appearance v1. Original native adaptation. */\nold\n"));
+        QVERIFY(write(older, "/* Platinum Reality application appearance v1. Original native adaptation. */\nold\n"));
         QVERIFY2(prepareApplicationAppearance(profile.path(), error), qPrintable(error));
         QFile replaced(older);
         QVERIFY(replaced.open(QIODevice::ReadOnly));
-        QVERIFY(replaced.readAll().startsWith("/* Platinum Reality application appearance v1."));
+        QVERIFY(replaced.readAll().startsWith("/* Platinum Dreams application appearance v1."));
         // Anything else is the user's and stays.
         QVERIFY(write(older, custom));
         QVERIFY(!prepareApplicationAppearance(profile.path(), error));

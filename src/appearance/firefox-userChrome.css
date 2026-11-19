@@ -1,4 +1,4 @@
-/* Platinum Reality application appearance v1. Browser UI only; no web content. */
+/* Platinum Dreams application appearance v1. Browser UI only; no web content. */
 @-moz-document url("chrome://browser/content/browser.xhtml") {
   :root {
     --toolbar-bgcolor: #dddddd !important;

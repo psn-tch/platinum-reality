@@ -1,4 +1,4 @@
-# Platinum Reality distribution prototype
+# Platinum Dreams distribution prototype
 
 Owner: Rocky (ISO, engine and owned-VM harness). Sammy owns monitor policy,
 the eventual installer GUI, canonical integration and desktop release gates.

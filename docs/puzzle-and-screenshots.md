@@ -14,7 +14,7 @@ logo, not numbers): when Asset Importer has taken the rainbow Apple from your ow
 whole number, so its pixels stay square, and centred on white. **Edit ▸ Clear** switches between the
 picture and numbers, as in System 7. Undo, Cut, Copy and Paste are there, dimmed, as in a desk
 accessory. Without an imported Apple the tiles are numbered and Clear is dimmed. The picture is
-never part of Platinum Reality; it is read from your assets when Puzzle opens. Asset Importer only
+never part of Platinum Dreams; it is read from your assets when Puzzle opens. Asset Importer only
 began saving the Apple on 2026-11-11, so assets imported before then need importing again.
 
 **Command-Shift-3** puts a picture of the whole desktop on the clipboard.
@@ -22,7 +22,7 @@ began saving the Apple on 2026-11-11, so assets imported before then need import
 area and a picture of just that goes on the clipboard (Escape cancels). The
 keyboard then goes back to whatever had it, the application included.
 
-**Alt+Shift+S** captures the Platinum Reality desktop and opens Screenshot. The
+**Alt+Shift+S** captures the Platinum Dreams desktop and opens Screenshot. The
 snapshot is taken before the tool opens. Drag on its preview to crop, or choose
 **Entire Desktop**. Enter a PNG filename and choose **Save**; **Cancel** discards
 the memory-only capture without saving. The suggested filename is under

@@ -97,7 +97,7 @@ and earlier table below remain distinct from those automatic results.
 
 | Application | Evidence | Established scope | Still to check |
 | --- | --- | --- | --- |
-| Firefox | Lily Hewitt's 2026-10-18 hands-on report: “firefox opened perfect inside it” | User-observed successful opening inside Platinum Reality | Exact version/build and launch method; browsing and text input; additional windows and dialogs; clipboard; downloads/uploads; audio/video; restart and profile behavior |
+| Firefox | Lily Hewitt's 2026-10-18 hands-on report: “firefox opened perfect inside it” | User-observed successful opening inside Platinum Dreams | Exact version/build and launch method; browsing and text input; additional windows and dialogs; clipboard; downloads/uploads; audio/video; restart and profile behavior |
 | Owned Finder and Editor | Eight-workflow native gate, latest archive `20261018T170917-495823` | Recorded folder/document operations, native input, menus, save/cancel, transfers and lifecycle assertions | Broader filesystem, recovery, accessibility and application interactions |
 | Qt test probe | Same native gate | Specific decorations, input, menu, modality and lifecycle assertions | General Qt application compatibility |
 

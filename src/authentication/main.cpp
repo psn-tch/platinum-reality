@@ -7,7 +7,7 @@
 #include <QApplication>
 #include <cstdio>
 
-// Platinum Reality's polkit authentication agent: the password box for Software Update, the App Store,
+// Platinum Dreams's polkit authentication agent: the password box for Software Update, the App Store,
 // Fingerprints and anything else that uses pkexec in this session (docs/password-box.md). The desktop
 // starts it once per session; KDE's agent is the fallback when it is not installed.
 int main(int argc, char **argv)

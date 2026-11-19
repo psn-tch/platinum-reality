@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build, sign and stage a Platinum Reality release on potato (docs/software-update.md).
+"""Build, sign and stage a Platinum Dreams release on potato (docs/software-update.md).
 
   make-release.py --notes notes.txt [--copy-to /run/media/<user>/External/platinum-releases]
 

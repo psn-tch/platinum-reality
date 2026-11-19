@@ -1,9 +1,9 @@
 # Private X11 compatibility
 
-Platinum Reality remains a native Wayland desktop. Its optional X11 service uses
+Platinum Dreams remains a native Wayland desktop. Its optional X11 service uses
 the installed Xwayland and a user-local, pinned build of xwayland-satellite.
 The bridge translates each X window into an ordinary xdg toplevel/popup.
-Platinum Reality owns the outer frame, activation/grouping, hiding, WindowShade,
+Platinum Dreams owns the outer frame, activation/grouping, hiding, WindowShade,
 size and fullscreen policy. This avoids maintaining a second ICCCM/EWMH engine.
 
 ## Provenance and build
@@ -84,7 +84,7 @@ not by an application's claimed Steam ID.
 
 This is a deliberate Linux adaptation: a tray-only X11 application is reached
 through its Control Strip tray item, rather than a windowless Application-menu
-entry. Hiding an application through Platinum Reality preserves its mapped
+entry. Hiding an application through Platinum Dreams preserves its mapped
 windows and menu entry. Steam IDs without a catalog name use the bounded window
 title when the game supplies one. No Steam account or library metadata is read.
 

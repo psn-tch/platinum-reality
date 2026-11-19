@@ -97,10 +97,10 @@ QStringList NotificationServer::GetCapabilities()
 
 QString NotificationServer::GetServerInformation(QString &vendor, QString &version, QString &spec_version)
 {
-    vendor = "Platinum Reality";
+    vendor = "Platinum Dreams";
     version = "0.1.0";
     spec_version = "1.2";
-    return "Platinum Reality Notification Manager";
+    return "Platinum Dreams Notification Manager";
 }
 
 QString NotificationServer::imageFor(uint id, const QString &icon, const QVariantMap &hints)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Import sounds and icons from the user's own Mac OS 9 installation into their private assets.
 
-Platinum Reality never ships Apple sounds or icons. This reads a Mac OS 9 disk image the user owns
+Platinum Dreams never ships Apple sounds or icons. This reads a Mac OS 9 disk image the user owns
 (qcow2 or raw, opened read-only through a private copy) and writes WAV files into
 $XDG_DATA_HOME/platinum-reality/assets, which is never part of the repository or a release:
 
@@ -14,7 +14,7 @@ $XDG_DATA_HOME/platinum-reality/assets, which is never part of the repository or
   icons/about-banner.png, icons/about-logo.png  the Finder's About This Computer banner, and the
                              Mac OS face from it, shown in About This Computer
   desktop-pictures/<Collection>/<Name>.jpg  the Appearance desktop pictures (JPEG files)
-  icons/control-strip/<module>.png  16 px icons of the Control Strip modules Platinum Reality
+  icons/control-strip/<module>.png  16 px icons of the Control Strip modules Platinum Dreams
                             has equivalents for (sound, soundsource, energy)
   cursors/Platinum-MacOS9/  an Xcursor theme from the System file's cursors (the arrow lives in ROM,
                             so it and anything else missing come from the inherited theme)
@@ -46,7 +46,7 @@ KEYCHAIN_ICON = 1031
 ABOUT_BANNER = 4000  # The Finder's 'PICT' drawn at the top of About This Computer (Mac OS 9.2.2).
 PICTURES = 'System Folder/Appearance/Desktop Pictures'
 STRIP = 'System Folder/Control Strip Modules'
-# Control Strip modules with a Platinum Reality equivalent: file, the 'ics8'/'ics#' pair it draws on
+# Control Strip modules with a Platinum Dreams equivalent: file, the 'ics8'/'ics#' pair it draws on
 # the strip (found by matching a 9.2.2 strip capture, docs/fidelity/control-strip.md), and our name.
 STRIP_ICONS = {'Sound Volume': (256, 'sound'), 'SoundSource Strip': (669, 'soundsource'),
                'Energy Settings': (256, 'energy')}

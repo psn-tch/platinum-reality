@@ -417,7 +417,7 @@ QFont documentFont()
 }
 
 const char *const help[] = {
-    "This program installs Platinum Reality in four steps, and asks you about your account on the way. "
+    "This program installs Platinum Dreams in four steps, and asks you about your account on the way. "
     "Nothing is changed on any disk until you click Start on the last step.",
     "Choose the disk to install on from the Destination Disk pop-up menu. The whole disk is erased: "
     "everything on it is lost. Encrypt Disk, below it, asks for your password each time the computer starts up.",
@@ -425,10 +425,10 @@ const char *const help[] = {
     "Read the license. When you click Continue, you are asked whether you agree to it.",
     "Your name, short name and password are for the account you log in with. The password also unlocks "
     "an encrypted disk each time the computer starts up.",
-    "Click Start to erase the destination disk and install Platinum Reality. You are asked once more before "
+    "Click Start to erase the destination disk and install Platinum Dreams. You are asked once more before "
     "anything is erased.",
-    "Platinum Reality is being installed. This takes a few minutes; don't turn off the computer.",
-    "The installation has finished. Restart the computer to use Platinum Reality."};
+    "Platinum Dreams is being installed. This takes a few minutes; don't turn off the computer.",
+    "The installation has finished. Restart the computer to use Platinum Dreams."};
 
 QString languageName(const QString &locale)
 {
@@ -443,7 +443,7 @@ QString languageName(const QString &locale)
 InstallerWindow::InstallerWindow(EngineClient *engine, QString informationText, QString licenseText, QWidget *parent)
     : QWidget(parent), m_engine(engine)
 {
-    setWindowTitle("Install Platinum Reality Software");
+    setWindowTitle("Install Platinum Dreams Software");
     setFixedSize(540, 372); // One size, like the Mac OS 9 Installer window.
     m_title = new QLabel;
     m_title->setObjectName("installer-title");
@@ -552,8 +552,8 @@ QWidget *InstallerWindow::welcomePage()
     auto *layout = new QVBoxLayout(page);
     layout->setContentsMargins(16, 14, 16, 10);
     layout->setSpacing(6);
-    layout->addWidget(wrapped("Welcome to the Platinum Reality installation program. This program will guide you "
-                              "through the five steps necessary to install Platinum Reality."));
+    layout->addWidget(wrapped("Welcome to the Platinum Dreams installation program. This program will guide you "
+                              "through the five steps necessary to install Platinum Dreams."));
     const QStringList steps{"Select a destination disk", "Read important information",
                             "Respond to the software license agreement", "Set up your account", "Install software"};
     auto *grid = new QGridLayout;
@@ -813,7 +813,7 @@ QWidget *InstallerWindow::finishedPage()
     layout->addWidget(m_finishedSummary);
     layout->addStretch();
     m_finishedAlert = new QDialog(this);
-    m_finishedAlert->setWindowTitle("Install Platinum Reality");
+    m_finishedAlert->setWindowTitle("Install Platinum Dreams");
     m_finishedAlert->setObjectName("installer-finished");
     auto *alert = new QGridLayout(m_finishedAlert);
     alert->setContentsMargins(16, 16, 16, 12);
@@ -854,11 +854,11 @@ void InstallerWindow::finish(const QString &message)
                     : "The installation could not be completed. " + message + "\n\n" +
                           (m_diskChanged
                                ? "The installer had already started erasing “" + disk + "”, so what was on it before "
-                                 "is gone, and it can't start up Platinum Reality yet. Your other disks were not "
+                                 "is gone, and it can't start up Platinum Dreams yet. Your other disks were not "
                                  "changed. You can quit and install again on the same disk."
                                : "Nothing was changed: “" + disk + "” was not erased. You can quit and try again."));
-    m_finishedSummary->setText(m_installOk ? "Platinum Reality was installed on “" + disk + "”."
-                                           : "Platinum Reality was not installed.");
+    m_finishedSummary->setText(m_installOk ? "Platinum Dreams was installed on “" + disk + "”."
+                                           : "Platinum Dreams was not installed.");
     m_restart->setVisible(m_installOk);
     m_restart->setDefault(m_installOk);
     m_quit->setDefault(!m_installOk);
@@ -1013,8 +1013,8 @@ void InstallerWindow::describeDisk()
         m_destinationNote->setText(!m_disks->count() ? QString()
                                    : internal ? "On a real computer this version installs only onto a USB drive "
                                                 "(16 GB or larger), never an internal disk. Plug one in, then quit "
-                                                "and open Install Platinum Reality again."
-                                              : "There is no disk here that Platinum Reality can be installed on: "
+                                                "and open Install Platinum Dreams again."
+                                              : "There is no disk here that Platinum Dreams can be installed on: "
                                                 "it needs one of at least 16 GB, other than the installation disk.");
         return;
     }
@@ -1025,8 +1025,8 @@ void InstallerWindow::describeDisk()
     const auto bytes = disk.value("size_bytes").toLongLong();
     m_diskSize->setText(sizeText(bytes));
     m_destinationNote->setText(bytes < minimumDiskBytes
-                                   ? "This disk is too small. Platinum Reality needs at least 16 GB."
-                                   : "This disk has enough space for Platinum Reality. Everything on it will be "
+                                   ? "This disk is too small. Platinum Dreams needs at least 16 GB."
+                                   : "This disk has enough space for Platinum Dreams. Everything on it will be "
                                      "erased when you click Start.");
 }
 
@@ -1069,14 +1069,14 @@ void InstallerWindow::goTo(Page page)
     if (page == Install || installing)
     {
         const auto disk = diskName();
-        m_installSummary->setText("Click Start to install Platinum Reality on “" + disk + ".”\n\nEverything on this "
+        m_installSummary->setText("Click Start to install Platinum Dreams on “" + disk + ".”\n\nEverything on this "
                                   "disk will be erased. Your account “" + m_userName->text() +
                                   "” will be created, and the computer will be called “" + m_computerName->text() +
                                   "”." +
                                   (m_encrypt->isChecked() ? " The disk will be encrypted: your password unlocks it "
                                                             "each time the computer starts up."
                                                           : QString()));
-        m_progressHeading->setText("Click Start to install Platinum Reality on “" + disk + ".”");
+        m_progressHeading->setText("Click Start to install Platinum Dreams on “" + disk + ".”");
     }
     m_continue->setEnabled(ready && !m_engine->busy());
     if (changed && page == Destination && m_disks->count() == 0)
@@ -1147,7 +1147,7 @@ void InstallerWindow::goForward()
 QString InstallerWindow::eraseQuestion(const QJsonObject &plan) const
 {
     // Plain text: partition labels come from the disk and are shown as written.
-    auto text = "Erase “" + diskName() + "” and install Platinum Reality? Everything on this disk will be lost.";
+    auto text = "Erase “" + diskName() + "” and install Platinum Dreams? Everything on this disk will be lost.";
     const auto partitions = plan.value("existing_partitions").toArray();
     if (!partitions.isEmpty())
     {
@@ -1174,7 +1174,7 @@ void InstallerWindow::startInstall()
 {
     m_diskChanged = false;
     m_installClock.invalidate();
-    m_progressText->setText("Installing Platinum Reality onto “" + diskName() + "”");
+    m_progressText->setText("Installing Platinum Dreams onto “" + diskName() + "”");
     goTo(Progress);
     QJsonObject secrets{{"password", m_password->text()}};
     if (m_encrypt->isChecked())

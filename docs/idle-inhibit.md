@@ -4,7 +4,7 @@ Status: **implemented and qualified in the headless harness (Claude, 2026-10-20)
 
 Lily Hewitt requested no automatic idle-timeout lock; the supervisor now listens only
 for explicit lock and before-sleep events. Video players, browsers playing video, and games ask the desktop
-to stay awake. Platinum Reality turns any such request into one idle inhibitor on its own window at
+to stay awake. Platinum Dreams turns any such request into one idle inhibitor on its own window at
 the host Sway. Sway pauses its idle timers, and therefore the lock, while a visible surface holds
 one.
 

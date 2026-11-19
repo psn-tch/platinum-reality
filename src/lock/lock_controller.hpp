@@ -24,7 +24,7 @@ class LockController final : public QObject
     // not be the screen the user is looking at, so every screen's dialog shows the same typing.
     Q_PROPERTY(QString entry READ entry WRITE setEntry NOTIFY entryChanged)
     // Log In at the start of a session (not a lock): the user also chooses the session to start,
-    // "platinum" (Platinum Reality) or "kde" (KDE Plasma).
+    // "platinum" (Platinum Dreams) or "kde" (KDE Plasma).
     Q_PROPERTY(bool loginMode READ loginMode CONSTANT)
     Q_PROPERTY(QString session READ session WRITE setSession NOTIFY changed)
   public:
@@ -44,7 +44,7 @@ class LockController final : public QObject
     bool loginMode() const { return m_loginMode; }
     QString session() const { return m_session; }
     void setSession(const QString &session);
-    // Before any window is shown. Unknown sessions start Platinum Reality.
+    // Before any window is shown. Unknown sessions start Platinum Dreams.
     void setLoginMode(const QString &defaultSession);
     // Logged only (lock.txt): the screen whose lock window has the keyboard, or "" for none.
     void setKeyboardScreen(const QString &screen);

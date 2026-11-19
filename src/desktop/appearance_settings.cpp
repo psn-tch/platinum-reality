@@ -218,6 +218,8 @@ AppearanceSettings::AppearanceSettings(QString profile, QObject *parent)
         m_rememberRecent = apple.value("rememberRecent").toBool();
     if (const auto count = apple.value("recentApplications").toInt(-1); count >= 1 && count <= 99)
         m_recentApplications = count;
+    if (const auto count = apple.value("recentDocuments").toInt(-1); count >= 1 && count <= 99)
+        m_recentDocuments = count;
     if (const auto icon = apple.value("icon").toString(); icon == "color" || icon == "black")
         m_appleIcon = icon;
     const auto switcher = object.value("switcher").toObject();
@@ -272,6 +274,7 @@ bool AppearanceSettings::save(int duration, bool visible, bool collapsed, int x,
                                                  {"appleMenu", QJsonObject{{"submenus", m_appleSubmenus},
                                                                            {"rememberRecent", m_rememberRecent},
                                                                            {"recentApplications", m_recentApplications},
+                                                                           {"recentDocuments", m_recentDocuments},
                                                                            {"icon", m_appleIcon}}},
                                                  {"switcher", QJsonObject{{"visible", m_switcherVisible},
                                                                           {"x", m_switcherX},
@@ -440,7 +443,7 @@ void AppearanceSettings::applyCaretFlash() const
 QVariantMap AppearanceSettings::appleMenu() const
 {
     return {{"submenus", m_appleSubmenus}, {"rememberRecent", m_rememberRecent},
-            {"recentApplications", m_recentApplications}, {"icon", m_appleIcon}};
+            {"recentApplications", m_recentApplications}, {"recentDocuments", m_recentDocuments}, {"icon", m_appleIcon}};
 }
 bool AppearanceSettings::setAppleMenuOption(QString key, QVariant value)
 {
@@ -449,24 +452,26 @@ bool AppearanceSettings::setAppleMenuOption(QString key, QVariant value)
     const bool valid = key == "submenus" || key == "rememberRecent" ? value.typeId() == QMetaType::Bool
                      : key == "icon" ? value.typeId() == QMetaType::QString &&
                                            (value.toString() == "color" || value.toString() == "black")
-                     : key == "recentApplications" && whole && number >= 1 && number <= 99;
+                     : (key == "recentApplications" || key == "recentDocuments") && whole && number >= 1 && number <= 99;
     if (!valid)
     {
         emit errorOccurred("That Apple Menu Options setting is not available.");
         return false;
     }
-    const auto previous = std::tuple{m_appleSubmenus, m_rememberRecent, m_recentApplications, m_appleIcon};
+    const auto previous = std::tuple{m_appleSubmenus, m_rememberRecent, m_recentApplications, m_recentDocuments, m_appleIcon};
     if (key == "submenus")
         m_appleSubmenus = value.toBool();
     else if (key == "rememberRecent")
         m_rememberRecent = value.toBool();
     else if (key == "icon")
         m_appleIcon = value.toString();
+    else if (key == "recentDocuments")
+        m_recentDocuments = number;
     else
         m_recentApplications = number;
     if (save(m_duration, m_stripVisible, m_stripCollapsed, m_stripX, m_stripY, m_wallpaperPath, m_wallpaperLayout))
         return true;
-    std::tie(m_appleSubmenus, m_rememberRecent, m_recentApplications, m_appleIcon) = previous;
+    std::tie(m_appleSubmenus, m_rememberRecent, m_recentApplications, m_recentDocuments, m_appleIcon) = previous;
     return false;
 }
 bool AppearanceSettings::setGeneralOption(QString key, QVariant value)

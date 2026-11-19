@@ -78,7 +78,7 @@ individual qualification. Qt child launches still request SHM buffers.
 ## Separate GPU experiments — not additional deployment
 
 The [experimental ledger](evidence/emulator-gpu-20261019/summary.json) records an
-original SDL3 OpenGL probe inside the **actual installed** Platinum Reality
+original SDL3 OpenGL probe inside the **actual installed** Platinum Dreams
 compositor on an owned hidden Sway display. It used the inner Wayland socket,
 reported the AMD Radeon 890M/Mesa renderer, presented 233 frames over four seconds,
 and read back its own buffer. More significantly, the outer composed screenshot

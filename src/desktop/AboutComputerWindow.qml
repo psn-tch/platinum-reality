@@ -19,7 +19,7 @@ DesktopWindow {
     onVisibleChanged: if (visible) refresh()
     Timer { objectName:"about-refresh"; interval:1000; repeat:true; running:window.visible && !window.collapsed; onTriggered:window.refresh() }
 
-    // The Platinum Reality mark (packaging/platinum-reality.svg, an original drawing), at any size.
+    // The Platinum Dreams mark (packaging/platinum-reality.svg, an original drawing), at any size.
     component Mark: Item {
         id: mark
         property real size: 64
@@ -64,7 +64,7 @@ DesktopWindow {
             Text {
                 objectName: "about-banner"
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Platinum Reality"; textFormat: Text.PlainText
+                text: "Platinum Dreams"; textFormat: Text.PlainText
                 font.family: "serif"; font.pixelSize: 50; color: "black"
             }
         }

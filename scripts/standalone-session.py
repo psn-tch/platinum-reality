@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Experimental login-session supervisor. Does not change login configuration.
 
-Sway supplies DRM/seat/input/session-lock; Platinum Reality owns the desktop.
+Sway supplies DRM/seat/input/session-lock; Platinum Dreams owns the desktop.
 Use --nested-check to qualify the same lifecycle without taking a physical seat.
 """
 import argparse
@@ -705,7 +705,7 @@ def run_with_saved_display_mode(options, run_session, environment):
     try:
         result = run_session(extended)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-        print("Platinum Reality session: all displays could not start: " + str(error), file=sys.stderr)
+        print("Platinum Dreams session: all displays could not start: " + str(error), file=sys.stderr)
         result = None
     # An authenticated choice of another session intentionally creates no desktop.
     # Preserve its routing code so login-session.py can start KDE after cleanup;
@@ -1738,7 +1738,7 @@ def run(options):
             def login_gate():
                 """--start-locked (Log In replacing the tty1 text login): authenticate before the desktop
                 exists, then return the chosen session, "platinum" or "kde". If the Platinum Log In cannot
-                run, swaylock authenticates instead and Platinum Reality starts. If neither succeeds, the
+                run, swaylock authenticates instead and Platinum Dreams starts. If neither succeeds, the
                 session ends (back to the login service). Never unauthenticated."""
                 nonlocal locker
                 platinum = launcher.parent.parent / "lib/platinum-reality/platinum-lock"
@@ -2212,7 +2212,7 @@ def main():
     try:
         return run_with_saved_display_mode(options, run, os.environ)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-        print("Platinum Reality session: " + str(error), file=sys.stderr)
+        print("Platinum Dreams session: " + str(error), file=sys.stderr)
         return 1
 
 

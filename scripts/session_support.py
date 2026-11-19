@@ -18,9 +18,10 @@ WALLET_SERVICE_DIRECTORY = Path("/usr/share/dbus-1/services")
 
 
 def adopt_previous_name(data):
-    """Platinum Reality was called Platinum Dreams. Its settings folder <data>/platinum-dreams (the
-    profile, imported assets and the startup screen drawing) moves to <data>/platinum-reality once,
-    leaving a link with the old name for older releases. Never replaces anything; links are left alone."""
+    """Keep the established storage migration from the original Dreams releases. The folder
+    <data>/platinum-dreams (the profile, imported assets and the startup screen drawing) moves to <data>/platinum-reality once,
+    leaving a compatibility link. The current Platinum Dreams branding keeps this storage layout.
+    Never replaces anything; links are left alone."""
     old, new = Path(data) / "platinum-dreams", Path(data) / "platinum-reality"
     if not old.is_dir() or old.is_symlink() or new.exists() or new.is_symlink():
         return False

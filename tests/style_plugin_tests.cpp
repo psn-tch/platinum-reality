@@ -24,7 +24,7 @@ class StylePluginTests : public QObject
     {
         QWidget window;
         auto *layout = new QVBoxLayout(&window);
-        auto *label = new QLabel("Platinum Reality — ordinary Qt controls", &window);
+        auto *label = new QLabel("Platinum Dreams — ordinary Qt controls", &window);
         auto *edit = new QLineEdit(&window);
         auto *check = new QCheckBox("Keep modern functionality", &window);
         auto *radio = new QRadioButton("Classic appearance", &window);

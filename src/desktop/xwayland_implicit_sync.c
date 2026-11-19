@@ -1,4 +1,4 @@
-/* Preloaded only into Platinum Reality' private Xwayland, by the launcher in
+/* Preloaded only into Platinum Dreams' private Xwayland, by the launcher in
  * xwayland-launcher.sh, which xwayland-satellite finds first on its PATH.
  *
  * Xwayland 24.1 offers DRI3 1.4 syncobjs to X11 clients whenever the kernel

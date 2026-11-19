@@ -26,7 +26,7 @@ failed-before evidence are in `experiments/audio-routing-hardening/README.md`).
     to that port, then makes its new output the default and moves the playing streams there.
     PipeWire's pactl gives a sink no card number, so its card comes from `device.name`.
   - It runs in its own process group with a 2 MiB reply cap.
-- **Audio server:** the login session names it (`PULSE_SERVER`). When Platinum Reality runs as a
+- **Audio server:** the login session names it (`PULSE_SERVER`). When Platinum Dreams runs as a
   window inside another desktop, the helper falls back to the user's own
   `/run/user/<uid>/pulse/native` (owned by the user, a real socket). It never replaces a server
   the session named.

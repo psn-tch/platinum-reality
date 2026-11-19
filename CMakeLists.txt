@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(FrankensteinMacintosh VERSION 0.1.0 LANGUAGES C CXX)
+project(PlatinumDreams VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -219,6 +219,7 @@ add_executable(frankenstein-drop-receiver src/desktop/drop_receiver.cpp src/desk
 target_include_directories(frankenstein-drop-receiver PRIVATE src)
 target_link_libraries(frankenstein-drop-receiver PRIVATE Qt6::Gui Qt6::DBus)
 add_library(frankenstein-files src/finder/file_operations.cpp src/finder/file_operations.hpp src/finder/file_details.cpp src/finder/file_details.hpp src/finder/file_labels.cpp src/finder/file_labels.hpp src/finder/favorites.cpp src/finder/favorites.hpp)
+target_sources(frankenstein-files PRIVATE src/finder/recent_documents.cpp src/finder/recent_documents.hpp)
 target_include_directories(frankenstein-files PUBLIC src)
 # GIO has a struct member named signals; keep Qt's keyword macros out of this
 # backend instead of relying on a fragile include order.
@@ -257,7 +258,7 @@ target_compile_options(platinum-snapshot-ui PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(platinum-snapshot src/snapshot/main.cpp)
 target_link_libraries(platinum-snapshot PRIVATE platinum-snapshot-ui)
 add_dependencies(frankenstein platinum-snapshot)
-# Install Platinum Reality: the installation disk's installer window. The install engine does
+# Install Platinum Dreams: the installation disk's installer window. The install engine does
 # the disk work (distro/installer-engine).
 add_library(platinum-installer-ui src/installer/engine_client.cpp src/installer/engine_client.hpp
             src/installer/installer_window.cpp src/installer/installer_window.hpp)
@@ -315,22 +316,24 @@ add_dependencies(frankenstein platinum-lock)
 # Keep helpers and the ABI-matched style plugin together. No system Qt plugin,
 # login-session, autostart, service, or user-profile files are installed.
 include(GNUInstallDirs)
-# The documentation folder takes the product name, not the CMake project name.
+# Keep installed paths stable across the Platinum Dreams branding change.
 set(CMAKE_INSTALL_DOCDIR "${CMAKE_INSTALL_DATAROOTDIR}/doc/platinum-reality")
 set(PLATINUM_LIBDIR "${CMAKE_INSTALL_LIBDIR}/platinum-reality")
 file(RELATIVE_PATH PLATINUM_LIB_FROM_BIN "${CMAKE_INSTALL_FULL_BINDIR}"
      "${CMAKE_INSTALL_PREFIX}/${PLATINUM_LIBDIR}")
 configure_file(packaging/platinum-reality.in platinum-reality @ONLY)
 configure_file(packaging/platinum-reality-session.in platinum-reality-session @ONLY)
+configure_file(packaging/platinum-reality.in platinum-dreams @ONLY)
+configure_file(packaging/platinum-reality-session.in platinum-dreams-session @ONLY)
 install(TARGETS frankenstein frankenstein-finder frankenstein-editor frankenstein-drop-receiver frankenstein-puzzle
                 platinum-lock platinum-app-store platinum-snapshot platinum-authentication-agent
         RUNTIME DESTINATION "${PLATINUM_LIBDIR}")
 install(TARGETS frankenstein-style LIBRARY DESTINATION "${PLATINUM_LIBDIR}/plugins/styles")
-install(PROGRAMS "${CMAKE_CURRENT_BINARY_DIR}/platinum-reality"
+install(PROGRAMS "${CMAKE_CURRENT_BINARY_DIR}/platinum-reality" "${CMAKE_CURRENT_BINARY_DIR}/platinum-dreams"
         DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(FILES scripts/session_support.py DESTINATION "${PLATINUM_LIBDIR}")
 # The whole session, from a login screen: the supervisor and its entry in wayland-sessions.
-install(PROGRAMS "${CMAKE_CURRENT_BINARY_DIR}/platinum-reality-session" DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(PROGRAMS "${CMAKE_CURRENT_BINARY_DIR}/platinum-reality-session" "${CMAKE_CURRENT_BINARY_DIR}/platinum-dreams-session" DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(FILES scripts/standalone-session.py DESTINATION "${PLATINUM_LIBDIR}")
 install(FILES packaging/platinum-reality-session.desktop DESTINATION "${CMAKE_INSTALL_DATADIR}/wayland-sessions"
         RENAME platinum-reality.desktop)
@@ -380,7 +383,7 @@ install(FILES packaging/platinum-reality.svg DESTINATION "${CMAKE_INSTALL_DATADI
 install(FILES docs/install.md docs/first-session.md docs/x11-integration.md DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 install(FILES LICENSE packaging/NOTICE
         DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/platinum-reality")
-# Install Platinum Reality (the installation disk's installer). The live ISO puts the launcher on
+# Install Platinum Dreams (the installation disk's installer). The live ISO puts the launcher on
 # its desktop and supplies /usr/bin/platinum-reality-install (the engine); installed systems
 # have no launcher for it.
 # The Platinum Log In for SDDM, on installed systems (docs/sddm-theme.md); selected by the installer.
@@ -532,7 +535,8 @@ if(BUILD_TESTING)
     target_link_libraries(policy-tests PRIVATE frankenstein-policy Qt6::Test)
     add_test(NAME policy COMMAND policy-tests)
     add_executable(file-tests tests/file_tests.cpp)
-    target_link_libraries(file-tests PRIVATE frankenstein-files Qt6::Test)
+    target_link_libraries(file-tests PRIVATE frankenstein-files Qt6::Test PkgConfig::GIO)
+    target_link_options(file-tests PRIVATE "LINKER:--wrap=g_file_copy" "LINKER:--wrap=g_file_move")
     add_test(NAME files COMMAND file-tests)
     add_executable(gui-tests tests/gui_tests.cpp)
     target_link_libraries(gui-tests PRIVATE frankenstein-finder-ui Qt6::Test)

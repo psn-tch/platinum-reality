@@ -1,6 +1,6 @@
 # Platinum Asset Importer
 
-Platinum Reality ships no Apple artwork or sounds. The Asset Importer brings them from the
+Platinum Dreams ships no Apple artwork or sounds. The Asset Importer brings them from the
 user's **own** copy of Mac OS 9 into their private assets folder,
 `$XDG_DATA_HOME/platinum-reality/assets` (normally `~/.local/share/platinum-reality/assets`),
 which is never part of the repository, a package or a release.
@@ -45,5 +45,5 @@ them. Measured on Lily Hewitt's 9.2.2 disk: 183 files; on the 9.2.2 install CD: 
 The importer only copies what the user already has, for their own use on their own computer.
 Owning installation media is not, by itself, a guarantee that every extraction or use is
 permitted by Apple's licence; the importer says so ("Use a copy of Mac OS you own") and never
-offers to download Mac OS or its artwork. Platinum Reality's own drawings remain the complete
+offers to download Mac OS or its artwork. Platinum Dreams's own drawings remain the complete
 default theme: every place that shows an imported asset falls back to them.

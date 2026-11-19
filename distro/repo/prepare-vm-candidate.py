@@ -19,7 +19,7 @@ import tarfile
 spec=importlib.util.spec_from_file_location('repo_producer',Path(__file__).with_name('produce-test-repo.py'))
 producer=importlib.util.module_from_spec(spec);spec.loader.exec_module(producer)
 PROOF='usr/share/doc/platinum-reality/r4-vm-test.txt'
-MARKER=b'Platinum Reality R4 VM TEST marker repack. NOT A RELEASE.\n'
+MARKER=b'Platinum Dreams R4 VM TEST marker repack. NOT A RELEASE.\n'
 METADATA={'.PKGINFO','.BUILDINFO','.MTREE'}
 
 

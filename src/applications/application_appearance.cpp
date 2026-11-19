@@ -15,9 +15,9 @@ static void initializeAppearanceResources()
 }
 namespace
 {
-const QByteArray marker = "/* Platinum Reality application appearance v1.";
+const QByteArray marker = "/* Platinum Dreams application appearance v1.";
 // Files written before the project was renamed are ours too, and are replaced like any other.
-const QByteArray previousMarker = "/* Platinum Dreams application appearance v1.";
+const QByteArray previousMarker = "/* Platinum Reality application appearance v1.";
 bool regularPath(const QString &root, const QString &relative, QString &error)
 {
     QString path = root;
@@ -127,7 +127,7 @@ bool gtkSettings(const QString &root, QString &error)
     if (!regularPath(root, "xdg/gtk-4.0/settings.ini", error))
         return false;
     return save(root + "/xdg/gtk-4.0/settings.ini",
-                "# Platinum Reality: scroll bars always shown, as in Mac OS 9.2.2.\n"
+                "# Platinum Dreams: scroll bars always shown, as in Mac OS 9.2.2.\n"
                 "[Settings]\ngtk-overlay-scrolling=false\n", error);
 }
 bool firefoxProgram(const QString &program)
@@ -204,7 +204,7 @@ bool prepareStyledApplication(frankenstein::applications::LaunchPlan &plan, cons
     if (!regularPath(root, "browsers/firefox", error) || !QDir().mkpath(root + "/browsers/firefox"))
     {
         if (error.isEmpty())
-            error = "The Platinum Reality Firefox profile could not be created.";
+            error = "The Platinum Dreams Firefox profile could not be created.";
         return false;
     }
     const auto browser = QFileInfo(root + "/browsers/firefox").canonicalFilePath();

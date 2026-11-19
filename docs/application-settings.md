@@ -1,7 +1,7 @@
 # Application settings: normal or private
 
 Decision (Lily Hewitt, 2026-10-20, after their first physical login): **"yes everything normal"**.
-Applications launched from Platinum Reality use the same settings and logins as under KDE. Firefox
+Applications launched from Platinum Dreams use the same settings and logins as under KDE. Firefox
 keeps its normal look (option 1b): no Platinum `userChrome.css` is written into their real profile.
 
 ## Behaviour

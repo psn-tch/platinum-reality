@@ -117,7 +117,7 @@ def updated_sddm_state(contents, session):
 def preselect_sddm_session(account, session):
     require_sddm_stopped()  # Check again after package installation.
     if not Path(session).is_file():
-        raise ValueError("Installed Platinum Reality session entry is missing")
+        raise ValueError("Installed Platinum Dreams session entry is missing")
     # Anchor all operations to a checked directory; never follow a state-file
     # symlink controlled by the unprivileged greeter account.
     directory = os.open(account.pw_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -244,7 +244,7 @@ def apply(plan, user):
     destination = Path("/var/lib/platinum-reality-installer")
     destination.mkdir(mode=0o700, parents=True, exist_ok=True)
     (destination / "receipt.json").write_text(json.dumps(receipt, indent=2)+"\n")
-    print("Installed. Reboot when ready; SDDM will preselect Platinum Reality. No autologin configured.")
+    print("Installed. Reboot when ready; SDDM will preselect Platinum Dreams. No autologin configured.")
 
 
 def main():

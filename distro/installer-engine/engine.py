@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Platinum Reality installer contract v1: owned QEMU/KVM guests, and USB drives on real computers.
+"""Platinum Dreams installer contract v1: owned QEMU/KVM guests, and USB drives on real computers.
 
 Discovery and planning never partition, format, mount or configure anything.
 Passwords belong only on stdin, never configuration files, argv or progress.
@@ -36,7 +36,7 @@ BOOT_ASSET_FILES = {'scripts/boot-splash.py', 'packaging/plymouth/platinum-reali
 MIN_DISK_BYTES = 16 * 1024**3
 STEPS = [('validate', 'Check the installation'), ('partition', 'Partition the destination'),
          ('format', 'Create filesystems'), ('mount', 'Mount the destination'),
-         ('packages', 'Install Arch Linux and Platinum Reality'), ('configure', 'Configure the system'),
+         ('packages', 'Install Arch Linux and Platinum Dreams'), ('configure', 'Configure the system'),
          ('bootloader', 'Prepare startup'), ('finish', 'Finish and unmount')]
 TARGET_PACKAGES = ['base', 'linux', 'linux-firmware', 'amd-ucode', 'intel-ucode', 'mesa',
     'platinum-reality', 'sudo', 'mkinitcpio', 'systemd-ukify', 'cryptsetup', 'plymouth', 'sddm', 'xorg-server',
@@ -156,7 +156,7 @@ def require_live_vm():
         raise Refused('Only QEMU/KVM virtual machines and real computers are supported; nothing changed')
     container = subprocess.run(['systemd-detect-virt', '--container'], capture_output=True, check=False, env=TOOL_ENV)
     if container.returncode == 0 or not BOOT_MOUNT.is_mount() or not Path('/etc/arch-release').is_file():
-        raise Refused('Requires the Platinum Reality live media; nothing changed')
+        raise Refused('Requires the Platinum Dreams live media; nothing changed')
     return 'vm' if virtual.returncode == 0 else 'physical'
 
 
@@ -720,7 +720,7 @@ def sanitize_live_target(root, source):
     write_target(root, 'etc/pacman.conf', source['pacman_config'])
     live_target_path(root, 'etc/crypttab')
     write_target(root, 'etc/crypttab', '# Root unlock is described by the target-specific UKI.\n')
-    write_target(root, 'etc/motd', 'Platinum Reality\n')
+    write_target(root, 'etc/motd', 'Platinum Dreams\n')
 
 
 def copy_live_root(root, source):

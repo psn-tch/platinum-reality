@@ -1,11 +1,11 @@
-# Platinum Reality for Arch Linux. scripts/package-arch.py writes this recipe beside a pinned source
+# Platinum Dreams for Arch Linux. scripts/package-arch.py writes this recipe beside a pinned source
 # snapshot; build it with makepkg (makepkg itself installs nothing unless asked to).
 pkgname=platinum-reality
 pkgver=@VERSION@
 pkgrel=1
-pkgdesc='A classic Platinum desktop for Linux: a whole session, or a window inside your current one'
+pkgdesc='Platinum Dreams: a classic Platinum desktop for Linux'
 arch=('x86_64')
-# Platinum Reality was called Platinum Dreams.
+# Preserve the established package ID and replace packages from the original Dreams releases.
 replaces=('platinum-dreams')
 conflicts=('platinum-dreams')
 url='https://github.com/psn-tch/platinum-reality'

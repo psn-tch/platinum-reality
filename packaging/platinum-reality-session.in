@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Platinum Reality as a whole session, as a login screen starts it (wayland-sessions).
+"""Platinum Dreams as a whole session, as a login screen starts it (wayland-sessions).
 
 The login screen has already authenticated the user; this starts the session supervisor
 (standalone-session.py) on the seat it was given, with the installed desktop. Each session

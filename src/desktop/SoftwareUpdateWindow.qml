@@ -5,7 +5,7 @@ import QtQuick.Controls
 // reference VM, docs/fidelity/control-strip.md's sibling docs/software-update.md): a short
 // explanation, a large Update Now button, and "Update software automatically" heading a group.
 // Update Now asks
-// GitHub for a newer Platinum Reality, shows its version, date and notes, and installs it only
+// GitHub for a newer Platinum Dreams, shows its version, date and notes, and installs it only
 // when asked (pacman, through an administrator's password). Install from Local Package takes a
 // release folder from a disk instead. Restore Previous Version undoes the last update.
 DesktopWindow {
@@ -14,7 +14,8 @@ DesktopWindow {
     title: "Software Update"
     width: 372
     // 9.2.2's window is 372 x 322; what was found opens below the group, as its own results window did.
-    height: details ? 574 : 322
+    // Restore Previous Version (not in 9.2.2) gets its own row below the group, not over it.
+    height: details ? 574 : service && service.previousKept ? 376 : 322
     readonly property bool details: choosingLocal || (service !== null && service !== undefined
         && (service.phase !== "" && service.phase !== "idle" || service.checked || service.error !== ""
             || service.available.version !== undefined || service.readyRelease.version !== undefined
@@ -29,14 +30,14 @@ DesktopWindow {
     onVisibleChanged: if (visible && service) service.refresh()
     Text {
         x: 22; y: 16; width: 300; wrapMode: Text.WordWrap; font.pixelSize: 12; textFormat: Text.PlainText
-        text: "Software Update checks for new versions of Platinum Reality on the Internet, or on a disk you choose."
+        text: "Software Update checks for new versions of Platinum Dreams on the Internet, or on a disk you choose."
     }
     Text {
         objectName: "software-update-installed"
         x: 22; y: 62; width: 328; elide: Text.ElideRight; font.pixelSize: 11; color: "#444"; textFormat: Text.PlainText
         text: panel.service && panel.service.installed
-              ? "Installed: Platinum Reality " + panel.service.installed
-              : "Platinum Reality is not installed as a package on this computer."
+              ? "Installed: Platinum Dreams " + panel.service.installed
+              : "Platinum Dreams is not installed as a package on this computer."
     }
     // Update Now: 9.2.2's 52 px square button with its picture, the bold label under it.
     Rectangle {
@@ -60,6 +61,7 @@ DesktopWindow {
     }
     // The group 9.2.2 heads with its "Update software automatically" box.
     Item {
+        objectName: "software-update-group"
         x: 20; y: 193; width: 328; height: 84
         Rectangle {x: 0; y: 8; width: parent.width - 1; height: parent.height - 9; color: "transparent"; border.color: "#888"}
         Rectangle {x: 1; y: 9; width: parent.width - 1; height: parent.height - 9; color: "transparent"; border.color: "white"; z: -1}
@@ -105,11 +107,11 @@ DesktopWindow {
                     readonly property bool restart: panel.service ? panel.service.restartNeeded : false
                     text: restart && panel.service.phase === "" ? panel.service.message
                         : panel.service && panel.service.phase === "checking" ? "Checking for updates…"
-                        : local.version !== undefined ? "Platinum Reality " + local.version + " is ready to install."
-                        : found.version !== undefined ? "Platinum Reality " + found.version + " is available"
+                        : local.version !== undefined ? "Platinum Dreams " + local.version + " is ready to install."
+                        : found.version !== undefined ? "Platinum Dreams " + found.version + " is available"
                               + (found.date ? " (" + panel.dateText(found.date) + ")" : "") + "."
-                        : panel.service && panel.service.checked ? "Your Platinum Reality is up to date."
-                        : "Click Update Now to look for a newer Platinum Reality."
+                        : panel.service && panel.service.checked ? "Your Platinum Dreams is up to date."
+                        : "Click Update Now to look for a newer Platinum Dreams."
                 }
                 ScrollView {
                     id: notesView

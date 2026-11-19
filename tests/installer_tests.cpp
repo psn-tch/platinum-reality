@@ -254,7 +254,7 @@ class InstallerTests final : public QObject
         QApplication::setFont(classicInterfaceFont());
         const auto restore = qScopeGuard([&] { QApplication::setFont(font); QApplication::setStyle("Fusion"); });
         EngineClient engine(QFINDTESTDATA("fake_install_engine.py"));
-        InstallerWindow window(&engine, "Platinum Reality is a Mac OS 9-style desktop for Arch Linux.\n\n"
+        InstallerWindow window(&engine, "Platinum Dreams is a Mac OS 9-style desktop for Arch Linux.\n\n"
                                "The installer erases the whole disk you choose.", "MIT License\n\nCopyright (c) Lily Hewitt");
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));

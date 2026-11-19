@@ -283,6 +283,9 @@ Rectangle {
         else if(action==="scrapbook")scrapbookWindow.open()
         else if(action==="sherlock")sherlockWindow.open()
         else if(action==="favorites-folder")manager.launchFinder(manager.favoritesFolder())
+        else if(action==="recent-documents-folder")manager.launchFinder(manager.recentDocumentsFolder())
+        else if(action==="open-recent-document")manager.requestOpenDocument(applicationId)
+        else if(action==="clear-recent-documents")manager.clearRecentDocuments()
         else if(action==="open-favorite"){if(manager.favorites().some(function(f){return f.target===applicationId && f.folder}))manager.launchFinder(applicationId);else manager.requestOpenDocument(applicationId)}
         else if(action==="add-to-favorites")manager.addFavorites(desktopFiles.selectedPaths())
         else if(action==="launcher")launcherWindow.open()
@@ -354,7 +357,7 @@ Rectangle {
         helpWindow.show(topic)
         helpWindow.forceActiveFocus()
     }
-    // A newly installed account's first login also checks for a newer Platinum Reality than the one
+    // A newly installed account's first login also checks for a newer Platinum Dreams than the one
     // the installer carried (it keeps trying until the network answers).
     Timer {interval:1500;running:true;onTriggered:if(manager.takeWelcome()){desktop.showHelp("welcome");manager.softwareUpdate.checkAfterInstall()}}
     // Closing a desktop window (the Clipboard, Help, Get Info) gives the keyboard back to what is in
@@ -550,6 +553,9 @@ Rectangle {
             const submenus=options.submenus!==false
             let recent=manager.recentApplications.slice(0,options.recentApplications||10)
                 .map(function(a){return {text:a.name,action:"launch",id:a.id,glyph:"application",icon:manager.applicationIcon(a.id)}})
+            let documents=manager.recentDocuments.slice(0,options.recentDocuments||10)
+                .map(function(d){return {text:d.name,action:"open-recent-document",id:d.target,enabled:d.exists,glyph:"document"}})
+            if(documents.length)documents=documents.concat([{separator:true,action:"separator"},{text:"Clear Menu",action:"clear-recent-documents"}])
             const folder=function(item,action,children){return submenus?Object.assign(item,{children:children}):Object.assign(item,{action:action})}
             return [
                 {text:"About This Computer",action:"about"},
@@ -603,7 +609,9 @@ Rectangle {
                     {text:manager.stickies.hidden?"Show All Notes":"Hide All Notes",action:"sticky-toggle",enabled:manager.stickies.count>0}]},
                 ].concat(options.rememberRecent===false?[]:[
                     folder({text:"Recent Applications",action:"recent-applications",glyph:"folder",icon:icon("folder")},"applications",
-                           recent.length?recent:[{text:"No Recent Applications",action:"none",enabled:false}])])
+                           recent.length?recent:[{text:"No Recent Applications",action:"none",enabled:false}]),
+                    folder({text:"Recent Documents",action:"recent-documents",glyph:"folder",icon:icon("folder")},"recent-documents-folder",
+                           documents.length?documents:[{text:"No Recent Documents",action:"none",enabled:false}])])
                 .concat([{text:"Terminal",action:"terminal",glyph:"application",icon:icon("terminal")}])
         }
         let kind=barEntries[index]?barEntries[index].kind:""
@@ -690,7 +698,7 @@ Rectangle {
             {text:"Log Out",action:"quit"}])
         return [{text:"Help Center",key:"⌘?",action:"help"},
             {separator:true,action:"separator"},
-            {text:"About Platinum Reality…",action:"about"}]
+            {text:"About Platinum Dreams…",action:"about"}]
     }
     // A strip menu lays itself out under the still pointer as it appears; the row that passes under
     // it isn't being pointed at. Until the pointer has had a moment, entering a row opens no submenu
@@ -2048,7 +2056,7 @@ Rectangle {
             desktop.forceActiveFocus()
         }
     }
-    // Software Update: checks for, downloads and installs Platinum Reality releases on request.
+    // Software Update: checks for, downloads and installs Platinum Dreams releases on request.
     SoftwareUpdateWindow {
         id:softwareUpdate
         service:manager.softwareUpdate
@@ -2434,7 +2442,7 @@ Rectangle {
         onAccepted:bluetoothPanel.service.forgetDevice(path)
     }
     ShellDialog {
-        id:messageDialog;objectName:"desktop-message-dialog";sessionManager:manager;width:460;title:"Platinum Reality"
+        id:messageDialog;objectName:"desktop-message-dialog";sessionManager:manager;width:460;title:"Platinum Dreams"
         alertSound:true
         standardButtons:Dialog.Ok
         contentItem:Text {text:desktop.statusMessage;textFormat:Text.PlainText;wrapMode:Text.WordWrap;font.pixelSize:12}

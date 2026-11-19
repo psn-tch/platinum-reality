@@ -56,8 +56,9 @@ Item {
                         enabled:controls.item(modelData.key).available
                         function commit(){commitDelay.stop();controls.service.set(modelData.key,Math.round(value))}
                         onPressedChanged:{if(pressed)controls.themeSound("sltp");else if(enabled)commit()}
-                        // Wheel movement has no press/release pair.
-                        onMoved:if(!pressed)commitDelay.restart()
+                        // Wheel movement has no press/release pair. A dragged volume is set as it
+                        // moves, so it can be heard; the service applies only the newest level.
+                        onMoved:{if(!pressed)commitDelay.restart();else if(modelData.key==="volume")controls.service.set("volume",Math.round(value))}
                         Timer{id:commitDelay;interval:300;onTriggered:slider.commit()}
                         background: Rectangle {
                             x:slider.leftPadding;y:slider.height/2-3

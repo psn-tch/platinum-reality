@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -I
-"""Install a verified Platinum Reality release with pacman (run through pkexec; never by the
+"""Install a verified Platinum Dreams release with pacman (run through pkexec; never by the
 desktop itself). Usage: platinum-update-install <release folder> | --restore-previous
 Progress and the result are JSON lines on standard output. See docs/software-update.md."""
 import json

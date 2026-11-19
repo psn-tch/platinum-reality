@@ -883,7 +883,7 @@ class NativeTests : public QObject
                         "user_pref(\"datareporting.policy.firstRunURL\",\"\");\n");
             prefs.close();
         }
-        QByteArray payload("Platinum Reality script-generated save\n");
+        QByteArray payload("Platinum Dreams script-generated save\n");
         for (int value=0; value<256; ++value) payload.append(char(value));
         const QByteArray report("name,value\nplatinum,9.2.2\n");
         const QByteArray page=
@@ -1658,6 +1658,74 @@ class NativeTests : public QObject
         api.call("Finish");
         QTRY_COMPARE(probe.state(),QProcess::NotRunning);
     }
+    void x11WindowStillTakesClicksAfterItsMonitorIsUnplugged()
+    {
+        // Lily Hewitt, 2026-11-18: Steam open on the dock's monitor, the laptop undocked: the
+        // window came back to the laptop's screen but could not be clicked or moved.
+        if (X11Bridge::helperPath().isEmpty()) QSKIP("This build explicitly disables X11 support.");
+        const auto ipc=qEnvironmentVariable("FRANKENSTEIN_HEADLESS_IPC");
+        QVERIFY2(ipc.startsWith("/tmp/platinum-headless."),"Requires the owned two-output venue");
+        NativeScene scene;
+        QVERIFY(scene.show());
+        QProcess command;
+        command.start("swaymsg",{"-s",ipc,QString("[pid=%1] fullscreen enable global").arg(QCoreApplication::applicationPid())});
+        QVERIFY(command.waitForFinished(3000));
+        QCOMPARE(command.exitCode(),0);
+        QTRY_COMPARE(scene.view.size(),QSize(2080,760));
+        const auto both=DisplayLayout::create({{"HEADLESS-1",{0,0,1120,760},1.5,"normal"},
+                                               {"HEADLESS-2",{1120,0,960,600},2,"90"}},
+                                              "HEADLESS-1",DisplayLayout::Mode::Extend);
+        QVERIFY(both);
+        scene.manager->setDisplayLayout(*both);
+        QTRY_VERIFY_WITH_TIMEOUT(scene.x11.ready(),12000);
+        auto &manager=*scene.manager;
+        QProcess probe;
+        auto environment=scene.childEnvironment();
+        environment.insert("QT_QPA_PLATFORM","xcb");
+        probe.setProcessEnvironment(environment);
+        const auto cleanup=qScopeGuard([&]{if(probe.state()!=QProcess::NotRunning){probe.kill();probe.waitForFinished(3000);}});
+        probe.start(QCoreApplication::applicationDirPath()+"/native-probe",{"X11Undock"});
+        QVERIFY(probe.waitForStarted());
+        QTRY_VERIFY_WITH_TIMEOUT(!first(manager,"Native Probe X11Undock").isEmpty(),10000);
+        QDBusInterface api("org.frankenstein.NativeProbeX11Undock","/Probe","org.frankenstein.NativeProbe");
+        QTRY_VERIFY(api.isValid());
+        const auto window=[&]{return first(manager,"Native Probe X11Undock");};
+        const auto id=window().value("id").toULongLong();
+        const auto failureCapture=qScopeGuard([&]{
+            if(QTest::currentTestFailed()) {
+                qWarning()<<"X11 undock state"<<QJsonDocument::fromVariant(manager.snapshot()).toJson(QJsonDocument::Compact);
+                capture(scene.view,"x11-undock-failure.png");
+            }
+        });
+        LineProcess pointer;
+        pointer.process.start(QCoreApplication::applicationDirPath()+"/virtual-pointer-driver",{});
+        QVERIFY(!pointer.next("driver-ready").isEmpty());
+        const auto clickInside=[&](int screenWidth,int screenHeight){
+            const auto w=window();
+            const int x=w.value("x").toInt()+w.value("width").toInt()/2, y=w.value("y").toInt()+27+w.value("height").toInt()/2;
+            const int before=QDBusReply<int>(api.call("MousePresses")).value();
+            if(!pointer.send(QString("abs %1 %2 %3 %4").arg(x).arg(y).arg(screenWidth).arg(screenHeight),"ok")) return false;
+            if(!pointer.send("button 272 1","ok") || !pointer.send("button 272 0","ok")) return false;
+            return QTest::qWaitFor([&]{return QDBusReply<int>(api.call("MousePresses")).value()>before;},4000);
+        };
+        // On the second monitor, it takes clicks.
+        manager.moveWindow(id,1250,80);
+        QTRY_COMPARE(window().value("x").toInt(),1250);
+        QTest::qWait(300);
+        QVERIFY2(clickInside(2080,760),"No click on the second monitor before unplugging");
+        // The second monitor is unplugged: the window comes to the first, and still takes clicks.
+        const auto single=DisplayLayout::create({{"HEADLESS-1",{0,0,1120,760},1.5,"normal"}},
+                                                "HEADLESS-1",DisplayLayout::Mode::Extend);
+        QVERIFY(single);
+        manager.setDisplayLayout(*single);
+        QTRY_VERIFY(window().value("x").toInt()+window().value("width").toInt()<=1120);
+        QTest::qWait(500);
+        qInfo().noquote()<<"After unplugging:"<<QJsonDocument::fromVariant(window()).toJson(QJsonDocument::Compact);
+        QVERIFY(capture(scene.view,"x11-undocked.png"));
+        QVERIFY2(clickInside(2080,760),"No click after the window's monitor was unplugged");
+        api.call("Finish");
+        QTRY_COMPARE(probe.state(),QProcess::NotRunning);
+    }
     void x11PrimaryMonitorIsTheMainDisplay()
     {
         // Wine and Proton open games on RandR's primary output. It is the main display (the one
@@ -1843,6 +1911,22 @@ class NativeTests : public QObject
         manager.fillScreen(id);
         QTRY_COMPARE(first(manager,"Pointer Probe").value("x").toInt(),850);
         QTRY_COMPARE(first(manager,"Pointer Probe").value("width").toInt(),320);
+        // Filled on the main monitor, dragged to the second and right-clicked there: it fills the
+        // second (Lily Hewitt, 2026-11-17: it went back to the main), and a second click puts it
+        // back at its size on the second, where it was on the main, kept on the screen.
+        manager.fillScreen(id);
+        QTRY_COMPARE(frame().topLeft(),QPointF(0,platinumMenuBarHeight));
+        manager.moveWindow(id,1200,40);
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("x").toInt(),1200);
+        manager.fillScreen(id,QPointF(1300,50));
+        QTRY_COMPARE(frame().topLeft(),second.topLeft());
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("width").toInt(),960);
+        manager.fillScreen(id,QPointF(1300,50));
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("width").toInt(),320);
+        QTRY_VERIFY(second.contains(frame()));
+        QCOMPARE(frame().y(),qreal(80-platinumMenuBarHeight));
+        manager.moveWindow(id,850,80);
+        QTRY_COMPARE(first(manager,"Pointer Probe").value("x").toInt(),850);
         // The zoom box the same way: zoomed for the screen it was clicked on, moved fully onto it.
         manager.zoom(id,QPointF(1150,90));
         QTRY_COMPARE(first(manager,"Pointer Probe").value("width").toInt(),850);
@@ -6200,7 +6284,7 @@ class NativeTests : public QObject
         // The first login opens the Help Center by itself, and only once.
         QTRY_VERIFY_WITH_TIMEOUT(help() && help()->isVisible(), 5000);
         QVERIFY(!QFile::exists(marker));
-        QVERIFY(body().contains("Welcome to Platinum Reality"));
+        QVERIFY(body().contains("Welcome to Platinum Dreams"));
         QVERIFY(help()->hasActiveFocus());
         // A link inside a topic, or a row in the topic list, shows another topic.
         QMetaObject::invokeMethod(help(), "show", Q_ARG(QVariant, QVariant(QString("keys"))));
@@ -6221,7 +6305,7 @@ class NativeTests : public QObject
         QMetaObject::invokeMethod(root, "dispatchShellCommand", Q_ARG(QVariant, QVariant(QString("help"))),
                                   Q_ARG(QVariant, QVariant(0)));
         QTRY_VERIFY(help() && help()->isVisible());
-        QVERIFY(body().contains("Welcome to Platinum Reality"));
+        QVERIFY(body().contains("Welcome to Platinum Dreams"));
     }
     void middleClickPastesThePrimarySelectionAcrossApplications()
     {
@@ -11468,7 +11552,7 @@ class NativeTests : public QObject
         {
             QFile document(disk + "/" + file);
             QVERIFY(document.open(QIODevice::WriteOnly));
-            document.write("Platinum Reality\n");
+            document.write("Platinum Dreams\n");
         }
         start("frankenstein-finder", {"--root", disk, "--profile", scene.files.path() + "/finder-profile"});
         QTRY_VERIFY_WITH_TIMEOUT(!first(manager, "Hard Disk").isEmpty(), 10000);
@@ -11513,7 +11597,7 @@ class NativeTests : public QObject
         bluez.addDevice("AA:00:00:00:00:01", "Wireless Headphones", "audio-headset", true, true, true, 80);
         bluez.addDevice("AA:00:00:00:00:02", "Bluetooth Mouse", "input-mouse", true, true, true, 60);
         bluez.addDevice("AA:00:00:00:00:03", "Game Controller", "input-gaming", true, true, false);
-        bluez.change(FakeBluez::adapter, "org.bluez.Adapter1", "Alias", "Platinum Reality");
+        bluez.change(FakeBluez::adapter, "org.bluez.Adapter1", "Alias", "Platinum Dreams");
         QVERIFY(iwdBus.registerVirtualObject("/", &iwd, QDBusConnection::SubPath) && iwdBus.registerService("net.connman.iwd"));
         QVERIFY(bluezBus.registerVirtualObject("/", &bluez, QDBusConnection::SubPath) && bluezBus.registerService("org.bluez"));
         WifiService wifi(client);
@@ -11619,7 +11703,7 @@ class NativeTests : public QObject
         QVERIFY(stickies);
         QList<int> notes;
         for (const auto &[x, y, color, text] :
-             {std::tuple{790, 410, "yellow", "Welcome to Platinum Reality!"},
+             {std::tuple{790, 410, "yellow", "Welcome to Platinum Dreams!"},
               std::tuple{830, 495, "pink", "Stickies stay where you leave them."}})
         {
             int note = 0;

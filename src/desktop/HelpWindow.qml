@@ -16,8 +16,8 @@ FocusScope {
     property string topic: "welcome"
     readonly property var topics: [
         {id: "welcome", title: "Welcome", body:
-            "<h3>Welcome to Platinum Reality</h3>" +
-            "<p>Platinum Reality is a desktop for Linux in the spirit of the classic Mac OS. There is one " +
+            "<h3>Welcome to Platinum Dreams</h3>" +
+            "<p>Platinum Dreams is a desktop for Linux in the spirit of the classic Mac OS. There is one " +
             "menu bar at the top of the screen, windows move by their title bars, and your disks and the " +
             "Trash sit on the desktop.</p>" +
             "<p>On your keyboard, the <b>Command</b> key (⌘) is the Windows or Super key.</p>" +
@@ -30,8 +30,8 @@ FocusScope {
             "<h3>The menu bar and Control Strip</h3>" +
             "<p>The menu at the far left of the menu bar is the <b>Apple menu</b>. It has About This " +
             "Computer, Applications…, Calculator, the Control Panels, Key Caps, Note Pad, Puzzle, Scrapbook, Snapshot, " +
-            "Recent Applications and Terminal. Control Panels ▸ Apple Menu Options chooses whether its folders have " +
-            "submenus, how many recent applications it remembers, and its icon: the color Apple or " +
+            "Recent Applications, Recent Documents and Terminal. Control Panels ▸ Apple Menu Options chooses whether its folders have " +
+            "submenus, how many recent documents and applications it remembers, and its icon: the color Apple or " +
             "System 6's black one.</p>" +
             "<p>The menus next to it belong to the application in front. On the desktop they are File, " +
             "Edit, View, Window, Special and Help.</p>" +
@@ -50,7 +50,7 @@ FocusScope {
             "<h3>About This Computer</h3>" +
             "<p><b>Apple menu ▸ About This Computer</b> shows your system version, built-in RAM, " +
             "swap and available memory, with live resident-memory bars for running applications. " +
-            "The last row, Platinum Reality, is the desktop itself with the Finder, as Mac OS listed " +
+            "The last row, Platinum Dreams, is the desktop itself with the Finder, as Mac OS listed " +
             "itself.</p>" +
             "<p>Bars compare the listed applications. Shared pages can appear in more than one app; " +
             "helper processes are not included. Measurements that cannot be read say Unavailable. " +
@@ -143,7 +143,7 @@ FocusScope {
             "from the list on the left. Changes take effect as you make them; close the window when " +
             "you are done. The Control Strip's menus open the same window at their panel.</p><ul>" +
             "<li><b>Appearance</b>: highlight colour, sounds, WindowShade and the Control Strip.</li>" +
-            "<li><b>Apple Menu Options</b>: submenus on or off, how many recent applications to remember, and " +
+            "<li><b>Apple Menu Options</b>: submenus on or off, how many recent documents and applications to remember, and " +
             "the Apple menu's icon.</li>" +
             "<li><b>Bluetooth</b>: pair, connect and forget devices.</li>" +
             "<li><b>Control Strip</b>: show or hide the Control Strip, or choose Hot key to show/hide and " +
@@ -185,6 +185,16 @@ FocusScope {
             "<p>A favorite is an alias. To remove one, choose the Favorites folder itself (with Apple Menu " +
             "Options' submenus off) or open it from the Finder, and move the alias to the Trash; the item " +
             "itself is not touched.</p>"},
+        {id: "recent-documents", title: "Recent Documents", body:
+            "<h3>Recent Documents</h3>" +
+            "<p>Documents opened through the desktop, Finder or Open With appear newest first in " +
+            "<b>Apple menu ▸ Recent Documents</b>. Choose one to open it again. A missing file is dimmed.</p>" +
+            "<p><b>Clear Menu</b> forgets the history without deleting your documents. With Apple Menu " +
+            "Options' submenus off, choosing Recent Documents opens its folder; removing an alias there " +
+            "forgets just that item.</p>" +
+            "<p>Apple Menu Options sets separate document and application counts. Turn off <b>Remember " +
+            "recently used items</b> to stop recording and hide both menus. Files opened or saved inside " +
+            "an application's own dialogs are not recorded.</p>"},
         {id: "launcher", title: "Launcher", body:
             "<h3>Launcher</h3>" +
             "<p>Choose <b>Apple menu ▸ Control Panels ▸ Launcher</b> to open the Launcher, a window of buttons " +
@@ -267,14 +277,14 @@ FocusScope {
             "program.</p>"},
         {id: "software", title: "Software and updates", body:
             "<h3>Software and updates</h3>" +
-            "<p>Platinum Reality is built on Arch Linux. Install and update software with " +
+            "<p>Platinum Dreams is built on Arch Linux. Install and update software with " +
             "<b>pacman</b> in the Terminal (Apple menu ▸ Terminal):</p><ul>" +
             "<li>Update everything: <tt>sudo pacman -Syu</tt></li>" +
             "<li>Install an application: <tt>sudo pacman -S</tt> followed by its name, for example " +
             "<tt>sudo pacman -S gimp</tt></li>" +
             "<li>Find one: <tt>pacman -Ss</tt> followed by a word</li></ul>" +
             "<p>New applications appear in Applications… as soon as they are installed.</p>" +
-            "<p><b>Apple menu ▸ Control Panels ▸ Software Update…</b> installs new versions of Platinum Reality " +
+            "<p><b>Apple menu ▸ Control Panels ▸ Software Update…</b> installs new versions of Platinum Dreams " +
             "itself. After an update, <b>Restore Previous Version…</b> goes back to the one you had.</p>" +
             "<p>When something needs an administrator's password (installing an update, the Camera module, " +
             "Fingerprints), a password box asks for it. Type the password and click <b>OK</b>; <b>Cancel</b> " +

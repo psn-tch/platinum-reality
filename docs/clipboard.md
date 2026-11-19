@@ -16,7 +16,7 @@ before the fix (`copyAndPasteTravelBetweenRealBrowsers`, Firefox to Chromium fai
 paste).
 
 **Command-C/V did nothing in external applications.** Super+C reached them as Super+C. Only
-Platinum Reality' own Qt applications had Meta shortcuts.
+Platinum Dreams' own Qt applications had Meta shortcuts.
 
 ## How it works now
 
@@ -74,7 +74,7 @@ Platinum Reality' own Qt applications had Meta shortcuts.
 ## Recent Clippings
 
 Lily Hewitt, 2026-11-12: "can the clipboard have a history? it would be rad to be able to copy multiple
-things and be able to switch between them". Mac OS 9 kept one clipping, so this is Platinum Reality's own.
+things and be able to switch between them". Mac OS 9 kept one clipping, so this is Platinum Dreams's own.
 
 - **What is kept:** each new copy, text or picture, from any application, the desktop or a clipboard
   tool. The newest 12 distinct clippings are kept, within 96 MB in all. A clipping copied again moves

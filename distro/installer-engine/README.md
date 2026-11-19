@@ -119,7 +119,7 @@ sd-encrypt drop-in is actually applied. systemd-boot is installed with
 
 The new account has wheel and password-authenticated sudo. Live autologin,
 passwordless sudo, SSH keys, VM test units and displays.json are not copied.
-SDDM's [Last] Session preselects the packaged Platinum Reality Wayland session.
+SDDM's [Last] Session preselects the packaged Platinum Dreams Wayland session.
 Normal SDDM authentication followed by the desktop is the agreed R2 proof.
 The next image selects Sammy's packaged Platinum SDDM theme using
 `/etc/sddm.conf.d/10-platinum-reality.conf`. Before erasure, offline package

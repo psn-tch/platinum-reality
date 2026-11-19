@@ -6,7 +6,7 @@ startup icon. See the README for installing and removing it.
 
 ## Unlocking an encrypted disk
 
-When the disk is encrypted, the startup screen asks for the password itself. Platinum Reality's
+When the disk is encrypted, the startup screen asks for the password itself. Platinum Dreams's
 installer encrypts the disk when Encrypt Disk is checked on its Select Destination page (off unless chosen, since update 50). The prompt is a Macintosh dialog below the icon (added 2026-10-30):
 - "Enter your password to start up." over an empty field;
 - one bullet per character typed, up to 28;

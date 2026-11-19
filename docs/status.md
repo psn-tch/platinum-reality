@@ -248,7 +248,7 @@ The sections below preserve earlier qualification and deployment history.
 The user subsequently requested default-session deployment before physical
 qualification. The preview is now installed per-user in
 `~/.local/share/platinum-dreams-native/`. The post-fingerprint tty1 command in
-`~/.bash_profile` invokes a five-second selector (Platinum Reality default, K for
+`~/.bash_profile` invokes a five-second selector (Platinum Dreams default, K for
 KDE). The exact profile backup and deployment hashes are retained. Protected
 projects, the fingerprint gate, KDE settings and system packages are unchanged.
 Seven disposable-home installer/recovery/routing checks pass. Actual physical
@@ -260,7 +260,7 @@ user-local installed payload; its installed supervisor also rendered and exited
 cleanly in nested mode at scale 1.5. Existing PulseAudio/PipeWire server queries
 succeeded from a private runtime; no playback claim follows from those queries.
 
-The user selected Platinum Reality as the whole login desktop. A separate session
+The user selected Platinum Dreams as the whole login desktop. A separate session
 supervisor now uses installed Sway 1.12 for display/seat/input and swaylock for the
 outer screen lock. [Eight nested backend checks](evidence/session-backend-20261018-b/manifest.json)
 pass, covering startup protection, control robustness, native lock readiness,
@@ -334,7 +334,7 @@ The chronological entries below describe earlier revisions, including the former
 socket restriction and browser alignment failures. They do not override the
 current results above.
 
-Lily Hewitt subsequently reports Firefox opening successfully inside Platinum Reality.
+Lily Hewitt subsequently reports Firefox opening successfully inside Platinum Dreams.
 This is a user-observed launch result, not an automated browser qualification.
 Version/backend and browsing, downloads, clipboard, media and restart behavior
 remain unrecorded. See [application observations](application-compatibility.md).
@@ -595,9 +595,9 @@ The native runner now defaults to a 30-second QtTest function watchdog, recorded
 in each new manifest; a timeout is failure, never a skipped or passing result.
 
 All source/build edits remain in the independent project or owned test fixtures.
-The existing KDE Platinum Reality repositories, their management/evidence, Potato
+The existing KDE Platinum Dreams repositories, their management/evidence, Potato
 and KDE configuration were not edited. This separate prototype now uses the
-visible product name Platinum Reality; its working directory and internal IDs
+visible product name Platinum Dreams; its working directory and internal IDs
 remain unchanged. No root operations, package installation, VM/emulator, original Macintosh
 program, deployment, Git initialization, commit or push was performed. No Apple
 asset is bundled; licensing/distribution is undecided.

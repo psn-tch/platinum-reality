@@ -1,4 +1,4 @@
-# Platinum Reality — development notes (the original README)
+# Platinum Dreams — development notes (the original README)
 
 > **Development log.** Paths, defaults, machines and earlier project names here describe the
 > developer's setup when each entry was written. Current behaviour is in the README and
@@ -11,7 +11,7 @@ Original Macintosh binaries and emulation are outside scope. This project is
 developed in the separate `frankenstein-macintosh-native` working directory.
 The earlier KDE Platinum theme repositories, their v0.2.0 scope and Potato
 remain protected. “Frankenstein Macintosh” is the earlier experiment name; the
-product name is now **Platinum Reality**, as requested.
+product name is now **Platinum Dreams**, as requested.
 
 The [source repository](https://github.com/psn-tch/platinum-reality) is private
 during development. Build outputs, personal assets/profiles, the local handoff
@@ -58,7 +58,7 @@ all GPU applications or establish the cause of earlier intermittent Firefox stal
 The exact selected user-local release and installed/session qualification counts
 are recorded in [the release ledger](docs/status.md). The
 [Sway-backed session supervisor](docs/standalone-session.md) provides seat and
-lock duties; Platinum Reality owns the visible desktop. Qualified updates take
+lock duties; Platinum Dreams owns the visible desktop. Qualified updates take
 effect at a user-chosen logout/login. The fingerprint gate and KDE fallback are
 retained: press K at the five-second login selector, or use
 `~/.local/bin/platinum-dreams-use-kde` to change the saved default.
@@ -199,7 +199,7 @@ Lily Hewitt expanded the source-only authorization to implementation, builds and
 and authorized native implementation, automatic tests and per-user desktop deployment.
 The former executor IPC restriction is resolved. No root actions, system package
 installation, repository initialization, commits or pushes occurred. No Apple
-software or assets are bundled. No existing KDE Platinum Reality repository or Potato files were changed.
+software or assets are bundled. No existing KDE Platinum Dreams repository or Potato files were changed.
 
 No complete historical certification, universal menu/CSD adaptation, Xwayland
 integration or production session safety is claimed. Project licensing remains

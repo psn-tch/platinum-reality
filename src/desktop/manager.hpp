@@ -186,6 +186,8 @@ class ManagedWindow final : public QObject
     // Right-click on the title bar: the whole screen (below the menu bar), and back to filledRestore.
     bool filled = false, fillPending = false;
     QRect filledRestore;
+    // Where the fill put the window; a filled window dragged away from it fills again where it is.
+    QPoint filledAt;
     // Where the click that asked to fill was, for a fill that waits for the shade to roll down.
     std::optional<QPointF> fillPointer;
     // A client-requested full screen: it covers the desktop without chrome and
@@ -313,6 +315,7 @@ class NativeManager final : public QAbstractListModel
     Q_PROPERTY(QObject *nativeDragIcon READ nativeDragIcon NOTIFY nativeDragChanged)
     Q_PROPERTY(qulonglong desktopDropWindow READ desktopDropWindow NOTIFY desktopDropTargetChanged)
     Q_PROPERTY(QVariantList recentApplications READ recentApplications NOTIFY recentApplicationsChanged)
+    Q_PROPERTY(QVariantList recentDocuments READ recentDocuments NOTIFY recentDocumentsChanged)
     Q_PROPERTY(bool pointerCaptured READ pointerCaptured NOTIFY pointerCaptureChanged)
     // Session-bus services for applications; null without a compositor (shell previews, tests).
     Q_PROPERTY(QObject *notifications READ notifications CONSTANT)
@@ -547,6 +550,9 @@ class NativeManager final : public QAbstractListModel
     Q_INVOKABLE bool idleInhibitAvailable() const;
     bool idleInhibited() const;
     QVariantList recentApplications() const { return m_recentApplications; }
+    QVariantList recentDocuments();
+    Q_INVOKABLE QString recentDocumentsFolder();
+    Q_INVOKABLE bool clearRecentDocuments();
     void attachShell(QWaylandXdgShell *shell);
     void setX11Bridge(X11Bridge *bridge);
     void initializeWallet();
@@ -621,6 +627,7 @@ class NativeManager final : public QAbstractListModel
     void windowMoveChanged();
     void desktopDropTargetChanged();
     void recentApplicationsChanged();
+    void recentDocumentsChanged();
     void launcherItemsChanged();
     void personalStripIconsChanged();
     void pointerCaptureChanged();
@@ -806,4 +813,6 @@ class NativeManager final : public QAbstractListModel
     qulonglong m_desktopDropWindow = 0;
     QVariantList m_recentApplications; // Apple menu > Recent Applications, newest first
     void rememberRecentApplication(const QString &id);
+    void rememberRecentDocument(const QString &path);
+    QFileSystemWatcher *m_recentDocumentsWatcher = nullptr;
 };

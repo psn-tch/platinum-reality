@@ -15,7 +15,8 @@ import shutil
 import subprocess
 import tempfile
 
-MARK = '# Platinum Reality: no Arch/KDE desktop sounds'
+MARK = '# Platinum Dreams: no Arch/KDE desktop sounds'
+PREVIOUS_MARK = '# Platinum Reality: no Arch/KDE desktop sounds'
 SOUNDS = 'usr/share/sounds'
 # The sound themes' folders; Oxygen-* are loose files of the oxygen theme.
 FOLDERS = ['freedesktop', 'ocean', 'oxygen', 'plasma-bigscreen']
@@ -34,7 +35,7 @@ class SoundsError(Exception):
 
 def _marked(lines):
     """Index of our marker line, or -1. Lily's first script wrote the same marker with her name and date."""
-    return next((i for i, line in enumerate(lines) if line.startswith(MARK)), -1)
+    return next((i for i, line in enumerate(lines) if line.startswith((MARK, PREVIOUS_MARK))), -1)
 
 
 def removed(root=Path('/')):

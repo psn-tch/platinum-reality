@@ -81,7 +81,7 @@ bool ScreenshotService::capture()
     auto pictures = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
     if (pictures.isEmpty())
         pictures = QDir::homePath() + "/Pictures";
-    m_suggestedPath = pictures + "/Screenshots/Platinum Reality " +
+    m_suggestedPath = pictures + "/Screenshots/Platinum Dreams " +
                       QDateTime::currentDateTime().toString("yyyy-MM-dd HH.mm.ss.zzz") + ".png";
     m_error.clear();
     emit changed();

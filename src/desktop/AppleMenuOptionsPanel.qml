@@ -3,8 +3,8 @@ import QtQuick.Controls
 
 // Apple Menu Options, a panel of the Control Panels window, laid out as 9.2.2's (captured in the
 // reference VM, 2026-11-12): Submenus On or Off, each with a small picture of a menu, and
-// Remember recently used items. Ours remembers applications only (there are no recent documents or
-// servers to count), from 1 to 99, and remembering off records nothing new. Apple Menu Icon is ours,
+// Remember recently used items, with separate document and application counts from 1 to 99.
+// Remembering off records nothing new. Apple Menu Icon is ours,
 // not 9.2.2's (Lily Hewitt, 2026-11-16): the colour Apple or System 6's black one. Saved in
 // appearance.json (AppearanceSettings.appleMenu); the Apple menu follows it at once.
 Item {
@@ -75,7 +75,7 @@ Item {
             }
             Text {
                 width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 11; color: "#444"; textFormat: Text.PlainText
-                text: "With submenus off, Control Panels opens its window and Recent Applications opens Applications."
+                text: "With submenus off, folders open in windows. Recent Applications opens Applications."
             }
         }
         PlatinumGroup {
@@ -88,6 +88,33 @@ Item {
                 onToggled: {
                     panel.settings.setAppleMenuOption("rememberRecent", checked)
                     checked = Qt.binding(function() { return panel.options.rememberRecent !== false })
+                }
+            }
+            Row {
+                spacing: 12
+                leftPadding: 24
+                Text {
+                    text: "Documents:"; font.pixelSize: 12; font.bold: true; textFormat: Text.PlainText
+                    width: 110; anchors.verticalCenter: parent.verticalCenter
+                    color: documentCount.enabled ? "#111" : "#888"
+                }
+                TextField {
+                    id: documentCount
+                    objectName: "apple-menu-recent-documents"
+                    width: 48; height: 26
+                    enabled: panel.options.rememberRecent !== false
+                    font.pixelSize: 12; selectByMouse: true; horizontalAlignment: TextInput.AlignRight
+                    validator: IntValidator { bottom: 1; top: 99 }
+                    color: "black"
+                    selectionColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightColor : "#ccccff"
+                    selectedTextColor: typeof manager !== "undefined" && manager ? manager.appearance.highlightTextColor : "black"
+                    background: FieldBackground {}
+                    text: String(panel.options.recentDocuments || 10)
+                    onEditingFinished: {
+                        const value = parseInt(text)
+                        if (value >= 1 && value <= 99) panel.settings.setAppleMenuOption("recentDocuments", value)
+                        text = Qt.binding(function() { return String(panel.options.recentDocuments || 10) })
+                    }
                 }
             }
             Row {
@@ -120,8 +147,8 @@ Item {
             Text {
                 width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 11; color: "#444"; textFormat: Text.PlainText
                 text: panel.options.rememberRecent === false
-                      ? "Recent Applications is left out of the Apple menu, and nothing new is remembered."
-                      : "The Apple menu's Recent Applications lists this many, newest first."
+                      ? "Recent items are left out of the Apple menu, and nothing new is remembered."
+                      : "Recent documents and applications appear newest first. Clear Menu forgets documents without deleting them."
             }
         }
         PlatinumGroup {

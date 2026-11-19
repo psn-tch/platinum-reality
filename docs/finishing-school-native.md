@@ -6,7 +6,7 @@
 
 Source: `~/Projects/Platinum-Dreams-finishing-school/` ("Operation Macintosh Finishing School",
 2026-10-14). It is twelve phases of Mac OS 9 interaction contracts backed by Apple publications,
-with owner decisions D01–D12. It was written for the older KDE-hosted Platinum Reality. Here the
+with owner decisions D01–D12. It was written for the older KDE-hosted Platinum Dreams. Here the
 desktop owns its compositor, so several items it marked "blocked in KWin" are possible or done.
 Lily Hewitt pointed Sam at it on 2026-10-21. Its decisions are still Lily Hewitt's to make; the defaults below
 follow the school's recommendations.

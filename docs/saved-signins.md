@@ -8,7 +8,7 @@ by development or automated tests; real unlock and retained sign-ins need a tria
 
 ## Intended behavior
 
-In a physical Platinum Reality login using normal application settings, recognized
+In a physical Platinum Dreams login using normal application settings, recognized
 VS Code, Chromium and Google Chrome launchers use `--password-store=kwallet6`.
 They retain the existing user profiles and the same KWallet backend used under
 KDE. An application's first wallet request may ask for the wallet password.

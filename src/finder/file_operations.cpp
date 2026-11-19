@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QSaveFile>
 #include <QSettings>
 #include <QUrl>
@@ -48,6 +49,44 @@ GFile *gfile(const QString &p)
 {
     return g_file_new_for_path(QFile::encodeName(p).constData());
 }
+using FileIdentity = QPair<quint64, quint64>;
+FileIdentity identity(const struct stat &entry)
+{
+    return {quint64(entry.st_dev), quint64(entry.st_ino)};
+}
+struct CopiedSources
+{
+    QHash<QString, struct stat> entries;
+    // Unlinking one of our copied hard links changes the same inode's ctime and link count.
+    QHash<FileIdentity, struct stat> unlinked;
+};
+bool sameIdentity(const struct stat &a, const struct stat &b)
+{
+    return a.st_dev == b.st_dev && a.st_ino == b.st_ino && a.st_mode == b.st_mode;
+}
+bool sameVersion(const struct stat &a, const struct stat &b)
+{
+    return sameIdentity(a, b) && a.st_size == b.st_size && a.st_nlink == b.st_nlink &&
+           a.st_mtim.tv_sec == b.st_mtim.tv_sec && a.st_mtim.tv_nsec == b.st_mtim.tv_nsec &&
+           a.st_ctim.tv_sec == b.st_ctim.tv_sec && a.st_ctim.tv_nsec == b.st_ctim.tv_nsec;
+}
+QString changedSource()
+{
+    return "The source changed while it was being copied. Its changed items were left in place.";
+}
+bool unchangedSources(const CopiedSources &copied, QString &error)
+{
+    for (auto it = copied.entries.cbegin(); it != copied.entries.cend(); ++it)
+    {
+        struct stat current {};
+        if (lstat(QFile::encodeName(it.key()).constData(), &current) != 0 || !sameVersion(current, it.value()))
+        {
+            error = changedSource();
+            return false;
+        }
+    }
+    return true;
+}
 FileResult moveEntry(const QString &source, const QString &target)
 {
     if (exists(target))
@@ -56,14 +95,15 @@ FileResult moveEntry(const QString &source, const QString &target)
     GFile *to = gfile(target);
     GError *error = nullptr;
     bool ok =
-        g_file_move(from, to, G_FILE_COPY_NOFOLLOW_SYMLINKS, nullptr, nullptr, nullptr, &error);
+        g_file_move(from, to, GFileCopyFlags(G_FILE_COPY_NOFOLLOW_SYMLINKS | G_FILE_COPY_NO_FALLBACK_FOR_MOVE),
+                    nullptr, nullptr, nullptr, &error);
     g_object_unref(from);
     g_object_unref(to);
     return ok ? FileResult{true, target, {}} : failure(errorText(error));
 }
 bool copyTree(const QString &source, const QString &target, GCancellable *cancel,
               const std::shared_ptr<std::atomic_bool> &stop, QString &error,
-              const std::shared_ptr<CopyProgress> &bytes = {})
+              const std::shared_ptr<CopyProgress> &bytes = {}, CopiedSources *copied = nullptr)
 {
     if (stop && stop->load())
         g_cancellable_cancel(cancel);
@@ -71,6 +111,16 @@ bool copyTree(const QString &source, const QString &target, GCancellable *cancel
     {
         error = "Copy canceled.";
         return false;
+    }
+    if (copied)
+    {
+        struct stat original {};
+        if (lstat(QFile::encodeName(source).constData(), &original) != 0)
+        {
+            error = changedSource();
+            return false;
+        }
+        copied->entries.insert(source, original);
     }
     QFileInfo info(source);
     if (info.isDir() && !info.isSymLink())
@@ -93,25 +143,25 @@ bool copyTree(const QString &source, const QString &target, GCancellable *cancel
             error = errorText(enumerationError);
             return false;
         }
-        bool copied = true;
+        bool complete = true;
         while (auto *entry = g_file_enumerator_next_file(entries, cancel, &enumerationError))
         {
             const auto name = QFile::decodeName(g_file_info_get_name(entry));
             g_object_unref(entry);
             if (!copyTree(QDir(source).filePath(name), QDir(target).filePath(name), cancel, stop,
-                          error, bytes))
+                          error, bytes, copied))
             {
-                copied = false;
+                complete = false;
                 break;
             }
         }
         if (enumerationError)
         {
             error = errorText(enumerationError);
-            copied = false;
+            complete = false;
         }
         g_object_unref(entries);
-        if (!copied)
+        if (!complete)
             return false;
         GFile *from = gfile(source);
         GFile *to = gfile(target);
@@ -185,25 +235,27 @@ void removeCreatedStage(const QString &p)
     else
         QFile::remove(p);
 }
-bool removeBelow(int parent, const char *name, dev_t device, QString &error);
-// Moves an item to Trash or back, which may be on another disk. g_file_move copies a file across
-// disks but refuses a folder ("Can't recursively copy directory"): a folder put in the Trash from a
-// flash drive stayed where it was. Such a folder is copied whole beside the target, renamed into
-// place, and only then removed from its disk. If some of it cannot be removed, the copy stays (ok
-// is false, path is the copy): nothing is lost.
+bool removeBelow(int parent, const char *name, dev_t device, QString &error,
+                 CopiedSources *copied = nullptr, const QString &source = {});
+// Moves an item to Trash, back, or to another folder. Across disks, copy beside the target,
+// publish, and then remove the unchanged sources. GIO's copy/delete fallback cannot detect edits
+// made during copying, so it is disabled even for individual files. If removal fails, the copy stays (ok
+// is false, path is the copy). Only entries whose copied identities and versions still match
+// may be removed. This detects source changes; it does not provide an atomic filesystem snapshot.
 FileResult moveAcrossDisks(const QString &source, const QString &target)
 {
     const QFileInfo item(source);
-    if (!item.isDir() || item.isSymLink() || FileOperations::sameVolume({source}, QFileInfo(target).absolutePath()))
+    if (FileOperations::sameVolume({source}, QFileInfo(target).absolutePath()))
         return moveEntry(source, target);
     if (exists(target))
         return failure("An item with that name already exists.");
     const auto stage = QFileInfo(target).absolutePath() + "/.frankenstein-move-" + QUuid::createUuid().toString(QUuid::Id128);
     GCancellable *token = g_cancellable_new();
     QString error;
-    const bool copied = copyTree(source, stage, token, {}, error);
+    CopiedSources copied;
+    const bool complete = copyTree(source, stage, token, {}, error, {}, &copied);
     g_object_unref(token);
-    if (!copied)
+    if (!complete || !unchangedSources(copied, error))
     {
         removeCreatedStage(stage);
         return failure(error);
@@ -218,7 +270,8 @@ FileResult moveAcrossDisks(const QString &source, const QString &target)
     struct stat original {};
     const bool removed = parent >= 0 &&
                          fstatat(parent, QFile::encodeName(item.fileName()).constData(), &original, AT_SYMLINK_NOFOLLOW) == 0 &&
-                         removeBelow(parent, QFile::encodeName(item.fileName()).constData(), original.st_dev, error);
+                         removeBelow(parent, QFile::encodeName(item.fileName()).constData(), original.st_dev,
+                                     error, &copied, source);
     if (parent >= 0)
         close(parent);
     if (!removed)
@@ -322,7 +375,7 @@ FileResult FileOperations::move(const QString &source, const QString &directory)
     if (QFileInfo(source).isDir() && !QFileInfo(source).isSymLink() &&
         within(QFileInfo(source).canonicalFilePath(), QFileInfo(directory).canonicalFilePath()))
         return failure("A folder cannot be moved into itself.");
-    return moveEntry(source, QDir(directory).filePath(QFileInfo(source).fileName()));
+    return moveAcrossDisks(source, QDir(directory).filePath(QFileInfo(source).fileName()));
 }
 FileResult FileOperations::duplicate(const QString &source) const
 {
@@ -330,7 +383,8 @@ FileResult FileOperations::duplicate(const QString &source) const
         return failure("The item is unavailable.");
     const auto parent = QFileInfo(source).absolutePath();
     const QFileInfo info(source);
-    const auto suffix = !info.isDir() && !info.suffix().isEmpty() ? "." + info.suffix() : QString();
+    const auto suffix = !info.isDir() && info.fileName().lastIndexOf('.') > 0 && !info.suffix().isEmpty()
+                            ? "." + info.suffix() : QString();
     const auto stem = suffix.isEmpty() ? info.fileName() : info.completeBaseName();
     // Keep the Linux association suffix usable. This naming policy is a native
     // adaptation, not a claim about classic Finder's type/creator-based naming.
@@ -371,7 +425,7 @@ FileResult FileOperations::createFile(const QString &directory, const QString &n
     if (!inside(QFileInfo(directory).canonicalFilePath()) || !validName(name))
         return failure("The file name or location is invalid.");
     const QFileInfo info(name);
-    const auto suffix = info.suffix().isEmpty() ? QString() : "." + info.suffix();
+    const auto suffix = name.lastIndexOf('.') > 0 && !info.suffix().isEmpty() ? "." + info.suffix() : QString();
     const auto stem = suffix.isEmpty() ? name : info.completeBaseName();
     auto path = QDir(directory).filePath(name);
     for (int number = 2; exists(path); ++number)
@@ -447,15 +501,37 @@ namespace
 {
 // Removes `name` inside the open directory `parent` without following links or
 // crossing onto another device. Returns false after recording the first error.
-bool removeBelow(int parent, const char *name, dev_t device, QString &error)
+bool removeBelow(int parent, const char *name, dev_t device, QString &error,
+                 CopiedSources *copied, const QString &source)
 {
     struct stat entry {};
     if (fstatat(parent, name, &entry, AT_SYMLINK_NOFOLLOW) != 0)
     {
-        if (errno == ENOENT)
+        if (errno == ENOENT && !copied)
             return true;
         error = QString::fromLocal8Bit(std::strerror(errno));
         return false;
+    }
+    if (copied)
+    {
+        const auto expected = copied->entries.constFind(source);
+        if (expected == copied->entries.cend())
+        {
+            error = changedSource();
+            return false;
+        }
+        auto version = expected.value();
+        const auto unlinked = copied->unlinked.constFind(identity(version));
+        if (unlinked != copied->unlinked.cend())
+        {
+            version.st_ctim = unlinked->st_ctim;
+            version.st_nlink = unlinked->st_nlink;
+        }
+        if (!sameVersion(entry, version))
+        {
+            error = changedSource();
+            return false;
+        }
     }
     if (entry.st_dev != device)
     {
@@ -470,6 +546,13 @@ bool removeBelow(int parent, const char *name, dev_t device, QString &error)
             error = QString::fromLocal8Bit(std::strerror(errno));
             return false;
         }
+        struct stat opened {};
+        if (copied && (fstat(directory, &opened) != 0 || !sameVersion(entry, opened)))
+        {
+            close(directory);
+            error = changedSource();
+            return false;
+        }
         DIR *stream = fdopendir(directory);
         if (!stream)
         {
@@ -479,11 +562,33 @@ bool removeBelow(int parent, const char *name, dev_t device, QString &error)
         }
         bool ok = true;
         QList<QByteArray> children;
-        while (auto *child = readdir(stream))
+        while (true)
+        {
+            errno = 0;
+            auto *child = readdir(stream);
+            if (!child)
+            {
+                if (errno)
+                {
+                    error = QString::fromLocal8Bit(std::strerror(errno));
+                    ok = false;
+                }
+                break;
+            }
             if (std::strcmp(child->d_name, ".") != 0 && std::strcmp(child->d_name, "..") != 0)
+            {
+                if (copied && !copied->entries.contains(QDir(source).filePath(QFile::decodeName(child->d_name))))
+                {
+                    error = changedSource();
+                    ok = false;
+                    break;
+                }
                 children.push_back(child->d_name);
+            }
+        }
         for (const auto &child : children)
-            if (!removeBelow(dirfd(stream), child.constData(), device, error))
+            if (!ok || !removeBelow(dirfd(stream), child.constData(), device, error, copied,
+                                    copied ? QDir(source).filePath(QFile::decodeName(child)) : QString()))
             {
                 ok = false;
                 break;
@@ -491,11 +596,49 @@ bool removeBelow(int parent, const char *name, dev_t device, QString &error)
         closedir(stream);
         if (!ok)
             return false;
+        // Deleting children changes directory timestamps, so recheck identity rather than
+        // its old version. A newly added child makes AT_REMOVEDIR fail and stays untouched.
+        struct stat current {};
+        if (copied && (fstatat(parent, name, &current, AT_SYMLINK_NOFOLLOW) != 0 || !sameIdentity(entry, current)))
+        {
+            error = changedSource();
+            return false;
+        }
+    }
+    // Hold a hard-linked inode so we can observe only our own unlink's metadata update.
+    // O_PATH does not read it, follow a symlink, or require read access to its contents.
+    const bool hardLink = copied && !S_ISDIR(entry.st_mode) && entry.st_nlink > 1;
+    const int held = hardLink ? openat(parent, name, O_PATH | O_NOFOLLOW | O_CLOEXEC) : -1;
+    struct stat before {};
+    if (hardLink && (held < 0 || fstat(held, &before) != 0 || !sameVersion(entry, before)))
+    {
+        if (held >= 0)
+            close(held);
+        error = changedSource();
+        return false;
     }
     if (unlinkat(parent, name, S_ISDIR(entry.st_mode) ? AT_REMOVEDIR : 0) != 0)
     {
         error = QString::fromLocal8Bit(std::strerror(errno));
+        if (held >= 0)
+            close(held);
         return false;
+    }
+    if (held >= 0)
+    {
+        struct stat after {};
+        const bool read = fstat(held, &after) == 0;
+        close(held);
+        // Our unlink changes ctime and link count, but cannot change contents, mode or mtime.
+        auto expected = entry;
+        expected.st_ctim = after.st_ctim;
+        expected.st_nlink = after.st_nlink;
+        if (!read || after.st_nlink != entry.st_nlink - 1 || !sameVersion(expected, after))
+        {
+            error = changedSource();
+            return false;
+        }
+        copied->unlinked.insert(identity(entry), after);
     }
     return true;
 }

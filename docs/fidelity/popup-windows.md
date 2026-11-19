@@ -34,7 +34,7 @@ addresses, once while idle); the study ran from saved VM states (`savevm`/`loadv
 - The closed tab's own colours: the Control Strip covered it.
 - Opening/closing sounds: none are played; none were heard or checked.
 
-## Platinum Reality
+## Platinum Dreams
 
 - The desktop draws pop-ups (`PopUpTab.qml`, the frame in `Desktop.qml`, `NativeManager::setPopUp`
   and friends). Only the Finder's own windows can become pop-ups, as in 9.2.2.

@@ -112,7 +112,7 @@ class VerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(update.UpdateError, 'expired'):
             update.verify_bundle(bundle(self.folder('expired'), self.keys, valid=timedelta(days=-1)),
                                  self.keys.keyring, installed=None, now=NOW)
-        with self.assertRaisesRegex(update.UpdateError, 'not a Platinum Reality release'):
+        with self.assertRaisesRegex(update.UpdateError, 'not a Platinum Dreams release'):
             update.verify_bundle(bundle(self.folder('name'), self.keys, name='something-else'),
                                  self.keys.keyring, installed=None, now=NOW)
         with self.assertRaisesRegex(update.UpdateError, 'aarch64'):
@@ -200,7 +200,7 @@ class InstallTests(unittest.TestCase):
         self.install(bundle(self.root / 'two', self.keys, version='0.42-1'), installed='0.41-1')
         self.assertTrue((self.state / 'previous/platinum-reality-0.41-1-x86_64.pkg.tar.zst').is_file())
         pacman = Pacman()
-        # It reports the version (Software Update shows "Platinum Reality 0.41-1 is installed").
+        # It reports the version (Software Update shows "Platinum Dreams 0.41-1 is installed").
         self.assertEqual(update.restore_previous(self.reports.append, self.keys.keyring, self.state, pacman), '0.41-1')
         self.assertTrue(pacman.calls[-1][3].endswith('platinum-reality-0.41-1-x86_64.pkg.tar.zst'))
 

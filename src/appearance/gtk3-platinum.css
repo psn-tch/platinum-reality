@@ -1,4 +1,4 @@
-/* Platinum Reality application appearance v1. GTK 3 only (GTK 4 has no scroll arrows). */
+/* Platinum Dreams application appearance v1. GTK 3 only (GTK 4 has no scroll arrows). */
 /* Mac OS 9.2.2 Smart Scrolling: both scroll arrows together at the end of the bar. */
 scrollbar {
     -GtkScrollbar-has-backward-stepper: false;

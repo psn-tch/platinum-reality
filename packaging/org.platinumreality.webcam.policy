@@ -5,7 +5,7 @@
      Turning the camera off never asks: it only takes access away. Turning it on asks for an
      administrator's password every time, so no program can quietly switch the camera back on. -->
 <policyconfig>
-  <vendor>Platinum Reality</vendor>
+  <vendor>Platinum Dreams</vendor>
   <vendor_url>https://github.com/psn-tch/platinum-reality</vendor_url>
   <action id="org.platinumreality.webcam.off">
     <description>Turn the camera off</description>

@@ -1,6 +1,6 @@
 # Application appearance on launch
 
-Platinum Reality supplies original classic-inspired controls to applications
+Platinum Dreams supplies original classic-inspired controls to applications
 launched by its Applications browser and document-opening path. This is a native
 adaptation, not an authenticated reconstruction of every Mac OS 9.2.2 control.
 It does not modify the existing KDE project, host theme settings or installed
@@ -110,7 +110,7 @@ not read. This is a presentation decision, not an OS security boundary or an
 xdg-decoration negotiation claim. General GTK/Electron CSD is still preserved.
 
 Only the dedicated browser CSS hides duplicate caption buttons. This profile is
-intended for launch inside Platinum Reality; opening it directly on another
+intended for launch inside Platinum Dreams; opening it directly on another
 desktop will not supply the replacement frame. The native tenth workflow tests
 an actual disposable Firefox blank window, its real square controls and process
 exit. It awaits execution. The [130-check local ledger](evidence/local-20261018T173419/manifest.json)

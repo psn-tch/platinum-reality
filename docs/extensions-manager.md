@@ -1,6 +1,6 @@
 # Extensions Manager
 
-Lily Hewitt asked on 2026-11-14 for the Mac OS 9.2.2 features Platinum Reality did not have yet. 9.2.2's
+Lily Hewitt asked on 2026-11-14 for the Mac OS 9.2.2 features Platinum Dreams did not have yet. 9.2.2's
 Extensions Manager chooses which extensions and control panels load at startup. Here it chooses which
 programs start when you log in: the freedesktop autostart items, the same ones other desktops start.
 
@@ -19,9 +19,9 @@ Open it from the Apple menu ▸ Control Panels ▸ Extensions Manager.
 ## Sets
 
 - The checkboxes belong to the selected set. **My Settings** is yours; **Duplicate Set…** copies the selected
-  set under a new name. **Platinum Reality All** (everything On) and **Platinum Reality Base** (everything
+  set under a new name. **Platinum Dreams All** (everything On) and **Platinum Dreams Base** (everything
   Off) are locked like 9.2.2's "Mac OS 9.2.2 All" and "Base": changing one makes the change in My Settings.
-- The sets are Platinum Reality's own (`extensions.json` in the session profile), so KDE's startup
+- The sets are Platinum Dreams's own (`extensions.json` in the session profile), so KDE's startup
   programs stay as KDE has them.
 - **The first session:** the items already there begin Off. They belong to other desktops, and Platinum
   Reality never started them before, so the first login with Extensions Manager starts nothing new (on

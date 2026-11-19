@@ -12,7 +12,9 @@ Item {
     property string openModule: ""
     signal moduleRequested(string module, Item anchor)
     // Sound Volume, as in 9.2.2: no menu, a vertical slider shown while the button is held over
-    // the module; releasing sets the level. The volume is {available, value (0-100), muted}.
+    // the module. The level follows the thumb as it is dragged, so it can be heard (Lily Hewitt,
+    // 2026-11-17: set on release, it took two or three tries). The volume is {available, value
+    // (0-100), muted}.
     property var volume: null
     // The user's own imported assets (scripts/import-macos9-assets.py): a module with an icon in
     // <personalFolder>/icons/control-strip/<command>.png shows it instead of our drawing. Only the
@@ -33,7 +35,7 @@ Item {
     // General Controls ▸ Menu Bar Size enlarges the strip with the menu bar. Everything inside is
     // laid out at the measured size; the strip, its slider and its outline are scaled from there.
     property real zoom: 1
-    // In the order 9.2.2 lists its modules (alphabetically by file), with Platinum Reality's own.
+    // In the order 9.2.2 lists its modules (alphabetically by file), with Platinum Dreams's own.
     // A new list recreates every module (and reloads its icon), so it changes only when what it
     // holds does, not each time a battery or tray item reports something.
     readonly property string moduleSignature: JSON.stringify(moduleList)
@@ -44,9 +46,9 @@ Item {
         .concat(battery && battery.present ? [{command:"battery",name:"Battery"}] : [])
         .concat([{command:"bluetooth",name:"Bluetooth"},
                  {command:"monitors",name:"Brightness"},
-                 // Platinum Reality's own (Lily Hewitt, 2026-11-12): a switch that takes the camera away from everything.
+                 // Platinum Dreams's own (Lily Hewitt, 2026-11-12): a switch that takes the camera away from everything.
                  {command:"camera",name:"Camera"},
-                 // Platinum Reality's own (Lily Hewitt, 2026-11-12): recent clippings, to switch between them.
+                 // Platinum Dreams's own (Lily Hewitt, 2026-11-12): recent clippings, to switch between them.
                  {command:"clipboard",name:"Clipboard"},
                  {command:"energy",name:"Energy Settings"}])
         .concat(handheld && handheld.available ? [{command:"handheld",name:"Handheld"}] : [])
@@ -56,7 +58,7 @@ Item {
                  {command:"sound",name:"Sound Volume",slider:true},
                  {command:"soundsource",name:"Sound Source"},
                  {command:"wifi",name:"Wi-Fi"},
-                 // Platinum Reality's own (Lily Hewitt, 2026-11-12): the workspace showing, and a menu of them.
+                 // Platinum Dreams's own (Lily Hewitt, 2026-11-12): the workspace showing, and a menu of them.
                  {command:"workspaces",name:"Workspaces"}])
         .concat(extraModules)
     // The laptop's own battery (BatteryStatus); the module appears only when there is one.
@@ -232,19 +234,16 @@ Item {
                                 strip.sliderModule = module
                                 strip.sliderValue = strip.volume && strip.volume.available
                                     ? (strip.volume.muted ? 0 : Math.round(strip.volume.value)) : -1
-                                strip.sliderStart = strip.sliderValue
                                 strip.sliderOpened()
                             }
                             onPositionChanged: function(mouse) {
-                                if (strip.sliderModule === module && strip.sliderValue >= 0)
-                                    strip.sliderValue = slider.valueAt(mapToItem(slider, mouse.x, mouse.y).y)
+                                if (strip.sliderModule !== module || strip.sliderValue < 0) return
+                                const value = slider.valueAt(mapToItem(slider, mouse.x, mouse.y).y)
+                                if (value === strip.sliderValue) return
+                                strip.sliderValue = value
+                                strip.volumeChosen(value)
                             }
-                            onReleased: {
-                                if (strip.sliderModule !== module) return
-                                if (strip.sliderValue >= 0 && strip.sliderValue !== strip.sliderStart)
-                                    strip.volumeChosen(strip.sliderValue)
-                                strip.sliderModule = null
-                            }
+                            onReleased: if (strip.sliderModule === module) strip.sliderModule = null
                             onCanceled: strip.sliderModule = null
                             onClicked: if (!module.modelData.slider) strip.moduleRequested(module.modelData.command, module)
                         }
@@ -360,7 +359,6 @@ Item {
 
     property Item sliderModule: null
     property int sliderValue: -1
-    property int sliderStart: -1
     // The Sound Volume slider, measured in 9.2.2: a 21 px panel above the pressed module, 5 px in
     // from its left, running from 63 px above the strip into the module so the strip's top line
     // opens under it; a black track with grey sides; a 17x13 thumb with three grip lines. The

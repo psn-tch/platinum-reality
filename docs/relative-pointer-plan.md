@@ -5,14 +5,14 @@ play is not yet certified. See "Limits" below.
 
 Games and emulators need two things from the desktop. **Relative motion** is raw mouse deltas,
 which keep coming after the cursor hits a screen edge. **Pointer capture** locks the cursor in
-place, or confines it to a region, while the game has focus. Platinum Reality is itself a Wayland
+place, or confines it to a region, while the game has focus. Platinum Dreams is itself a Wayland
 client of the hidden Sway backend, so both features are passed through from that host rather than
 imitated.
 
 ## How it works
 
 ```
-game (Wayland or X11) ──► Platinum Reality compositor ──► host Sway (hardware)
+game (Wayland or X11) ──► Platinum Dreams compositor ──► host Sway (hardware)
   zwp_relative_pointer_v1      PointerConstraints              zwp_relative_pointer_v1
   zwp_locked/confined_pointer  (src/desktop/pointer_*)          zwp_locked/confined_pointer
                                HostPointer (host_pointer.*) ◄──  relative_motion, locked/unlocked

@@ -10,7 +10,7 @@ and [application compatibility](../application-compatibility.md).
 
 | Class | What it covers | Practical boundary |
 | --- | --- | --- |
-| 1. Fully controlled by Platinum Reality | Its own menus, managed outer frames, window controls, desktop, switcher, Finder and owned widgets | Can implement and measure directly. The compositor cannot redraw arbitrary pixels inside a client's surface. |
+| 1. Fully controlled by Platinum Dreams | Its own menus, managed outer frames, window controls, desktop, switcher, Finder and owned widgets | Can implement and measure directly. The compositor cannot redraw arbitrary pixels inside a client's surface. |
 | 2. Existing theming systems | Style-aware Qt Widgets, ordinary GTK widgets, compatible system icon/font/color settings | Apply the existing QStyle plugin or GTK CSS within the session. App overrides and custom controls remain possible. |
 | 3. Compatibility or custom integration | Decoration negotiation, exported menus, selected browser UI, Qt Quick styles, app-provided theme extensions | Requires an explicit integration with its own lifecycle/input tests. It is not automatically covered by class 2. |
 | 4. Individual application modification required | Arbitrary custom canvases, game interfaces, web UI that ignores toolkit styles, exact replicas of a modern app's whole UI | No reliable universal theme. Leave functional UI intact unless the app supplies a supported customization path. |

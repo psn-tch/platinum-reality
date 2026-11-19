@@ -109,7 +109,7 @@ class SddmThemeTests final : public QObject
         Greeter(QList<QStringList> people, int lastUser)
             : users({"name", "realName", "homeDir", "icon", "needsPassword"}, people, lastUser),
               sessions({"directory", "file", "type", "name"},
-                       {{"/usr/share/wayland-sessions", "platinum-reality.desktop", "wayland", "Platinum Reality"},
+                       {{"/usr/share/wayland-sessions", "platinum-reality.desktop", "wayland", "Platinum Dreams"},
                         {"/usr/share/wayland-sessions", "plasma.desktop", "wayland", "Plasma (Wayland)"}}, 0)
         {
             config.insert("background", "");

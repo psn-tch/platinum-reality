@@ -5,7 +5,7 @@
      (docs/app-store.md). The password is remembered for a few minutes, so installing yay
      (its tools, then yay itself) asks once. -->
 <policyconfig>
-  <vendor>Platinum Reality</vendor>
+  <vendor>Platinum Dreams</vendor>
   <vendor_url>https://github.com/psn-tch/platinum-reality</vendor_url>
   <action id="org.platinumreality.packages.manage">
     <description>Install or remove software</description>

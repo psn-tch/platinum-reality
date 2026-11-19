@@ -1,6 +1,6 @@
 # Platinum Software Update
 
-Platinum Software Update installs new Platinum Reality releases from the project's GitHub
+Platinum Software Update installs new Platinum Dreams releases from the project's GitHub
 Releases, or from a release bundle on a local disk (such as Lily Hewitt's external SSD), through
 `pacman`. It looks like Mac OS 9's Software Update; underneath, every package is authenticated,
 checked against what is installed, and installed by pacman, never copied over the system.
@@ -38,7 +38,7 @@ A release is one folder (on GitHub, the assets of one Release; offline, a folder
 
 ## Trust
 
-- Signatures are OpenPGP, made with the Platinum Reality release key (kept on potato, the
+- Signatures are OpenPGP, made with the Platinum Dreams release key (kept on potato, the
   development machine). The public key ships inside the package at
   `/usr/share/platinum-reality/release-keys.gpg`, so trusting an update depends only on the
   package already installed, not on the user's own keyring or a key server.
@@ -98,7 +98,7 @@ console (Ctrl-Alt-F3) when the desktop does not start: log in, run
 `sudo /usr/lib/platinum-reality/platinum-update-install --restore-previous`. With snapper, the
 "pre" snapshot is a further fallback. We do not promise atomic updates: pacman installs files in
 place, so a power loss during installation can leave a mixed state; restoring the previous
-package repairs Platinum Reality's own files.
+package repairs Platinum Dreams's own files.
 
 ## Offline updates (external SSD)
 

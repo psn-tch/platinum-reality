@@ -240,7 +240,7 @@ void ScreenSaverAdaptor::UnInhibit(uint cookie)
 
 bool ScreenSaverAdaptor::GetActive()
 {
-    return false; // Platinum Reality has no screen saver; the host lock is separate.
+    return false; // Platinum Dreams has no screen saver; the host lock is separate.
 }
 
 void ScreenSaverAdaptor::SimulateUserActivity()

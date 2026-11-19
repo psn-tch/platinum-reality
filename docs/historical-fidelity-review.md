@@ -1,4 +1,4 @@
-# Historical fidelity review: Platinum Reality native desktop vs Mac OS 9.x evidence
+# Historical fidelity review: Platinum Dreams native desktop vs Mac OS 9.x evidence
 
 > **Development log.** Paths, defaults, machines and earlier project names here describe the
 > developer's setup when each entry was written. Current behaviour is in the README and
@@ -37,7 +37,7 @@ They are listed for Lily Hewitt's decision, not as defects.
 | Location | Contents | How it was used |
 | --- | --- | --- |
 | `~/Projects/Platinum-Dreams-management/reports/platinum-scholar-20261017/` | Rocky's Platinum Scholar package (21 files): source bibliography S01–S32, Finder study FD01–FD18, window/menu/keyboard WM/MM/KB records, visual/system reference, open questions U01–U16, phase-2 Apple-support claims C201–C215, phase-3 source acquisition | Read the index, sources, plan, references, open questions and phase-2/3 evidence. Its evidence labels and limits are kept below. |
-| `~/Projects/Platinum-Dreams-platinum-microscope/` | Sol's Platinum Microscope (16 files): source register H01–H22 (original Apple HIG/Appearance pages), findings L01–L10, M01–M10, A01–A05 | Read the index, source register and findings. Its findings target the earlier KDE-based Platinum Reality; the historical sources carry over, the code references do not. |
+| `~/Projects/Platinum-Dreams-platinum-microscope/` | Sol's Platinum Microscope (16 files): source register H01–H22 (original Apple HIG/Appearance pages), findings L01–L10, M01–M10, A01–A05 | Read the index, source register and findings. Its findings target the earlier KDE-based Platinum Dreams; the historical sources carry over, the code references do not. |
 | `~/Projects/Platinum-Dreams-mac9ref-inventory/` | OCR/transcript inventory: 20 frames, 7 derived clips, OCR evidence, priority moments | Read SOL-START-HERE, findings and priority moments. Its OCR-only claims were checked against frames where they mattered. |
 | `~/mac9ref/` (read-only source archive) | 13 recordings (~3.5 h, mostly 1080p) with yt-dlp metadata, 14 subtitle files for 8 videos, 42 indexed screenshots, catalog and method notes | Transcripts searched for topics. **Frames were extracted and inspected directly** (single frames, crops and frame-by-frame sequences). |
 | This repository | `src/desktop/*.qml`, `manager.cpp`, `src/finder/*`, `src/appearance/*`; latest gate captures `build/artifacts/native-runs/20261019T135428-151333/` | Current behaviour, cited by file and line. |
@@ -312,7 +312,7 @@ of Apple Menu Items with 16 px icons. Submenus (▸) for Control Panels, Favorit
 Recent Documents and Speakable Items. DOC S31: the contents come from the user-editable Apple Menu
 Items folder, separate from the application's About command.
 
-**Current.** `Desktop.qml:412` is a fixed list: About Platinum Reality…, Appearance…, Desktop Picture…,
+**Current.** `Desktop.qml:412` is a fixed list: About Platinum Dreams…, Appearance…, Desktop Picture…,
 Applications…, Puzzle, Terminal, End Nested Session. It has no icons and no submenus, and it includes
 session ending.
 

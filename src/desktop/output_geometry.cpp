@@ -132,7 +132,7 @@ void DesktopOutputGeometry::synchronize()
             entry->output->setProperty("platinumOutputOwner", QVariant::fromValue<QObject *>(this));
             entry->logical = std::make_unique<QWaylandXdgOutputV1>(entry->output.get(), &m_manager);
             entry->logical->setName(description.name);
-            entry->logical->setDescription("Platinum Reality " + description.name);
+            entry->logical->setDescription("Platinum Dreams " + description.name);
             // QuickOutput's queued initialization adds a physical-window mode.
             // Reconcile afterward, retaining logical units as the current mode.
             QTimer::singleShot(0, this, &DesktopOutputGeometry::synchronize);

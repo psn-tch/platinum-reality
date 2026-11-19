@@ -28,8 +28,8 @@ class StartupItems final : public QObject
     Q_PROPERTY(QString error READ error NOTIFY changed)
   public:
     static constexpr auto mySettings = "My Settings";
-    static constexpr auto allSet = "Platinum Reality All";
-    static constexpr auto baseSet = "Platinum Reality Base";
+    static constexpr auto allSet = "Platinum Dreams All";
+    static constexpr auto baseSet = "Platinum Dreams Base";
     // Starts one item's desktop file; false when it could not.
     using Launcher = std::function<bool(const QString &file, const QString &id)>;
     // directories: most important first (the user's own autostart folder, then the system's).

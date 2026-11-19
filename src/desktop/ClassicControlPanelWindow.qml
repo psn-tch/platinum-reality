@@ -119,7 +119,7 @@ DesktopWindow {
                 }
             }
             Rectangle { y: parent.height - 24; width: parent.width; height: 1; color: "black" }
-            Text { x: 4; y: parent.height - 20; text: "Platinum Reality"; textFormat: Text.PlainText; font.pixelSize: 12; color: "black" }
+            Text { x: 4; y: parent.height - 20; text: "Platinum Dreams"; textFormat: Text.PlainText; font.pixelSize: 12; color: "black" }
         }
         Rectangle { x: column.width; width: 1; height: parent.height; color: "black" }
 

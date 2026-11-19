@@ -150,7 +150,7 @@ Rectangle {
             Rectangle {
                 id: sessionBox
                 objectName: "login-session"
-                readonly property var names: ({platinum: qsTr("Platinum Reality"), kde: qsTr("KDE Plasma")})
+                readonly property var names: ({platinum: qsTr("Platinum Dreams"), kde: qsTr("KDE Plasma")})
                 width: 170; height: 22; color: "white"; border.color: "#222"
                 Rectangle {x: 1; y: 1; width: parent.width - 2; height: 1; color: "#ccc"}
                 Text {

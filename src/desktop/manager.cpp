@@ -3,6 +3,7 @@
 #include "scroll_bar_art.hpp"
 #include "applications/desktop_entry.hpp"
 #include "finder/favorites.hpp"
+#include "finder/recent_documents.hpp"
 #include <unistd.h>
 #include <set>
 #include "appearance_settings.hpp"
@@ -1093,7 +1094,11 @@ void NativeManager::launchApplication(QString id, QString document, bool remembe
     const bool launched =
         launch(plan.program, plan.arguments, plan.workingDirectory, plan.existingApplicationSettings);
     if (launched)
+    {
         rememberRecentApplication(id);
+        if (!document.isEmpty())
+            rememberRecentDocument(document);
+    }
     if (launched && remember && !document.isEmpty())
     {
         QString error;
@@ -2648,7 +2653,14 @@ void NativeManager::fillScreen(qulonglong id, QPointF pointer)
         return;
     }
     const auto clicked = std::exchange(w->fillPointer, std::nullopt);
-    if (w->filled)
+    // The screen the click was on (a big window dragged partly onto a small display fills that
+    // display; Lily Hewitt, 2026-11-15), else the window's; below the menu bar on the main one,
+    // with the frame's chrome inside too.
+    const auto screen = clicked ? effectiveDisplayLayout().screenForWindow(QRect(clicked->toPoint(), QSize(1, 1)))
+                                : windowScreen(w);
+    const int top = screen.y() + (screen.contains(effectiveDisplayLayout().primaryRect().topLeft()) ? platinumMenuBarHeight : 0);
+    const QPoint position(w->x(), w->y());
+    if (w->filled && position == w->filledAt)
     {
         w->filled = false;
         resizeWindow(id, w->filledRestore.width(), w->filledRestore.height());
@@ -2656,17 +2668,24 @@ void NativeManager::fillScreen(qulonglong id, QPointF pointer)
         m_interfaceSounds->play("wzmi");
         return;
     }
-    // The screen the click was on (a big window dragged partly onto a small display fills that
-    // display; Lily Hewitt, 2026-11-15), else the window's; below the menu bar on the main one,
-    // with the frame's chrome inside too.
-    const auto screen = clicked ? effectiveDisplayLayout().screenForWindow(QRect(clicked->toPoint(), QSize(1, 1)))
-                                : windowScreen(w);
-    const int top = screen.y() + (screen.contains(effectiveDisplayLayout().primaryRect().topLeft()) ? platinumMenuBarHeight : 0);
     const int frameWidth = w->serverDecorated() ? 6 : 0, frameHeight = w->serverDecorated() ? 27 : 0;
-    w->filledRestore = QRect(w->x(), w->y(), w->width(), w->height());
+    if (w->filled)
+    {
+        // Dragged since it filled (onto another display, say; Lily Hewitt, 2026-11-17): fill again
+        // where it is, as 9.2.2's zoom box goes to the standard state from anywhere else, and take
+        // the size to go back to along, at the same place on this screen.
+        const QPoint place = w->filledRestore.topLeft() - w->filledAt + QPoint(screen.x(), top);
+        const QSize size = w->filledRestore.size();
+        w->filledRestore = QRect(QPoint(std::clamp(place.x(), screen.x(), std::max(screen.x(), screen.right() + 1 - size.width() - frameWidth)),
+                                        std::clamp(place.y(), top, std::max(top, screen.bottom() + 1 - size.height() - frameHeight))),
+                                 size);
+    }
+    else
+        w->filledRestore = QRect(position, QSize(w->width(), w->height()));
     w->filled = true;
     w->zoomed = false;
     moveWindow(id, screen.x(), top);
+    w->filledAt = QPoint(w->x(), w->y());
     resizeWindow(id, screen.width() - frameWidth, screen.y() + screen.height() - top - frameHeight);
     m_interfaceSounds->play("wzmo");
 }
@@ -2871,7 +2890,7 @@ bool NativeManager::launch(QString program, QStringList arguments, QString direc
         emit errorOccurred(appearanceError);
         return false;
     }
-    // Platinum Reality' own applications (Finder, Editor, Puzzle) keep their state in the session
+    // Platinum Dreams' own applications (Finder, Editor, Puzzle) keep their state in the session
     // profile; everything else may use the user's own settings folders.
     static const QStringList ownedApplications{"frankenstein-finder", "frankenstein-editor", "frankenstein-puzzle",
                                                "platinum-app-store"};
@@ -3545,6 +3564,40 @@ void NativeManager::rememberRecentApplication(const QString &id)
     }
     emit recentApplicationsChanged();
 }
+QVariantList NativeManager::recentDocuments()
+{
+    recentDocumentsFolder();
+    return RecentDocuments::list(m_profile);
+}
+QString NativeManager::recentDocumentsFolder()
+{
+    const auto folder = RecentDocuments::folder(m_profile);
+    QDir().mkpath(folder);
+    if (!m_recentDocumentsWatcher)
+    {
+        m_recentDocumentsWatcher = new QFileSystemWatcher(this);
+        connect(m_recentDocumentsWatcher, &QFileSystemWatcher::directoryChanged, this, &NativeManager::recentDocumentsChanged);
+    }
+    if (!m_recentDocumentsWatcher->directories().contains(folder))
+        m_recentDocumentsWatcher->addPath(folder);
+    return folder;
+}
+void NativeManager::rememberRecentDocument(const QString &path)
+{
+    if (m_appearance->appleMenu().value("rememberRecent").toBool() &&
+        RecentDocuments::remember(m_profile, path, m_appearance->appleMenu().value("recentDocuments").toInt()))
+        emit recentDocumentsChanged();
+}
+bool NativeManager::clearRecentDocuments()
+{
+    if (!RecentDocuments::clear(m_profile))
+    {
+        emit errorOccurred("The recent document history could not be cleared.");
+        return false;
+    }
+    emit recentDocumentsChanged();
+    return true;
+}
 QVariantList NativeManager::windowMenu() const
 {
     QVariantList result;
@@ -3583,7 +3636,7 @@ QVariantMap NativeManager::computerInformation() const
         ComputerApplication app{id.value,m_applicationNames.value(id.value),{}};
         // As in 9.2.2, the Finder is part of the system's row: the desktop with its Finder windows.
         if (id == m_desktopApplication) {
-            app.name = "Platinum Reality";
+            app.name = "Platinum Dreams";
             app.system = true;
             app.processes.append(QCoreApplication::applicationPid());
         }
@@ -3622,7 +3675,7 @@ QString NativeManager::aboutThisComputer() const
                 break;
             }
         }
-    return QString("Platinum Reality\n\nSystem: %1\nKernel: %2 %3\nBuilt-in Memory: %4\n\n"
+    return QString("Platinum Dreams\n\nSystem: %1\nKernel: %2 %3\nBuilt-in Memory: %4\n\n"
                    "An original desktop inspired by Mac OS 9. No Apple software or artwork is used.")
         .arg(QSysInfo::prettyProductName(), QSysInfo::kernelType(), QSysInfo::kernelVersion(), memory);
 }

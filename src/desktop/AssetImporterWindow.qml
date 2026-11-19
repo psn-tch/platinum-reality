@@ -35,7 +35,7 @@ DesktopWindow {
         Text {
             width: parent.width; wrapMode: Text.WordWrap; font.pixelSize: 12; textFormat: Text.PlainText
             text: "Bring the sounds, icons, cursors and desktop pictures from your own copy of Mac OS 9 "
-                + "into Platinum Reality. Choose a Mac OS 9 disk, CD image or System Folder. Nothing is "
+                + "into Platinum Dreams. Choose a Mac OS 9 disk, CD image or System Folder. Nothing is "
                 + "downloaded, and your disk is only read, never changed."
         }
         Text {

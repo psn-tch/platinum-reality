@@ -641,11 +641,11 @@ RemainAfterExit=yes
                 receipt['engine_sha256'] = engine_hash
                 receipt['wrapper_sha256'] = wrapper_hash
                 receipt['image_source_verification'] = 'Actual immutable engine/wrapper match full locally known distribution Git commit'
-                remote('test -x /usr/bin/platinum-reality-installer && test -f "/home/liveuser/Desktop/Install Platinum Reality.desktop"', 'image-gui-present')
+                remote('test -x /usr/bin/platinum-reality-installer && test -f "/home/liveuser/Desktop/Install Platinum Dreams.desktop"', 'image-gui-present')
                 receipt['native_source_commit'] = pin['commit']
                 receipt['distribution_commit'] = pin['distribution_commit']
                 receipt['engine_execution'] = 'Immutable ISO live-only sudo wrapper; no fixture engine supplied'
-                remote("test -x '/home/liveuser/Desktop/Install Platinum Reality.desktop'", 'image-launcher-mode')
+                remote("test -x '/home/liveuser/Desktop/Install Platinum Dreams.desktop'", 'image-launcher-mode')
                 remote("python3 -I -c "+shlex.quote(
                     "from pathlib import Path; import json; t=Path('/usr/share/plymouth/themes/platinum-reality'); "
                     "assert '@' not in (t/'platinum-reality.script').read_text(); "

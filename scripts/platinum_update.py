@@ -76,7 +76,7 @@ def read_release(folder, keyring=KEYRING):
     metadata = regular_file(folder / RELEASE, MAX_METADATA)
     signature = regular_file(folder / (RELEASE + '.sig'), 64 * 1024)
     if not gpg_verify(keyring, metadata, signature):
-        raise UpdateError('The release description is not signed by the Platinum Reality release key.')
+        raise UpdateError('The release description is not signed by the Platinum Dreams release key.')
     try:
         release = json.loads(metadata.read_text())
     except (ValueError, UnicodeDecodeError):
@@ -87,7 +87,7 @@ def read_release(folder, keyring=KEYRING):
         if key not in release:
             raise UpdateError(f'The release description has no "{key}".')
     if release['name'] != NAME:
-        raise UpdateError('This is not a Platinum Reality release.')
+        raise UpdateError('This is not a Platinum Dreams release.')
     if release['arch'] != ARCH:
         raise UpdateError(f'This release is for {release["arch"]} computers.')
     version = str(release['version'])
@@ -105,7 +105,7 @@ def read_release(folder, keyring=KEYRING):
 def verify_bundle(folder, keyring=KEYRING, installed=None, now=None, allow_same=False):
     """Check a release folder completely; returns (release, package path) or raises UpdateError.
 
-    `installed` is the installed version (None when Platinum Reality is not installed), `now` the
+    `installed` is the installed version (None when Platinum Dreams is not installed), `now` the
     current time (tests pass one). Newer only, unless `allow_same` (reinstalling the same version)."""
     folder = Path(folder)
     release = read_release(folder, keyring)
@@ -123,11 +123,11 @@ def verify_bundle(folder, keyring=KEYRING, installed=None, now=None, allow_same=
     if digest.hexdigest() != release['sha256']:
         raise UpdateError('The package is damaged or was changed: its checksum does not match.')
     if not gpg_verify(keyring, package, signature):
-        raise UpdateError('The package is not signed by the Platinum Reality release key.')
+        raise UpdateError('The package is not signed by the Platinum Dreams release key.')
     if installed is not None:
         order = vercmp(release['version'], installed)
         if order < 0 or (order == 0 and not allow_same):
-            raise UpdateError(f'Platinum Reality {installed} is installed; {release["version"]} is not newer.')
+            raise UpdateError(f'Platinum Dreams {installed} is installed; {release["version"]} is not newer.')
     return release, package
 
 
@@ -206,7 +206,7 @@ def kept_package(folder):
 def pacman_install(run, package, state):
     """pacman -U a package this module has already verified. pacman is handed a hard link in a
     folder of its own: with our .sig beside it, pacman checks that signature against its own
-    keyring, which lacks the Platinum Reality key, and refuses ("required key missing")."""
+    keyring, which lacks the Platinum Dreams key, and refuses ("required key missing")."""
     folder = state / 'pacman'
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     target = folder / package.name
@@ -278,7 +278,7 @@ def restore_previous(report, keyring=KEYRING, state=STATE, run=subprocess.run):
     if package is None:
         raise UpdateError('No previous version was kept. (One is kept from the second update on.)')
     if not gpg_verify(keyring, package, Path(str(package) + '.sig')):
-        raise UpdateError('The kept previous version is not signed by the Platinum Reality release key.')
+        raise UpdateError('The kept previous version is not signed by the Platinum Dreams release key.')
     report({'step': 'install', 'version': package_version(package)})
     result = pacman_install(run, package, state)
     if result.returncode != 0:

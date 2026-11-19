@@ -3,7 +3,7 @@
 Lily Hewitt asked for this on 2026-11-14: "make the polkit more 9.2.2 style". When Software Update, the
 App Store, Fingerprints or anything else uses pkexec, polkit asks the session's authentication agent for
 an administrator's password. Since update 44 that agent was KDE's (`polkit-kde-authentication-agent-1`),
-a Plasma-style window. Platinum Reality now has its own agent, `platinum-authentication-agent`, so the
+a Plasma-style window. Platinum Dreams now has its own agent, `platinum-authentication-agent`, so the
 box looks like Mac OS 9.2.2's password dialogs.
 
 ## What it does

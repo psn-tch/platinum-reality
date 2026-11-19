@@ -1,4 +1,4 @@
-// platinum-lock: the Platinum Reality screen lock, with the same contract as the swaylock it
+// platinum-lock: the Platinum Dreams screen lock, with the same contract as the swaylock it
 // replaces in the session supervisor: "\n" on --ready-fd once every output is locked, and exit
 // status 0 only after a successful unlock. Any other exit leaves the compositor locked.
 #include "authenticator.hpp"

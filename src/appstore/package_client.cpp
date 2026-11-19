@@ -36,7 +36,7 @@ PackageClient::PackageClient(QString helper, QObject *parent) : QObject(parent),
     });
     connect(&m_catalog, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart)
-            emit catalogFailed("The App Store's helper is missing. Reinstall Platinum Reality.");
+            emit catalogFailed("The App Store's helper is missing. Reinstall Platinum Dreams.");
     });
     connect(&m_change, &QProcess::readyReadStandardOutput, this, &PackageClient::readChange);
     connect(&m_change, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
@@ -48,7 +48,7 @@ PackageClient::PackageClient(QString helper, QObject *parent) : QObject(parent),
     });
     connect(&m_change, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart)
-            emit finished(false, "The App Store's helper is missing. Reinstall Platinum Reality.", false);
+            emit finished(false, "The App Store's helper is missing. Reinstall Platinum Dreams.", false);
     });
 }
 

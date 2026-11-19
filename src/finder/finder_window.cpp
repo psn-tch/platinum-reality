@@ -967,7 +967,7 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
     action(view, "as Icons", "icons", {}, [this] { setViewMode(false); });
     action(view, "as List", "list", {}, [this] { setViewMode(true); });
     // as Window / as Pop-up Window (9.2.2): the desktop draws the window, so it makes the change.
-    // Only inside Platinum Reality's own session, where that desktop is there to ask.
+    // Only inside Platinum Dreams's own session, where that desktop is there to ask.
     if (qEnvironmentVariable("FRANKENSTEIN_ISOLATED") == "1")
     {
         view->addSeparator();
@@ -1135,7 +1135,7 @@ FinderWindow::FinderWindow(QString root, QString profile, QString directory, QWi
            {
                QMessageBox::about(
                    this, "Finder",
-                   "Platinum Reality\nA native Linux spatial file manager.\n\nHistorical "
+                   "Platinum Dreams\nA native Linux spatial file manager.\n\nHistorical "
                    "behavior is being qualified against Mac OS 9.2.2.");
            });
     for (auto *view :

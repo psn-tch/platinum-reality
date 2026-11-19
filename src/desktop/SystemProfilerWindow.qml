@@ -110,7 +110,7 @@ DesktopWindow {
                             title: "Linux overview"; width: parent.width - 10; spacing: 2
                             Fact { objectName: "profiler-system"; label: "System"; value: profiler.software.system }
                             Fact { label: "Kernel"; value: profiler.software.kernel }
-                            Fact { objectName: "profiler-platinum"; label: "Platinum Reality"; value: profiler.software.platinum }
+                            Fact { objectName: "profiler-platinum"; label: "Platinum Dreams"; value: profiler.software.platinum }
                             Fact { label: "Toolkit"; value: profiler.software.toolkit }
                         }
                     }

@@ -51,7 +51,7 @@ int main(int argc, char **argv)
     else
         qunsetenv("QT_WAYLAND_DISABLED_INTERFACES");
     app.setFont(classicInterfaceFont());
-    QCoreApplication::setApplicationName("Platinum Reality");
+    QCoreApplication::setApplicationName("Platinum Dreams");
     const bool preview = app.arguments().contains("--preview");
     if (!preview && qEnvironmentVariable("FRANKENSTEIN_ISOLATED") != "1")
     {
@@ -100,7 +100,7 @@ int main(int argc, char **argv)
     DesktopClientRetirement retireClients;
     X11BridgeRetirement retireX11;
     QQuickView view;
-    view.setTitle("Platinum Reality — Native Desktop");
+    view.setTitle("Platinum Dreams — Native Desktop");
     view.resize(parser.isSet("fullscreen") && view.screen() ? view.screen()->size()
                                                             : QSize(1120, 760));
     view.setResizeMode(QQuickView::SizeRootObjectToView);
@@ -221,9 +221,9 @@ int main(int argc, char **argv)
     if (parser.isSet("exit-after"))
         QTimer::singleShot(parser.value("exit-after").toInt(), &app, &QCoreApplication::quit);
     if (compositor)
-        qInfo("Platinum Reality ready on %s", compositor->socketName().constData());
+        qInfo("Platinum Dreams ready on %s", compositor->socketName().constData());
     else
-        qInfo("Platinum Reality shell preview (no native clients)");
+        qInfo("Platinum Dreams shell preview (no native clients)");
     const int result = app.exec();
     return result;
 }

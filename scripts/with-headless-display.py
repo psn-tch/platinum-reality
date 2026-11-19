@@ -36,7 +36,7 @@ environment = os.environ.copy()
 for key in ("DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "SWAYSOCK", "I3SOCK",
             "DBUS_SESSION_BUS_ADDRESS", "QT_QPA_PLATFORM", "QT_QUICK_BACKEND"):
     environment.pop(key, None)
-# A terminal inside a desktop session (including Platinum Reality itself) inherits
+# A terminal inside a desktop session (including Platinum Dreams itself) inherits
 # its client settings: installed plugin paths, shm-only buffers, the live profile's
 # XDG roots and audio sockets. Tests must exercise the build, not the parent session.
 inherited = sorted(key for key in environment if key.startswith(("QT_", "QSG_", "GDK_", "GTK_", "SDL_"))

@@ -58,12 +58,12 @@ for the experimental Extend path and incomplete Mirror work.
 
 ## Initial deployment record
 
-The user has selected Platinum Reality as the desired entire login desktop,
+The user has selected Platinum Dreams as the desired entire login desktop,
 rather than an application inside KDE. The first session prototype uses the
 already-installed Sway 1.12 as the display/seat/input backend, with the existing
 Qt Wayland compositor as its sole fullscreen desktop client. KDE is not a runtime
 dependency of a physical-seat session. Sway's tiling UI, bar, user configuration,
-Xwayland and background launcher are disabled. Platinum Reality still owns its
+Xwayland and background launcher are disabled. Platinum Dreams still owns its
 inner application windows, menu, desktop and Finder policies.
 
 This remains an experimental backend; physical-seat qualification is incomplete.
@@ -76,8 +76,8 @@ packages are unchanged. The immutable Arch package was not modified or installed
 through pacman; this deployment is user-local.
 
 At the next tty1 login, the existing authentication runs first. The selector
-defaults to Platinum Reality after five seconds; **K** chooses the existing KDE
-session for that login, **P** chooses Platinum Reality, and Escape logs out. Ending
+defaults to Platinum Dreams after five seconds; **K** chooses the existing KDE
+session for that login, **P** chooses Platinum Dreams, and Escape logs out. Ending
 the desktop returns to the login prompt. There is no automatic unlocked fallback
 or authenticated interactive shell beneath the new session.
 
@@ -87,7 +87,7 @@ To restore KDE as the saved default from a terminal:
 ~/.local/bin/platinum-dreams-use-kde
 ```
 
-`~/.local/bin/platinum-dreams-use-native` selects Platinum Reality again. The exact
+`~/.local/bin/platinum-dreams-use-native` selects Platinum Dreams again. The exact
 original profile is backed up at
 `~/.local/share/platinum-dreams-native/bash_profile.before`; the deployment
 manifest records before/after hashes and the untouched KDE fallback hash.
@@ -146,7 +146,7 @@ This command refuses to run in an existing graphical environment. It requires an
 active local logind seat/VT and uses the immutable qualified release extracted
 under `build/packages/20261018T203329/`, not an arbitrary current build. The
 `PLATINUM_SESSION_LAUNCHER` variable can explicitly select another qualified
-installed launcher later. Default files live in `~/Platinum Reality`, with a
+installed launcher later. Default files live in `~/Platinum Dreams`, with a
 separate installed-preview profile; development `var/` data is not migrated.
 
 On this machine tty1 starts the existing KDE session through the protected

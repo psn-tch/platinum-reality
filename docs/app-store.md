@@ -53,7 +53,7 @@ other people's code, has Cancel as its default button.
 - **AUR Helper ▸ Install paru…** (or yay): asks first, the same way. The one just installed is used
   from then on. The AUR list already here is kept.
 - **After an update** that touched the system's own software (the kernel, systemd, glibc, graphics
-  drivers, microcode or Platinum Reality), it asks you to restart.
+  drivers, microcode or Platinum Dreams), it asks you to restart.
 
 A failure is shown as a sentence. Some examples:
 
@@ -111,7 +111,7 @@ The window (`src/appstore/`) never runs pacman itself. It runs one helper:
   - Package names must look like package names, so a name can never be read as one of pacman's
     options.
   - The system's own packages are never removed: base, linux, systemd, pacman, sudo, polkit, sddm,
-    sway, Platinum Reality and a few more (`PROTECTED`).
+    sway, Platinum Dreams and a few more (`PROTECTED`).
 - **Progress:** pacman's numbered steps (`( 2/3) installing paint`) drive the progress bar. Its other
   lines, and the AUR helper's, are shown as they come.
 

@@ -2,7 +2,7 @@
 
 Part of the Control Panels makeover Lily Hewitt asked for in update 48. 9.2.2's File Exchange has a PC
 Exchange tab: a list of PC extensions, the application that opens them and their Mac file type, with
-Add…, Remove and Change… (captured in the reference VM, 2026-11-12). Platinum Reality's File Exchange
+Add…, Remove and Change… (captured in the reference VM, 2026-11-12). Platinum Dreams's File Exchange
 uses that layout for what it means here: **which application opens each kind of document** when you
 open it in the Finder or on the desktop.
 

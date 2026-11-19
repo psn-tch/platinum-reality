@@ -15,7 +15,7 @@ import socket
 import subprocess
 import tarfile
 
-IDENTITY = 'Platinum Reality VM TEST KEY - NOT FOR RELEASE <vm-test@example.invalid>'
+IDENTITY = 'Platinum Dreams VM TEST KEY - NOT FOR RELEASE <vm-test@example.invalid>'
 DATABASE = 'platinum-reality-vm-test.db.tar.gz'
 GUEST_HOME = Path('/home/tester')
 

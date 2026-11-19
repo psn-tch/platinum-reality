@@ -1,6 +1,6 @@
-# Platinum Reality
+# Platinum Dreams
 
-**A classic Platinum desktop for Linux.** Platinum Reality brings back the look and feel of
+**A classic Platinum desktop for Linux.** Platinum Dreams brings back the look and feel of
 Mac OS 9 — the menu bar with its application menu, WindowShade title bars, the Control Strip,
 spatial Finder windows, Platinum push buttons and alerts — as a real desktop for running modern
 Linux applications: Firefox, Chromium, Steam, your terminal, your games.
@@ -8,10 +8,10 @@ Linux applications: Firefox, Chromium, Steam, your terminal, your games.
 It is its own Wayland compositor (built with Qt 6), not a theme on top of another desktop, and not
 an emulator: no Apple software runs, and none is included.
 
-![Platinum Reality with Mac OS 9.2.2's icons imported: the Apple menu with Control Panels open, Finder windows, About This Computer and a sticky note](docs/images/screenshots/platinum-reality.png)
+![Platinum Dreams with Mac OS 9.2.2's icons imported: the Apple menu with Control Panels open, Finder windows, About This Computer and a sticky note](docs/images/screenshots/platinum-reality.png)
 
-> These pictures show Platinum Reality after **Asset Importer** has read a Mac OS 9.2.2 installation:
-> its icons, the rainbow Apple, desktop pictures, alert sounds and cursors. Platinum Reality includes
+> These pictures show Platinum Dreams after **Asset Importer** has read a Mac OS 9.2.2 installation:
+> its icons, the rainbow Apple, desktop pictures, alert sounds and cursors. Platinum Dreams includes
 > none of Apple's files. Bring your own Mac OS 9 installation, or use it as it comes, with its own
 > original artwork ([how that looks](#without-imported-files)).
 
@@ -31,9 +31,9 @@ an emulator: no Apple software runs, and none is included.
 
 ### Without imported files
 
-Out of the box, Platinum Reality uses its own original artwork:
+Out of the box, Platinum Dreams uses its own original artwork:
 
-![The same desktop with Platinum Reality's own artwork](docs/images/screenshots/original-artwork.png)
+![The same desktop with Platinum Dreams’ own artwork](docs/images/screenshots/original-artwork.png)
 
 ## What you get
 
@@ -67,6 +67,9 @@ Out of the box, Platinum Reality uses its own original artwork:
   saved as you type.
 - **Application Switcher**: drag the Application menu down to tear it off as a palette of running
   applications, as in Mac OS 9.
+- **Recent Documents** (Apple menu): reopen documents dispatched through the desktop, Finder or
+  Open With, newest first. Apple Menu Options sets separate document and application counts;
+  Clear Menu forgets documents without deleting them. [Details](docs/recent-documents.md).
 - **Labels** (File ▸ Label, in the Finder and on the desktop): seven colours for files and folders,
   kept with the file (as the extended attribute `user.platinum.label`).
 - **Key Caps** (Apple menu ▸ Key Caps): see what every key types, with Shift and Option.
@@ -81,10 +84,10 @@ Out of the box, Platinum Reality uses its own original artwork:
 
 ## Install (Arch Linux)
 
-> **Install it on a fresh Arch Linux installation.** That is what Platinum Reality is built and
+> **Install it on a fresh Arch Linux installation.** That is what Platinum Dreams is built and
 > tested on. On a system that has been used for a while, other desktops, themes, display settings
 > and leftover configuration can interfere in ways nobody has tested, and the glitches may only show
-> up later. A ready-made Arch-based system with Platinum Reality set up from the start is planned,
+> up later. A ready-made Arch-based system with Platinum Dreams set up from the start is planned,
 > so that installing it is one step on a clean machine.
 
 As a normal user with `sudo` and a working network (never as root), first update the system and
@@ -107,9 +110,13 @@ makepkg --config ./makepkg.conf -si
 `makepkg -s` installs the build dependencies; the build compiles the desktop and the X11 bridge
 from source and runs the automatic tests (add `--nocheck` to skip them).
 
+The project is now **Platinum Dreams**. Existing installations keep their package name
+(`platinum-reality`), settings, imported assets and trusted update source. Both
+`platinum-dreams` and the older `platinum-reality` commands work after installation.
+
 ## Start it
 
-- **From your login screen** (SDDM, GDM, LightDM): log out, choose **Platinum Reality**
+- **From your login screen** (SDDM, GDM, LightDM): log out, choose **Platinum Dreams**
   from the session list, and log in. A minimal Arch install has no login screen yet: install and
   enable one first, for example `sudo pacman -S sddm` and `sudo systemctl enable sddm`.
   For SDDM, the package includes a Platinum **Log In** theme: set `Current=platinum-reality` under
@@ -117,7 +124,7 @@ from source and runs the automatic tests (add `--nocheck` to skip them).
   (greetd has no session list of its own; it needs a greeter such as tuigreet set up to read
   `/usr/share/wayland-sessions`.) Everything you need for a whole session (sway as the display
   backend, swayidle, swaylock for the lock screen's password check, Xwayland) is a dependency.
-- **In a window inside your current desktop**, to try it first: run `platinum-reality`.
+- **In a window inside your current desktop**, to try it first: run `platinum-dreams`.
 
 To leave, choose **Special ▸ Log Out** from the menu bar.
 
@@ -126,10 +133,10 @@ settings, and what to do if something goes wrong.
 
 ## Make it yours: your own Mac OS 9 sounds, icons and pictures
 
-Platinum Reality ships only original drawings and sounds. If you own a Mac OS 9 installation — for
+Platinum Dreams ships only original drawings and sounds. If you own a Mac OS 9 installation — for
 example the disk image of a virtual machine — you can import its alert sounds, Platinum interface
 sounds, Finder icons, desktop pictures and cursors into your own private folder
-(`~/.local/share/platinum-reality/assets`), where Platinum Reality finds them at runtime:
+(`~/.local/share/platinum-reality/assets`), where Platinum Dreams finds them at runtime:
 
 ```bash
 python3 scripts/import-macos9-assets.py ~/path/to/macos9.qcow2
@@ -169,7 +176,7 @@ The full native test suite runs real applications on a private headless display;
 
 ## How this was made
 
-Platinum Reality was made with AI. Lily Hewitt had the idea, decided what it should do and how it
+Platinum Dreams was made with AI. Lily Hewitt had the idea, decided what it should do and how it
 should feel, used it every day as their real desktop and reported what was wrong. Almost all of
 the code, tests and documentation were written by AI coding assistants working from that
 direction: Anthropic's Claude (in Claude Code) and OpenAI's Codex. The title-bar drawings come from
@@ -182,18 +189,18 @@ machines: if something is wrong, please open an issue.
 
 ## Contact
 
-Platinum Reality is made by Lily Hewitt. Write to **lily@platinumreality.uk**, or open an issue
+Platinum Dreams is made by Lily Hewitt. Write to **lily@platinumreality.uk**, or open an issue
 here. The project's home is **[platinumreality.uk](https://platinumreality.uk)**, and
 **[platinumreality.uk/download](https://platinumreality.uk/download)** always leads to the
 newest release.
 
 ## Licence
 
-Platinum Reality's own code is [MIT](LICENSE): take it, change it, build on it, share it. A built
+Platinum Dreams’ own code is [MIT](LICENSE): take it, change it, build on it, share it. A built
 desktop links Qt Wayland Compositor (GPL-3.0), so shared builds follow GPL-3.0 as a whole. The
 title-bar drawings come from PlatinumWayland (MIT, see `src/desktop/titlebar/LICENSE-PlatinumWayland`);
 the X11 bridge is xwayland-satellite (MPL-2.0), built from its published source with a recorded
 patch. See [NOTICE](packaging/NOTICE).
 
-Mac OS, Macintosh and the Happy Mac are trademarks of Apple Inc. Platinum Reality is an independent
+Mac OS, Macintosh and the Happy Mac are trademarks of Apple Inc. Platinum Dreams is an independent
 project, not affiliated with or endorsed by Apple.

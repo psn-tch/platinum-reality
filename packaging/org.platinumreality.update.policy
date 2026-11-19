@@ -4,11 +4,11 @@
 <!-- Platinum Software Update installs verified releases through this one helper only
      (docs/software-update.md). An administrator's password is asked each time. -->
 <policyconfig>
-  <vendor>Platinum Reality</vendor>
+  <vendor>Platinum Dreams</vendor>
   <vendor_url>https://github.com/psn-tch/platinum-reality</vendor_url>
   <action id="org.platinumreality.update.install">
-    <description>Install a Platinum Reality update</description>
-    <message>Software Update needs an administrator's password to install Platinum Reality.</message>
+    <description>Install a Platinum Dreams update</description>
+    <message>Software Update needs an administrator's password to install Platinum Dreams.</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>

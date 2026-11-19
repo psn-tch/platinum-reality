@@ -1,10 +1,10 @@
-# Installing Platinum Reality
+# Installing Platinum Dreams
 
-Platinum Reality is packaged for Arch Linux. It installs:
+Platinum Dreams is packaged for Arch Linux. It installs:
 
 - `platinum-reality`: the desktop in a window inside your current desktop, to try it first;
 - `platinum-reality-session` and its login-screen entry (`/usr/share/wayland-sessions/platinum-reality.desktop`),
-  so SDDM, GDM and LightDM list **Platinum Reality** as a session (greetd needs a greeter, such as
+  so SDDM, GDM and LightDM list **Platinum Dreams** as a session (greetd needs a greeter, such as
   tuigreet, set up to read `/usr/share/wayland-sessions`);
 - the desktop, Finder, editor, lock screen and their helpers in `/usr/lib/platinum-reality`,
   including a patched X11 bridge (xwayland-satellite) built from its published source.
@@ -20,10 +20,10 @@ As a normal user with `sudo` and a working network (never as root):
 sudo pacman -Syu --needed base-devel git python
 ```
 
-> **Install it on a fresh Arch Linux installation.** That is what Platinum Reality is built and
+> **Install it on a fresh Arch Linux installation.** That is what Platinum Dreams is built and
 > tested on. On a system that has been used for a while, other desktops, themes, display settings
 > and leftover configuration can interfere in ways nobody has tested, and the glitches may only show
-> up later. A ready-made Arch-based system with Platinum Reality set up from the start is planned,
+> up later. A ready-made Arch-based system with Platinum Dreams set up from the start is planned,
 > so that installing it is one step on a clean machine.
 
 ```bash
@@ -46,7 +46,7 @@ sudo pacman -S sddm
 sudo systemctl enable sddm
 ```
 
-Log out, choose **Platinum Reality** in your login screen's session menu, and log in. The session runs
+Log out, choose **Platinum Dreams** in your login screen's session menu, and log in. The session runs
 sway as its display backend (you never see sway itself), swayidle for sleep and idle, and locks with
 the Platinum lock screen, which checks your password through the `swaylock` PAM service (and your
 fingerprint, where that service already allows it). Each session keeps a log folder in
@@ -84,13 +84,13 @@ known conflicting network/display configuration. `--network preserve-wired`
 leaves existing wired/DNS configuration alone and does not set up Wi-Fi.
 It enables services for the next boot, without starting a login screen,
 restarting networking, configuring autologin or rebooting automatically.
-Setup preselects **Platinum Reality** using SDDM's documented
+Setup preselects **Platinum Dreams** using SDDM's documented
 [`~sddm/state.conf` `[Last] Session` setting](https://man.archlinux.org/man/sddm-state.conf.5.en).
 Other saved state, including the last username, is preserved. The state file is
 written atomically, owned by SDDM and mode0600. No autologin setting is created;
 the normal password login still applies. Other sessions remain selectable,
 and SDDM can remember later choices normally. Explicitly rerunning setup
-preselects Platinum Reality again. Optional `plasma-integration` is retained
+preselects Platinum Dreams again. Optional `plasma-integration` is retained
 for Qt application menus even though it brings an additional Plasma session.
 
 The reviewed package is copied into a private staging directory and checked

@@ -1,4 +1,4 @@
-# R1: native Platinum Reality live ISO
+# R1: native Platinum Dreams live ISO
 
 The host builder refuses to create/start its copied VM with less than 20 GiB
 free at the checkout. Before receiving a completed ISO, it rechecks the output
@@ -128,7 +128,7 @@ build data, not tracked source or release uploads.
 
 ## Profile changes from releng
 
-- Packaged Platinum Reality starts through SDDM's existing Wayland session.
+- Packaged Platinum Dreams starts through SDDM's existing Wayland session.
   `liveuser` has an empty password and live-only passwordless sudo. Root's
   password is locked, and releng's tty1 root-autologin override is removed. SDDM autologin exists **only in this live overlay**;
   an installed target must create a password and use the normal Log In.

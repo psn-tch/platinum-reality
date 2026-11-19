@@ -35,6 +35,7 @@
 #include <QClipboard>
 #include "desktop/system_controls.hpp"
 #include "finder/file_drag.hpp"
+#include "finder/recent_documents.hpp"
 #include "native_keys.hpp"
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -335,6 +336,15 @@ class DesktopTests : public QObject
     {
         QTemporaryDir root;
         QDir().mkpath(root.filePath("profile"));
+        for (const auto *name : {"First.txt", "Second.txt", "Missing.txt"})
+        {
+            QFile document(root.filePath(name));
+            QVERIFY(document.open(QIODevice::WriteOnly));
+            document.write("document contents");
+            document.close();
+            QVERIFY(RecentDocuments::remember(root.filePath("profile"), document.fileName(), 10));
+        }
+        QVERIFY(QFile::remove(root.filePath("Missing.txt")));
         {
             QFile recent(root.filePath("profile/recent-applications.json"));
             QVERIFY(recent.open(QIODevice::WriteOnly));
@@ -379,7 +389,14 @@ class DesktopTests : public QObject
         QVERIFY(!menu.value("Control Panels").toMap().value("children").toList().isEmpty());
         auto order = menu.value("__order").toStringList();
         QCOMPARE(order.indexOf("Recent Applications"), order.indexOf("Stickies") + 1);
-        QCOMPARE(order.indexOf("Terminal"), order.indexOf("Recent Applications") + 1);
+        QCOMPARE(order.indexOf("Recent Documents"), order.indexOf("Recent Applications") + 1);
+        QCOMPARE(order.indexOf("Terminal"), order.indexOf("Recent Documents") + 1);
+        auto documents = menu.value("Recent Documents").toMap().value("children").toList();
+        QCOMPARE(documents.size(), 5); // Three documents, separator, Clear Menu.
+        QCOMPARE(documents[0].toMap().value("text").toString(), QString("Missing.txt"));
+        QVERIFY(!documents[0].toMap().value("enabled").toBool());
+        QCOMPARE(documents[1].toMap().value("id").toString(), root.filePath("Second.txt"));
+        QCOMPARE(documents[1].toMap().value("action").toString(), QString("open-recent-document"));
         QVERIFY(menu.value("Control Panels").toMap().value("children").toString().isEmpty());
         bool listed = false;
         for (const auto &child : menu.value("Control Panels").toMap().value("children").toList())
@@ -404,6 +421,7 @@ class DesktopTests : public QObject
         QVERIFY(menu.value("Control Panels").toMap().value("children").toList().isEmpty());
         QCOMPARE(menu.value("Control Panels").toMap().value("action").toString(), QString("control-panels-window"));
         QCOMPARE(menu.value("Recent Applications").toMap().value("action").toString(), QString("applications"));
+        QCOMPARE(menu.value("Recent Documents").toMap().value("action").toString(), QString("recent-documents-folder"));
         // How many: two.
         auto *field = item("apple-menu-recent-applications");
         QVERIFY(field);
@@ -412,16 +430,26 @@ class DesktopTests : public QObject
         QTest::keyClick(&view, Qt::Key_2);
         QTest::keyClick(&view, Qt::Key_Return);
         QTRY_COMPARE(appearance->appleMenu().value("recentApplications").toInt(), 2);
+        field = item("apple-menu-recent-documents");
+        QVERIFY(field);
+        field->forceActiveFocus();
+        QVERIFY(QMetaObject::invokeMethod(field, "selectAll"));
+        QTest::keyClick(&view, Qt::Key_2);
+        QTest::keyClick(&view, Qt::Key_Return);
+        QTRY_COMPARE(appearance->appleMenu().value("recentDocuments").toInt(), 2);
         QVERIFY(set("submenus", true));
         menu = apple();
         const auto recent = menu.value("Recent Applications").toMap().value("children").toList();
         QCOMPARE(recent.size(), 2);
         QCOMPARE(recent.at(0).toMap().value("text").toString(), QString("Alpha"));
+        QCOMPARE(menu.value("Recent Documents").toMap().value("children").toList().size(), 4);
         // Remembering off: no Recent Applications at all.
         click(item("apple-menu-remember"));
         QTRY_COMPARE(appearance->appleMenu().value("rememberRecent").toBool(), false);
         QVERIFY(!apple().contains("Recent Applications"));
+        QVERIFY(!apple().contains("Recent Documents"));
         QVERIFY(!item("apple-menu-recent-applications")->isEnabled());
+        QVERIFY(!item("apple-menu-recent-documents")->isEnabled());
         // Apple Menu Icon ▸ Black: the menu bar's Apple follows at once.
         QVERIFY(item("apple-menu-icon-color")->property("checked").toBool());
         click(item("apple-menu-icon-black"));
@@ -437,16 +465,69 @@ class DesktopTests : public QObject
         QCOMPARE(options.value("submenus").toBool(true), true);
         QCOMPARE(options.value("rememberRecent").toBool(true), false);
         QCOMPARE(options.value("recentApplications").toInt(), 2);
+        QCOMPARE(options.value("recentDocuments").toInt(), 2);
         QCOMPARE(options.value("icon").toString(), QString("black"));
         // Out-of-range values are refused, on a second instance (an error alert would block this view).
         AppearanceSettings other(root.filePath("other-profile"));
         QVERIFY(!other.setAppleMenuOption("recentApplications", 0));
         QVERIFY(!other.setAppleMenuOption("recentApplications", 100));
+        QVERIFY(!other.setAppleMenuOption("recentDocuments", 0));
+        QVERIFY(!other.setAppleMenuOption("recentDocuments", 100));
         QVERIFY(!other.setAppleMenuOption("submenus", 1));
         QVERIFY(!other.setAppleMenuOption("servers", 5));
         QVERIFY(!other.setAppleMenuOption("icon", QString("purple")));
         QVERIFY(!other.setAppleMenuOption("icon", 1));
         QVERIFY(other.setAppleMenuOption("recentApplications", 99));
+        AppearanceSettings reloaded(root.filePath("profile"));
+        QCOMPARE(reloaded.appleMenu().value("recentDocuments").toInt(), 2);
+        // Clear Menu affects only history. Dispatch and observe its live menu update.
+        QVERIFY(set("rememberRecent", true));
+        QVERIFY(QMetaObject::invokeMethod(desktop, "dispatchShellCommand", Q_ARG(QVariant, QVariant("clear-recent-documents")), Q_ARG(QVariant, QVariant(0))));
+        QCOMPARE(manager.recentDocuments().size(), 0);
+        QCOMPARE(apple().value("Recent Documents").toMap().value("children").toList()[0].toMap().value("text").toString(), QString("No Recent Documents"));
+        QVERIFY(QFileInfo(root.filePath("First.txt")).isFile());
+        QVERIFY(QFileInfo(root.filePath("Second.txt")).isFile());
+    }
+    void recentDocumentsReopenThroughTheDocumentChooserAndRevalidatePaths()
+    {
+        QTemporaryDir root, outside;
+        const auto profile = root.filePath("profile"), document = root.filePath("Picture.png");
+        QFile file(document);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QByteArray::fromHex("89504e470d0a1a0a00000000"));
+        file.close();
+        QVERIFY(RecentDocuments::remember(profile, document, 10));
+        QQuickView view; view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), profile, {});
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        view.show(); QVERIFY(QTest::qWaitForWindowExposed(&view));
+        const auto dispatch = [&](const QString &path) {
+            return QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                Q_ARG(QVariant, QVariant("open-recent-document")), Q_ARG(QVariant, QVariant(path)));
+        };
+        QVERIFY(dispatch(document));
+        auto *browser = view.rootObject()->findChild<QObject *>("application-browser");
+        QVERIFY(browser);
+        QTRY_VERIFY(browser->property("opened").toBool());
+        QCOMPARE(browser->property("documentPath").toString(), document);
+        QTest::keyClick(&view, Qt::Key_Escape);
+        QTRY_VERIFY(!manager.shellModal());
+        QSignalSpy changed(&manager, &NativeManager::recentDocumentsChanged);
+        const auto entries = manager.recentDocuments();
+        QCOMPARE(entries.size(), 1);
+        QVERIFY(QFile::remove(entries[0].toMap().value("link").toString()));
+        QTRY_VERIFY(changed.count() > 0);
+        QVERIFY(manager.recentDocuments().isEmpty());
+        QVERIFY(QFileInfo(document).isFile());
+        // Even a formerly valid history action is checked again at dispatch time.
+        QVERIFY(QFile::remove(document));
+        QSignalSpy errors(&manager, &NativeManager::errorOccurred);
+        QVERIFY(dispatch(document));
+        QCOMPARE(errors.count(), 1);
+        QVERIFY(!manager.readableDocument(outside.filePath("Picture.png")));
     }
     // Extensions Manager (Lily Hewitt, 2026-11-14): the freedesktop autostart items that apply to
     // this session, each On or Off in a set; the user's folder overrides the system's by file name.
@@ -481,7 +562,7 @@ class DesktopTests : public QObject
             QCOMPARE(items.items().first().toMap().value("user").toBool(), true);
             QCOMPARE(items.items().first().toMap().value("program").toString(), QString("/usr/bin/true"));
             QVERIFY(items.items().first().toMap().value("size").toLongLong() > 0);
-            QCOMPARE(items.sets(), (QStringList{"My Settings", "Platinum Reality All", "Platinum Reality Base"}));
+            QCOMPARE(items.sets(), (QStringList{"My Settings", "Platinum Dreams All", "Platinum Dreams Base"}));
             // The first session: what was already installed begins Off, so nothing new starts.
             for (const auto &id : ids(items))
                 QVERIFY2(!items.isOn(id), qPrintable(id));
@@ -500,7 +581,7 @@ class DesktopTests : public QObject
             QVERIFY(!items.isOn("steam.desktop") && !items.changedSinceLogin());
             QVERIFY(!items.setOn("plasma.desktop", false)); // Not an item here.
             // A locked set changes into My Settings.
-            QVERIFY(items.selectSet("Platinum Reality Base"));
+            QVERIFY(items.selectSet("Platinum Dreams Base"));
             QVERIFY(!items.isOn("remapper.desktop"));
             QVERIFY(items.setOn("remapper.desktop", true));
             QCOMPARE(items.selectedSet(), QString("My Settings"));
@@ -508,10 +589,10 @@ class DesktopTests : public QObject
             QVERIFY(items.duplicateSet("Work"));
             QCOMPARE(items.selectedSet(), QString("Work"));
             QVERIFY(!items.duplicateSet("Work") && !items.error().isEmpty());
-            QVERIFY(!items.duplicateSet("Platinum Reality All"));
+            QVERIFY(!items.duplicateSet("Platinum Dreams All"));
             QVERIFY(items.setGroupOn(false, true));
             QVERIFY(items.isOn("ours.desktop") && !items.isOn("steam.desktop"));
-            QVERIFY(!items.deleteSet("My Settings") && !items.deleteSet("Platinum Reality Base"));
+            QVERIFY(!items.deleteSet("My Settings") && !items.deleteSet("Platinum Dreams Base"));
         }
         {
             // Saved: a new session starts what the last one chose.
@@ -521,7 +602,7 @@ class DesktopTests : public QObject
             QCOMPARE(items.startAll(launcher), (QStringList{"remapper.desktop", "ours.desktop"}));
             QCOMPARE(launched, (QStringList{"remapper.desktop", "ours.desktop"}));
             // Revert puts back the sets as they were when the session started.
-            QVERIFY(items.selectSet("Platinum Reality All"));
+            QVERIFY(items.selectSet("Platinum Dreams All"));
             QVERIFY(items.changedSinceLogin());
             items.revert();
             QCOMPARE(items.selectedSet(), QString("Work"));
@@ -542,6 +623,94 @@ class DesktopTests : public QObject
         environment.insert("XDG_CONFIG_DIRS", "/etc/xdg:/opt/xdg:relative");
         QCOMPARE(StartupItems::standardDirectories(environment),
                  (QStringList{"/home/someone/.config/autostart", "/etc/xdg/autostart", "/opt/xdg/autostart"}));
+    }
+    void startupItemsKeepRealitySelectionsAfterTheRename()
+    {
+        for (const auto &name : {QString("All"), QString("Base")})
+        {
+            QTemporaryDir root;
+            const auto entries = root.filePath("autostart");
+            QVERIFY(QDir().mkpath(entries));
+            QFile entry(entries + "/example.desktop");
+            QVERIFY(entry.open(QIODevice::WriteOnly));
+            entry.write("[Desktop Entry]\nType=Application\nName=Example\nExec=/usr/bin/true\n");
+            entry.close();
+            QFile settings(root.filePath("extensions.json"));
+            QVERIFY(settings.open(QIODevice::WriteOnly));
+            settings.write(QJsonDocument(QJsonObject{
+                {"selected", "Platinum Reality " + name},
+                {"sets", QJsonObject{{"My Settings", QJsonObject{{"off", QJsonArray{"example.desktop"}}}},
+                                     {"Work", QJsonObject{{"off", QJsonArray{"example.desktop"}}}}}}}).toJson());
+            settings.close();
+            StartupItems items(root.path(), {entries}, {"PlatinumReality"}, QProcessEnvironment::systemEnvironment());
+            QCOMPARE(items.selectedSet(), "Platinum Dreams " + name);
+            QVERIFY(items.selectedLocked());
+            QCOMPARE(items.isOn("example.desktop"), name == "All");
+            QVERIFY(!items.changedSinceLogin());
+            QVERIFY(items.selectSet("Work"));
+            QVERIFY(!items.isOn("example.desktop"));
+            items.revert();
+            QCOMPARE(items.selectedSet(), "Platinum Dreams " + name);
+            QCOMPARE(items.isOn("example.desktop"), name == "All");
+            QVERIFY(!items.changedSinceLogin());
+        }
+    }
+    void startupItemsPreserveCustomSetsWhoseNamesBecomeBuiltIn()
+    {
+        for (const auto &name : {QString("All"), QString("Base")})
+        {
+            QTemporaryDir root;
+            const auto entries = root.filePath("autostart");
+            QVERIFY(QDir().mkpath(entries));
+            QFile entry(entries + "/example.desktop");
+            QVERIFY(entry.open(QIODevice::WriteOnly));
+            entry.write("[Desktop Entry]\nType=Application\nName=Example\nExec=/usr/bin/true\n");
+            entry.close();
+            const QString custom = "Platinum Dreams " + name;
+            const auto occupied = custom + " (Custom)";
+            QFile settings(root.filePath("extensions.json"));
+            QVERIFY(settings.open(QIODevice::WriteOnly));
+            settings.write(QJsonDocument(QJsonObject{
+                {"selected", custom},
+                {"sets", QJsonObject{{"My Settings", QJsonObject{{"off", QJsonArray{}}}},
+                                     {custom, QJsonObject{{"off", QJsonArray{"example.desktop"}}}},
+                                     {occupied, QJsonObject{{"off", QJsonArray{}}}}}}}).toJson());
+            settings.close();
+            auto environment = QProcessEnvironment::systemEnvironment();
+            environment.insert("FRANKENSTEIN_NATIVE_TEST", "1");
+            StartupItems items(root.path(), {entries}, {"PlatinumReality"}, environment);
+            QVERIFY(!items.selectedLocked());
+            QVERIFY(!items.isOn("example.desktop"));
+            const auto recovered = items.selectedSet();
+            QVERIFY(recovered != custom && recovered != occupied);
+            QVERIFY(items.selectSet(occupied));
+            QVERIFY(items.isOn("example.desktop"));
+            items.revert();
+            QCOMPARE(items.selectedSet(), recovered);
+            QVERIFY(!items.isOn("example.desktop"));
+            QVERIFY(items.selectSet(recovered)); // Save the migrated names, then load again.
+            StartupItems next(root.path(), {entries}, {"PlatinumReality"}, environment);
+            QCOMPARE(next.selectedSet(), recovered);
+            QVERIFY(!next.selectedLocked() && !next.isOn("example.desktop"));
+            QVERIFY(next.sets().contains(occupied));
+        }
+    }
+    void startupItemsDoNotMistakeACustomRealityNameForTheOldBuiltInSet()
+    {
+        for (const auto &suffix : {QString("All"), QString("Base")})
+        {
+            QTemporaryDir root;
+            const auto name = "Platinum Reality " + suffix;
+            auto environment = QProcessEnvironment::systemEnvironment();
+            environment.insert("FRANKENSTEIN_NATIVE_TEST", "1");
+            {
+                StartupItems items(root.path(), {}, {"PlatinumReality"}, environment);
+                QVERIFY(items.duplicateSet(name));
+            }
+            StartupItems next(root.path(), {}, {"PlatinumReality"}, environment);
+            QCOMPARE(next.selectedSet(), name);
+            QVERIFY(!next.selectedLocked());
+        }
     }
     void sherlockFindsItemsByNameAndContents()
     {
@@ -1763,10 +1932,27 @@ class DesktopTests : public QObject
         QCOMPARE(controls.state().value("volume").toMap().value("value").toInt(),75);
         QCOMPARE(volume->property("value").toInt(),75);
         QVERIFY(volume->hasActiveFocus());
+        // Dragged, the volume is set before the thumb is let go, so the level can be heard.
+        {
+            auto *handle=volume->property("handle").value<QQuickItem *>();
+            QVERIFY(handle);
+            const QPoint grab=handle->mapToScene(QPointF(handle->width()/2,handle->height()/2)).toPoint();
+            QTest::mousePress(&view,Qt::LeftButton,{},grab);
+            QTest::mouseMove(&view,grab-QPoint(40,0),20);
+            QTRY_VERIFY_WITH_TIMEOUT(lastCall().startsWith("set volume ") && lastCall()!="set volume 75",8000);
+            QTRY_VERIFY_WITH_TIMEOUT(!controls.busy(),8000);
+            QCOMPARE(lastCall(),"set volume "+QByteArray::number(volume->property("value").toInt()));
+            QTest::mouseRelease(&view,Qt::LeftButton,{},grab-QPoint(40,0),20);
+            QTRY_VERIFY_WITH_TIMEOUT(!controls.busy(),8000);
+            // Back to 75 for the Control Strip's slider below.
+            controls.set("volume",75);
+            QTRY_VERIFY_WITH_TIMEOUT(!controls.busy(),8000);
+            QTRY_COMPARE(volume->property("value").toInt(),75);
+        }
         QTest::keyClick(&view,Qt::Key_Escape);
         QTRY_VERIFY(!panel->property("opened").toBool());
         // Sound Volume is a slider, as in 9.2.2: held down, it shows the level (75 here); dragging
-        // the pointer up and releasing sets the new level; a click that doesn't move sets nothing.
+        // the pointer up sets each new level as it goes; a click that doesn't move sets nothing.
         {
             auto *module=visualItem(view.contentItem(),"control-strip-sound");
             QVERIFY(module);
@@ -1790,6 +1976,9 @@ class DesktopTests : public QObject
             QTest::mousePress(&view,Qt::LeftButton,{},at);
             QTRY_VERIFY(slider->isVisible());
             QTest::mouseMove(&view,at-QPoint(0,40),20);
+            // Still held: the level is already set, so it can be heard while dragging.
+            QTRY_VERIFY_WITH_TIMEOUT(lastCall().startsWith("set volume "),8000);
+            QVERIFY(slider->isVisible());
             QTest::mouseMove(&view,at-QPoint(0,200),20);
             QTRY_COMPARE(qRound(thumb->y()),3);
             QTest::mouseRelease(&view,Qt::LeftButton,{},at-QPoint(0,200),20);
@@ -2175,7 +2364,7 @@ class DesktopTests : public QObject
         QVERIFY2(service.error().isEmpty(), qPrintable(service.error()));
         QTRY_VERIFY(visualItem(view.contentItem(), "software-update-install")->isVisible());
         QCOMPARE(visualItem(view.contentItem(), "software-update-result")->property("text").toString(),
-                 QString("Platinum Reality 99.0-1 is ready to install."));
+                 QString("Platinum Dreams 99.0-1 is ready to install."));
         QCOMPARE(visualItem(view.contentItem(), "software-update-notes")->property("text").toString(),
                  QString("Faster folders."));
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/software-update.png"));
@@ -2243,7 +2432,7 @@ class DesktopTests : public QObject
         QVERIFY(service.restartNeeded());
         QCOMPARE(finished.count(), 1);
         QCOMPARE(finished.at(0).at(0).toString(), QString("99.0-1"));
-        QCOMPARE(service.message(), QString("Platinum Reality 99.0-1 is installed. Restart Desktop to use it: "
+        QCOMPARE(service.message(), QString("Platinum Dreams 99.0-1 is installed. Restart Desktop to use it: "
                                             "your applications close and open again."));
         auto *restart = visualItem(view.contentItem(), "software-update-restart-desktop");
         QTRY_VERIFY(restart->isVisible() && restart->isEnabled());
@@ -2256,6 +2445,62 @@ class DesktopTests : public QObject
         QVERIFY(note.open(QIODevice::ReadOnly));
         QVERIFY(QJsonDocument::fromJson(note.readAll()).object().value("shell").toArray().contains("software-update"));
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/software-update-restart.png"));
+    }
+    // After an update, Restore Previous Version sat on top of the "Update software automatically"
+    // group (Lily Hewitt, 2026-11-17). It has its own row, in the short window and the long one.
+    void softwareUpdateRestoreButtonClearsTheGroup()
+    {
+        QTemporaryDir root;
+        const auto client = root.path() + "/fake-update.py";
+        QFile script(client);
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write("import json, sys\n"
+                     "say = lambda **m: print(json.dumps(m), flush=True)\n"
+                     "if sys.argv[1] == 'verify':\n"
+                     "    say(ready=sys.argv[2], release={'version': '99.0-1', 'notes': 'Faster folders.'})\n"
+                     "else:\n"
+                     "    say(installed='98.0-1', previous=True)\n");
+        script.close();
+        QVERIFY(QDir().mkpath(root.path() + "/bundle"));
+        QQuickView view;
+        view.resize(1120, 760);
+        NativeManager manager(nullptr, &view, root.path(), root.path() + "/profile", {});
+        SoftwareUpdate service(client, root.path() + "/keys.gpg", root.path() + "/software-update.json");
+        view.rootContext()->setContextProperty("manager", &manager);
+        view.setSource(QUrl("qrc:/desktop/src/desktop/Desktop.qml"));
+        QVERIFY(view.status() != QQuickView::Error);
+        const auto clearView = qScopeGuard([&] { view.setSource({}); });
+        auto *window = view.rootObject()->findChild<QObject *>("software-update-window");
+        QVERIFY(window && window->setProperty("service", QVariant::fromValue(static_cast<QObject *>(&service))));
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QVERIFY(QMetaObject::invokeMethod(view.rootObject(), "dispatchShellCommand",
+                                          Q_ARG(QVariant, QVariant("software-update")), Q_ARG(QVariant, QVariant(0))));
+        QTRY_VERIFY(visualItem(view.contentItem(), "software-update-window")->isVisible());
+        QTRY_VERIFY_WITH_TIMEOUT(!service.busy() && service.previousKept(), 20000);
+        const auto rect = [&](const char *name) {
+            auto *item = visualItem(view.contentItem(), name);
+            return item ? item->mapRectToScene(QRectF(0, 0, item->width(), item->height())) : QRectF();
+        };
+        const auto clear = [&](const char *below) {
+            const auto restore = rect("software-update-restore"), above = rect(below), frame = rect("software-update-window");
+            return restore.top() >= above.bottom() + 8 && frame.contains(restore);
+        };
+        QTRY_VERIFY(visualItem(view.contentItem(), "software-update-restore")->isVisible());
+        const auto spans = [&](const char *name) {
+            const auto r = rect(name);
+            return QString("%1 %2..%3").arg(name).arg(r.top()).arg(r.bottom());
+        };
+        QTRY_VERIFY2(clear("software-update-group"), qPrintable(spans("software-update-restore") + ", "
+            + spans("software-update-group") + ", " + spans("software-update-window")));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/software-update-restore.png"));
+        // With a release found, the window grows and the row stays below what it says.
+        service.useLocal(root.path() + "/bundle");
+        QTRY_VERIFY_WITH_TIMEOUT(!service.busy() && !service.ready().isEmpty(), 20000);
+        QTRY_VERIFY(visualItem(view.contentItem(), "software-update-install")->isVisible());
+        QTRY_VERIFY2(clear("software-update-result"), qPrintable(spans("software-update-restore") + ", "
+            + spans("software-update-result") + ", " + spans("software-update-window")));
+        QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath() + "/artifacts/software-update-restore-found.png"));
     }
     void softwareUpdateChecksAfterInstallingUntilTheNetworkAnswers()
     {
@@ -6399,7 +6644,7 @@ class DesktopTests : public QObject
         QVERIFY(!snapshot.value("applications").toList().isEmpty());
         // The system's own row (the desktop with its Finder) comes last, named for the system.
         const auto last=snapshot.value("applications").toList().last().toMap();
-        QCOMPARE(last.value("name").toString(),QString("Platinum Reality"));
+        QCOMPARE(last.value("name").toString(),QString("Platinum Dreams"));
         QVERIFY(last.value("system").toBool());
         QVERIFY(view.grabWindow().save(QCoreApplication::applicationDirPath()+"/artifacts/about-computer.png"));
         // 9.2's window controls: the collapse box rolls it up and back, the size box resizes it

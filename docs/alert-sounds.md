@@ -1,7 +1,7 @@
 # Alert sounds
 
 Mac OS 9 played the chosen alert sound when an alert appeared, or when you clicked outside a
-modal dialog. With the alert volume at zero, it flashed the menu bar instead. Platinum Reality
+modal dialog. With the alert volume at zero, it flashed the menu bar instead. Platinum Dreams
 does the same (Finishing School Phase 11, 2026-10-21).
 
 ## Sounds, and Lily Hewitt's personal assets
@@ -54,7 +54,7 @@ as an option for everyone, to remove them or download them again. **Sound ▸ Al
 only** asks for an administrator's password, then:
 
 - **On:** a `NoExtract` line in `/etc/pacman.conf`, after its own `#NoExtract` example and marked
-  `# Platinum Reality: no Arch/KDE desktop sounds`, keeps updates from extracting the sound themes:
+  `# Platinum Dreams: no Arch/KDE desktop sounds`, keeps updates from extracting the sound themes:
   `/usr/share/sounds/{freedesktop,ocean,oxygen,plasma-bigscreen}` and the loose `Oxygen-*` files.
   Then those are deleted. The packages stay installed, so nothing that depends on them breaks
   (libcanberra needs sound-theme-freedesktop, plasma-workspace needs ocean-sound-theme).

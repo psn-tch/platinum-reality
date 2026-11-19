@@ -1,5 +1,12 @@
 # Mac OS 9.2.2 fidelity gaps
 
+**2026-11-19 addition (Platinum Dreams):** Recent Documents now accompanies Recent Applications in
+the Apple menu. Apple Menu Options has independent Documents and Applications counts, based on the
+existing `sammy-922-reference-20261112/ref-apple-menu-options.png` capture. History uses real aliases,
+supports forgetting individual entries and Clear Menu, and honors Remember recently used items.
+See [scope and limitations](recent-documents.md). This does not implement Recent Servers or claim
+complete Mac OS 9.2.2 parity.
+
 **Status, 2026-11-15 (update 50, Sammy):** the table below is the November 2 snapshot. Since then
 every row has an implementation: the Application Switcher palette, File labels, Calculator, Note
 Pad, Stickies, Key Caps, Scrapbook, pop-up folder tabs, spring-loaded folders, the Special menu and

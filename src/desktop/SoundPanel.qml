@@ -477,6 +477,9 @@ Item {
                 onCommitted: function(value) {
                     if (panel.mainOutput) panel.service.setVolume("output", panel.mainOutput.name, Math.round(value))
                 }
+                // Dragged, the level follows the thumb so it can be heard; the service applies
+                // only the newest one.
+                onMoved: if (pressed && panel.mainOutput) panel.service.setVolume("output", panel.mainOutput.name, Math.round(value))
             }
             SpeakerIcon { loud: true; anchors.verticalCenter: parent.verticalCenter }
             PlatinumCheckBox {

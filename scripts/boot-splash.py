@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Platinum Reality boot screen: a gray 1-bit startup screen instead of the boot messages.
+"""The Platinum Dreams boot screen: a gray 1-bit startup screen instead of the boot messages.
 
   boot-splash.py render                 as the user: draw the pictures into
                                         <data>/platinum-reality/boot-splash (the user's own startup
@@ -63,7 +63,7 @@ ORIGINAL_ICON = """
 """
 SCALES = range(1, 9)
 THEME = "platinum-reality"
-LEGACY = "platinum-dreams"   # the name before Platinum Reality; its install is taken over
+LEGACY = "platinum-dreams"   # the original storage name; its install is taken over
 # Quiet boot, and Plymouth at one device pixel per pixel: on a high-density panel it otherwise
 # doubles everything, reports half the panel's size, and the theme no longer recognises the panel
 # (its picture then came out unturned: sideways on a panel mounted sideways, 2026-10-23).
@@ -458,7 +458,7 @@ def install(options):
     dropin = under(root, "/etc/mkinitcpio.conf.d/platinum-reality-plymouth.conf")
     dropin.parent.mkdir(parents=True, exist_ok=True)
     hooks = mkinitcpio_hooks(root)
-    dropin.write_text("# Platinum Reality boot screen (boot-splash.py uninstall removes this).\n"
+    dropin.write_text("# Platinum Dreams boot screen (boot-splash.py uninstall removes this).\n"
                       f"HOOKS=({' '.join(hooks)})\n")
     try:
         run(["plymouth-set-default-theme", THEME], options)
@@ -469,7 +469,7 @@ def install(options):
         restore(root, backups)
         raise SystemExit("Rebuilding the boot image failed, so nothing changed: the original boot "
                          "configuration is back in place. The boot image on disk is the previous one.")
-    print("The Platinum Reality boot screen is installed. It appears at the next start-up.")
+    print("The Platinum Dreams boot screen is installed. It appears at the next start-up.")
     print("To undo: sudo python3 " + str(Path(__file__).resolve()) + " uninstall")
 
 

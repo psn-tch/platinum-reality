@@ -29,7 +29,7 @@ StartupItems::StartupItems(QString profile, QStringList directories, QStringList
     if (firstSession)
     {
         // The items already installed belong to other desktops (KDE's tray applets, Steam, kwallet's
-        // PAM helper...), and Platinum Reality never started them before: they begin Off, so the first
+        // PAM helper...), and Platinum Dreams never started them before: they begin Off, so the first
         // login with Extensions Manager starts nothing new. Items installed later are On, as a newly
         // installed extension was in 9.2.2 (Cotato, 2026-11-14).
         auto &off = m_sets[mySettings];
@@ -73,7 +73,20 @@ void StartupItems::load()
     {
         const auto saved = QJsonDocument::fromJson(file.readAll()).object();
         m_atLogin = saved;
-        const auto sets = saved.value("sets").toObject();
+        auto sets = saved.value("sets").toObject();
+        QHash<QString, QString> renamed;
+        // These names were available for custom sets before the product rename. Keep those
+        // choices under a unique name rather than discarding them in favour of the built-ins.
+        for (const auto &key : sets.keys())
+        {
+            if (!locked(key))
+                continue;
+            auto custom = key + " (Custom)";
+            for (int number = 2; sets.contains(custom); ++number)
+                custom = key + " (Custom " + QString::number(number) + ")";
+            sets.insert(custom, sets.take(key));
+            renamed.insert(key, custom);
+        }
         for (auto it = sets.begin(); it != sets.end() && m_sets.size() < 64; ++it)
         {
             if (locked(it.key()) || it.key().trimmed().isEmpty() || it.key().size() > 64)
@@ -84,7 +97,14 @@ void StartupItems::load()
                     off.append(id.toString());
             m_sets.insert(it.key(), off);
         }
-        const auto selected = saved.value("selected").toString();
+        auto selected = saved.value("selected").toString();
+        // Only built-in set names change; user-defined sets and their choices stay intact.
+        if (renamed.contains(selected))
+            selected = renamed.value(selected);
+        else if (!m_sets.contains(selected) && selected == "Platinum Reality All")
+            selected = allSet;
+        else if (!m_sets.contains(selected) && selected == "Platinum Reality Base")
+            selected = baseSet;
         if (m_sets.contains(selected) || locked(selected))
             m_selected = selected;
     }

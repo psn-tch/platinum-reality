@@ -70,7 +70,7 @@ All values in screen pixels; x from the screen edge, y from the strip's top.
   (+2 px shadow) and 64 px tall from the strip's top; `#ddd` face, black track with `#aaa`
   sides, a 15x12 thumb with three grip lines.
 
-## Platinum Reality status
+## Platinum Dreams status
 
 - 2026-11-08 (sammy/fidelity): geometry above implemented in `src/desktop/ControlStrip.qml`.
   Frame, collapse box, wells, arrows, cells, triangles and end tab compared pixel by pixel with
@@ -136,7 +136,7 @@ unlocked GNOME Keyring on a private bus: `scripts/test-keychain.sh build`.
 
 ## Camera (added 2026-11-12)
 
-Platinum Reality's own module, not one from 9.2.2 (Lily Hewitt: a webcam kill switch, "like nothing can
+Platinum Dreams's own module, not one from 9.2.2 (Lily Hewitt: a webcam kill switch, "like nothing can
 access it if its toggled off"). Its menu follows the wording of 9.2.2's AppleTalk Switch: **Camera On**
 and **Camera Off**, with the current one checked; then a line and the cameras in italics. The kernel
 does the blocking (docs/camera-switch.md). The glyph is our own drawing: a webcam on its stand, with a

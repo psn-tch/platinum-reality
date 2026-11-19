@@ -19,12 +19,12 @@ QString readText(const QString &path, const QString &fallback)
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
-    app.setApplicationName("Install Platinum Reality");
+    app.setApplicationName("Install Platinum Dreams");
     app.setDesktopFileName("org.platinumreality.Installer");
     app.setStyle(new PlatinumStyle);
     app.setFont(classicInterfaceFont());
     QCommandLineParser parser;
-    parser.setApplicationDescription("Installs Platinum Reality on a whole disk, using the install engine.");
+    parser.setApplicationDescription("Installs Platinum Dreams on a whole disk, using the install engine.");
     parser.addHelpOption();
     QCommandLineOption engine("engine", "The install engine program.", "program",
                               qEnvironmentVariable("PLATINUM_INSTALLER_ENGINE", "/usr/bin/platinum-reality-install"));
@@ -36,7 +36,7 @@ int main(int argc, char **argv)
     EngineClient client(parser.value(engine));
     InstallerWindow window(&client,
                            readText(folder + "/ReadMe.txt",
-                                    "Platinum Reality is a Mac OS 9-style desktop for Arch Linux.\n\n"
+                                    "Platinum Dreams is a Mac OS 9-style desktop for Arch Linux.\n\n"
                                     "The installer erases the whole disk you choose. Back up anything you need first."),
                            readText(folder + "/LICENSE", "MIT License"));
     QObject::connect(&window, &InstallerWindow::restartRequested, &app,

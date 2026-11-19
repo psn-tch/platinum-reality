@@ -1,6 +1,6 @@
 # The Platinum Log In for SDDM
 
-Computers installed from the Platinum Reality live disk log in through SDDM. The theme in
+Computers installed from the Platinum Dreams live disk log in through SDDM. The theme in
 `packaging/sddm/platinum-reality` shows the same Mac OS 9.2.2-style Log In dialog as the tty1 Log In
 (`src/lock/LockScreen.qml`), on a Mac OS 9 desktop color. It's an original adaptation; no Apple art.
 

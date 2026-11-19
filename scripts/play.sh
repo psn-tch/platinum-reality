@@ -8,6 +8,6 @@ for program in frankenstein native-tests frankenstein-finder frankenstein-editor
     fi
 done
 bash "$project_dir/scripts/qualify-native.sh"
-printf '\nAutomatic native checks passed. Opening Platinum Reality for hands-on use.\n'
+printf '\nAutomatic native checks passed. Opening Platinum Dreams for hands-on use.\n'
 printf 'Use the Apple menu for Applications and End Nested Session.\n'
 exec bash "$project_dir/scripts/run-nested.sh" "$@"

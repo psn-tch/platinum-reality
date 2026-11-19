@@ -123,7 +123,7 @@ void SoftwareUpdate::handle(const QJsonObject &message)
     {
         m_restartNeeded = true;
         // Restart Desktop needs a session supervisor that knows it (update 48 and later).
-        m_message = "Platinum Reality " + message.value("version").toString() + " is installed. " +
+        m_message = "Platinum Dreams " + message.value("version").toString() + " is installed. " +
                     (qEnvironmentVariable("PLATINUM_DESKTOP_RESTART") == "75"
                          ? "Restart Desktop to use it: your applications close and open again."
                          : "Log out and back in to use it.");
@@ -171,7 +171,7 @@ void SoftwareUpdate::useLocal(const QString &folder)
 {
     m_ready.clear(); m_readyRelease.clear();
     if (folder.isEmpty() || !QFileInfo(folder).isDir()) {
-        m_error = "Choose a folder holding a Platinum Reality release."; emit changed(); return;
+        m_error = "Choose a folder holding a Platinum Dreams release."; emit changed(); return;
     }
     run("verifying", {"verify", QFileInfo(folder).absoluteFilePath()});
 }

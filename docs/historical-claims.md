@@ -7,7 +7,7 @@ Draft · 2026-10-18 · No original reference system operated
 The read-only source collection is
 private research notes (private research notes).
 Its Phase 1–3 evidence is historical research, not this project's implementation
-architecture. No claim here marks a Platinum Reality feature DONE.
+architecture. No claim here marks a Platinum Dreams feature DONE.
 
 Labels preserve the collection's distinctions: **V922** is a prior researcher's
 inspection of a still from a recording displaying 9.2.2, with provenance limits;

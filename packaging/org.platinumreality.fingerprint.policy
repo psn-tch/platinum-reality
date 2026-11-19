@@ -4,7 +4,7 @@
 <!-- The Fingerprints control panel turns fingerprint login on or off, and installs fprintd,
      through this one helper only (docs/fingerprints.md). An administrator's password is asked. -->
 <policyconfig>
-  <vendor>Platinum Reality</vendor>
+  <vendor>Platinum Dreams</vendor>
   <vendor_url>https://github.com/psn-tch/platinum-reality</vendor_url>
   <action id="org.platinumreality.fingerprint.login">
     <description>Change fingerprint login</description>

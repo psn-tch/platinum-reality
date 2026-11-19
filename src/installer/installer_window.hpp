@@ -17,7 +17,7 @@ class QPushButton;
 class QStackedWidget;
 class QTextBrowser;
 
-// Install Platinum Reality, as faithful to the Mac OS 9.2.2 Installer as an original can be: the band
+// Install Platinum Dreams, as faithful to the Mac OS 9.2.2 Installer as an original can be: the band
 // naming the step, a page, and the step's buttons. Welcome lists the steps; then Select Destination
 // (a Destination Disk pop-up and whether to encrypt it), Important Information and the license (Save…,
 // Print…, then Agree / Disagree), the account, and Install Software, whose Start erases the chosen disk

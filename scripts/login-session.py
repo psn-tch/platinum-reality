@@ -33,7 +33,7 @@ def set_default(root, choice):
 def choose(default):
     if not sys.stdin.isatty():
         return default
-    print("\nPlatinum Reality login: [P] Platinum Reality  [K] KDE  [Esc] Log out", flush=True)
+    print("\nPlatinum Dreams login: [P] Platinum Dreams  [K] KDE  [Esc] Log out", flush=True)
     print(f"Starting {default} in 5 seconds; press a key to choose.", flush=True)
     descriptor = sys.stdin.fileno()
     previous = termios.tcgetattr(descriptor)
